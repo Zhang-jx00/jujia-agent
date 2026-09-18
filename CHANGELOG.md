@@ -6,6 +6,32 @@
 
 ---
 
+## [v0.6.0-arch] — 2026-09-18 23:12
+
+**类型**：架构级范围扩展（用户要求：轻量类 IDE + 接入自有云主机 + 本地/云端调度 + 高可定制化外观）
+
+**联网核实（2026-09-18 检索，来源见文档 §9）**
+- **会话状态归 host**：Remote Agent Host Session 范式中，客户端断开只应是 UI 事件；
+  靠 host 持有会话日志 + 单调 seq + 增量回放/快照恢复（opencode AHP 与 Anthropic Managed Agents 同思路）
+- **三种远端传输**：出站 HTTPS（Cursor 自托管 worker 做法，无入站端口/防火墙/VPN）→ SSH（复用 sshd）→ 反向隧道
+- **真实风险**：匿名 dev tunnel 可被未认证访问者触发命令执行（厂商文档 + 安全厂商实测告警）
+- **运行位置四档权衡**：本机/容器/一次性 VM/边缘 isolate；长无人值守任务用一次性 VM 换内核边界
+- **远端沙箱必须是完整工具链 harness**（只读控制面 + 工具 harness + 持久输出面 + 质量门）
+- **Codex App Server 思路**：双向 JSON-RPC 暴露 threads/events/diffs/approvals，重运行时放在状态聚集处
+
+**改动内容**
+- 新增 `docs/ARCH-CLOUD-IDE.md`：五层架构、三条设计律、新增模块 M19–M23、路由规则表、
+  迁移机制、IDE 与 Agent 的集成方式（共用 `WorkspaceRef`）、外观系统的可定制边界与安全约束
+- 新增模块与周次：**M19 轻量 IDE（W19）· M20 远程接入（W20）· M21 云端 worker（W21）·
+  M22 调度与切换（W22）· M23 外观系统（W23）**；M13 并入 M23
+- **权限门定为本机专属**：远端 worker 无放行权，只能执行已批准的那一次调用
+- 编辑器选型：**CodeMirror 6**（轻量、模块化），Monaco 作为备选
+- PLAN / PRODUCT-GOAL / COVERAGE-MATRIX / README 同步更新
+
+**验证**：文档一致性核对（矩阵 ↔ 计划 ↔ 目标）；四件套保持全绿（上一轮 141/141）
+
+---
+
 ## [v0.5.1-coverage] — 2026-09-18 23:07
 
 **类型**：范围补全（用户要求：点名的 60+ 领域**每一项都要实现**）

@@ -226,6 +226,11 @@ jujia/
 | P5 | W5c | **自定义权限规则表**（allow/deny/ask + 参数 glob + 即时生效） | 规则表 | 写一条 deny 后立刻被拦 |
 | W5d | **钩子四类齐备**（PreToolUse/PostToolUse/Stop/SessionStart） | 钩子注册表 | 四类均可挂载且拒绝生效 |
 | W17 | **主题与背景自定义**（背景图/纯色/毛玻璃/透明度 + 持久化） | ui-tokens + 设置页 | 立即生效且重启保留 |
+| W19 | **轻量 IDE MVP**：文件树 + CodeMirror 6 编辑器 + diff 视图（与 Agent 共用工作区句柄） | `features/ide` | 能开文件/编辑/看 diff/保存 |
+| W20 | **远程主机接入**：SSH 或出站隧道 + **首次指纹确认** + 凭据保管（密钥不出本机） | `packages/remote` | 连上真实主机并列目录；匿名连接一律拒绝 |
+| W21 | **云端 agent worker**：远端运行时 + 完整工具链 harness + 证据回传（diff/日志/截图） | `packages/remote-worker` | 远端跑通「读→改→测试」并回传证据 |
+| W22 | **调度与切换**：确定性路由规则 + 迁移（显式确认）+ 断点续跑 + 任务面板 | `packages/orchestrator` | 长任务本地发起→迁云端→迁回并汇总 |
+| W23 | **外观系统**：对话框样式包 + 背景（纯色/图/毛玻璃/透明度）+ 对比度守护 + 导入导出 | `packages/ui-tokens` + 设置页 | 切换即时生效、重启保留、可导出 |
 | W18 | **多子 agent 编排与长任务续跑**（并发派发/分工/汇总/各自权限 + 断点续跑） | agent-core/orchestrator | 并发派 3 个子代理并汇总；中断可续 |
 | W16 | **多模态能力门控** | M5b（W16 末） | §6 P5 验收全绿 |
 
