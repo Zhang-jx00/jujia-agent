@@ -1,0 +1,33 @@
+{
+  "name": "jujia",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "俱佳Agent — 面向 Windows 的个人桌面 Agent（含无限画布工作流、内置浏览器、多模态能力门控）",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @jujia/desktop",
+    "build": "npm run build --workspace @jujia/desktop",
+    "smoke": "npm run smoke --workspace @jujia/desktop",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "clean": "node -e \"console.log('使用 python scripts/cleanup.py --apply 执行项目清理')\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "prettier": "^3.9.8",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.1"
+  }
+}

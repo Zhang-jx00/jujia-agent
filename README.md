@@ -10,6 +10,7 @@
 
 | 路径 | 说明 |
 |------|------|
+| `CHANGELOG.md` | **变更与回退账本**：每阶段的时间戳、改动范围、验证方式、回退点 |
 | `docs/PLAN.md` | **开发计划（唯一执行依据，v3）**：目标与范围、选型、架构、模块、阶段任务与验收、风险、设计稿 |
 | `docs/LEARNING-MAP.md` | 108 个知识领域的地图与学习顺序 |
 | `review/EVALUATION.md` | **需求达成度评估**：此前运行各项要求的达成/未达成明细 |
@@ -18,8 +19,25 @@
 | `knowledge/sources/` | S1–S11：每领域 T1–T5 五类权威来源 |
 | `knowledge/findings/` | 深调研原始证据 F1–F8 + FYAN（quote/URL/confidence） |
 | `knowledge/cards/` | 知识卡片：对俱佳Agent 的落地决定 |
-| `scripts/` | cleanup / verify_urls / count_coverage / gen_matrix 等工具 |
-| `src/` | （待创建）应用源码 |
+| `apps/desktop/` | Electron 桌面端（`src/main` · `src/preload` · `src/renderer`） |
+| `packages/shared-ipc/` | IPC 通道常量与载荷契约（zod，全进程共用） |
+| `scripts/` | `cleanup.py` 等工具：清理、覆盖度统计、矩阵生成、链接校验 |
+
+> 后续阶段的 `packages/agent-core`、`packages/canvas-core`、`packages/media-cap`、`packages/ui-tokens`
+> 按开发计划 §6 在各阶段**按需创建**，不预建空壳目录。
+
+## 常用命令
+
+| 命令 | 说明 |
+|------|------|
+| `npm run dev` | 启动开发（Electron + Vite HMR） |
+| `npm run build` | 构建 main / preload / renderer |
+| `npm run smoke` | **冒烟验证**：构建后无界面启动，检验「主进程 + 预加载桥 + 渲染层」全链路 |
+| `npm run typecheck` | 全工作区类型检查 |
+| `npm run lint` / `npm run format` | 代码检查 / 格式化 |
+| `npm run test` | 单元测试（vitest） |
+| `python scripts/cleanup.py` | 任务收尾清理（项目约定） |
+
 
 ## 快速开始
 
