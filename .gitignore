@@ -1,0 +1,36 @@
+# 依赖与构建产物
+node_modules/
+dist/
+out/
+build/
+*.tsbuildinfo
+
+# 测试与覆盖率
+coverage/
+.vitest/
+
+# 本地回收站（cleanup.py 使用）
+.trash/
+
+# 运行时数据（Electron userData 若落在仓库内）
+JuJiaData/
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+*.tmp
+*.temp
+_generated-*.md
+
+# 编辑器 / 系统
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 环境变量（含密钥，禁止入库）
+.env
+.env.local
+.env.*.local
