@@ -37,8 +37,16 @@ TEMP_PATTERNS = [
     "Thumbs.db",
     "desktop.ini",
 ]
-# ② 可整目录删除的产物
-TEMP_DIRS = ["__pycache__", ".pytest_cache", ".mypy_cache", "node_modules/.cache"]
+# ② 可整目录删除的产物（含可重建的构建输出）
+TEMP_DIRS = [
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    "node_modules/.cache",
+    "apps/desktop/out",      # electron-vite 构建产物（npm run build 可重建）
+    "coverage",
+    ".vitest",
+]
 # ③ 明确的旧版记录（改名/重构后遗留）
 LEGACY_HINTS = [
     "research",           # 旧知识目录（已迁至 knowledge/）
