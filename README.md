@@ -21,6 +21,7 @@
 | `knowledge/cards/` | 知识卡片：对俱佳Agent 的落地决定 |
 | `apps/desktop/` | Electron 桌面端（`src/main` · `src/preload` · `src/renderer`） |
 | `packages/shared/` | 通用基础设施：原子 JSON 存储 `json-store`（tmp+fsync+rename+`.bak`+version 信封+损坏自愈） |
+| `packages/agent-core/` | Agent 运行时核心：模型 provider、SSE 流式协议解析（无 Electron 依赖，可单测） |
 | `packages/shared-ipc/` | IPC 通道常量与载荷契约（zod，全进程共用） |
 | `scripts/` | `cleanup.py` 等工具：清理、覆盖度统计、矩阵生成、链接校验 |
 

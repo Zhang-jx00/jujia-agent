@@ -1,0 +1,15 @@
+{
+  "name": "@jujia/agent-core",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Agent 运行时核心：模型 provider、流式协议解析、Agent Loop（无 Electron 依赖，可单测）",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

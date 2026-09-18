@@ -270,6 +270,8 @@ jujia/
 
 ### P1 · W1–W5 可用内核
 
+> 进度：W1 ✅（`v0.1.1-w1`，复核后 `v0.1.2-review`）· W2 ✅（`v0.2.0-w2`：连接 UI + SSE 流式对话，54 项测试全绿）
+
 | 周 | 任务 | 产出 | 验收标准 |
 |----|------|------|----------|
 | W1 | json-store（tmp+rename+.bak+version）+ 单测；typed preload 桥 | `packages/shared`、`shared-ipc` | 半截写入模拟可自愈；IPC 契约 zod 校验 |

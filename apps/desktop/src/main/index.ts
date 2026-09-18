@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { app, BrowserWindow } from 'electron';
+import { IPC, type StreamEvent } from '@jujia/shared-ipc';
 import { registerIpcHandlers } from './ipc';
 import { ensureConfigFile } from './config-store';
 import { getDataRoot } from './paths';
@@ -15,6 +16,16 @@ app.setName('JujiaAgent');
 
 const isSmoke = process.argv.includes('--smoke');
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
+
+/** 当前主窗口引用：流式事件推送与窗口重建都依赖它 */
+let mainWindow: BrowserWindow | undefined;
+
+/** 把流式事件安全地推给渲染层（窗口已销毁时静默丢弃，避免抛错） */
+function emitStream(event: StreamEvent): void {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send(IPC.CHAT_STREAM, event);
+}
 
 function createMainWindow(): BrowserWindow {
   const webPreferences = secureWebPreferences(join(__dirname, '../preload/index.js'));
@@ -33,6 +44,11 @@ function createMainWindow(): BrowserWindow {
   });
 
   applySecurityBaseline(win, { devServerUrl });
+  mainWindow = win;
+
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = undefined;
+  });
 
   win.once('ready-to-show', () => {
     if (!isSmoke) win.show();
@@ -122,7 +138,7 @@ if (!app.requestSingleInstanceLock()) {
   void app
     .whenReady()
     .then(async () => {
-      registerIpcHandlers();
+      registerIpcHandlers({ emitStream });
 
       // 首次启动落盘默认配置（原子写），使「写 → 备份 → 损坏恢复」链路在运行时真实可达
       const snapshot = await ensureConfigFile();

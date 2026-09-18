@@ -3,19 +3,44 @@ import {
   IPC,
   appConfigSchema,
   appInfoSchema,
+  chatSendResultSchema,
   configSnapshotSchema,
+  connectionInputSchema,
+  testResultSchema,
   type AppConfig,
   type AppInfo,
+  type ChatSendResult,
   type ConfigSnapshot,
+  type ConnectionView,
+  type StreamEvent,
+  type TestResult,
 } from '@jujia/shared-ipc';
+import { listModels } from '@jujia/agent-core';
 import { getDataRoot } from './paths';
 import { readConfigSnapshot, writeConfig } from './config-store';
+import {
+  createConnection,
+  deleteConnection,
+  listConnectionViews,
+  resolveConnection,
+  updateConnection,
+} from './connections-store';
+import { getHistory, sendMessage, stopMessage } from './chat-service';
+
+export interface IpcDeps {
+  /** 把流式事件推给渲染层（由 main/index.ts 注入，便于测试与窗口重建） */
+  emitStream: (event: StreamEvent) => void;
+  /** 测试用：覆盖 fetch */
+  fetcher?: typeof fetch;
+}
 
 /**
  * 注册 main 侧 IPC handler。
  * 约定：入参与出参都必须过 zod 校验，避免契约悄悄漂移。
  */
-export function registerIpcHandlers(): void {
+export function registerIpcHandlers(deps: IpcDeps): void {
+  const fetchImpl = deps.fetcher ?? fetch;
+
   ipcMain.handle(IPC.APP_INFO, (): AppInfo => {
     const payload: AppInfo = {
       name: '俱佳Agent',
@@ -47,5 +72,84 @@ export function registerIpcHandlers(): void {
     if (parsed.theme !== undefined) clean.theme = parsed.theme;
     if (parsed.workspace !== undefined) clean.workspace = parsed.workspace;
     return configSnapshotSchema.parse(await writeConfig(clean));
+  });
+
+  /* ---------------------------- 连接管理 ---------------------------- */
+
+  ipcMain.handle(IPC.CONNECTION_LIST, async (): Promise<ConnectionView[]> => {
+    return listConnectionViews();
+  });
+
+  ipcMain.handle(IPC.CONNECTION_CREATE, async (_e, input: unknown): Promise<ConnectionView> => {
+    return createConnection(connectionInputSchema.parse(input));
+  });
+
+  ipcMain.handle(IPC.CONNECTION_UPDATE, async (_e, payload: unknown): Promise<ConnectionView> => {
+    const { id, patch } = (payload ?? {}) as { id?: unknown; patch?: unknown };
+    if (typeof id !== 'string' || id === '') throw new Error('缺少连接 id');
+    return updateConnection(id, patch);
+  });
+
+  ipcMain.handle(IPC.CONNECTION_DELETE, async (_e, id: unknown): Promise<boolean> => {
+    if (typeof id !== 'string' || id === '') throw new Error('缺少连接 id');
+    return deleteConnection(id);
+  });
+
+  ipcMain.handle(IPC.CONNECTION_TEST, async (_e, id: unknown): Promise<TestResult> => {
+    if (typeof id !== 'string' || id === '') throw new Error('缺少连接 id');
+    const started = Date.now();
+    try {
+      const { record, apiKey } = await resolveConnection(id);
+      const models = await listModels(
+        { baseUrl: record.baseUrl, apiKey, signal: AbortSignal.timeout(20_000) },
+        { fetcher: fetchImpl },
+      );
+      return testResultSchema.parse({
+        ok: true,
+        message: `连通成功，可用模型 ${models.length} 个`,
+        models,
+        latencyMs: Date.now() - started,
+      });
+    } catch (err) {
+      return testResultSchema.parse({
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+        models: [],
+        latencyMs: Date.now() - started,
+      });
+    }
+  });
+
+  /* ------------------------------ 对话 ------------------------------ */
+
+  ipcMain.handle(IPC.CHAT_SEND, async (_e, payload: unknown): Promise<ChatSendResult> => {
+    const { connectionId, text, sessionId } = (payload ?? {}) as {
+      connectionId?: unknown;
+      text?: unknown;
+      sessionId?: unknown;
+    };
+    if (typeof connectionId !== 'string' || connectionId === '') throw new Error('请先选择一个连接');
+    if (typeof text !== 'string' || text.trim() === '') throw new Error('消息不能为空');
+
+    const result = sendMessage(
+      {
+        connectionId,
+        text,
+        ...(typeof sessionId === 'string' && sessionId !== '' ? { sessionId } : {}),
+      },
+      deps.emitStream,
+      { fetcher: fetchImpl },
+    );
+    return chatSendResultSchema.parse({ ...result, accepted: true });
+  });
+
+  ipcMain.handle(IPC.CHAT_STOP, async (_e, sessionId: unknown): Promise<boolean> => {
+    if (typeof sessionId !== 'string' || sessionId === '') return false;
+    return stopMessage(sessionId);
+  });
+
+  ipcMain.handle(IPC.CHAT_HISTORY, async (_e, sessionId: unknown) => {
+    if (typeof sessionId !== 'string' || sessionId === '') return [];
+    return getHistory(sessionId);
   });
 }

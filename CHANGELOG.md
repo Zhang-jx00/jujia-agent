@@ -6,6 +6,52 @@
 
 ---
 
+## [v0.2.0-w2] — 2026-09-18 21:57
+
+**阶段**：P1 · W2「Connection UI + OpenAI-compatible SSE 流式对话」（`docs/PLAN.md` §6 P1 第 2 行）
+**范围**：新增 `packages/agent-core`（provider 与流式协议解析）+ 连接管理链路 + 对话 UI；
+不含记忆/工具/权限（W3–W5 职责）。
+
+**改动内容**
+- **新增 `packages/agent-core`**（无 Electron 依赖，可单测）
+  - `providers/sse.ts`：SSE 解析器（**纯函数**，按事件边界切分，处理注释行/CRLF/多行 data/尾包）
+  - `providers/openai-compat.ts`：`streamChat()` 流式生成器 + `listModels()` 连通性探测 +
+    `resolveEndpoint()` baseUrl 归一化（自动补 `/v1`，兼容智谱 `/api/paas/v4` 等）
+  - `providers/types.ts`：`ProviderEvent` 契约（`text_delta` / `usage` / `done`）
+- **契约扩展** `packages/shared-ipc`：`ConnectionInput` / `ConnectionView`（脱敏）/
+  `TestResult` / `StreamEvent`（discriminated union）/ `ChatSendResult` / `ChatMessageView`；
+  新增 9 个 IPC 通道（连接 CRUD + 测试、对话 发送/停止/历史、流式事件推送）
+- **主进程**
+  - `main/secret.ts`：优先 Electron `safeStorage`（Windows DPAPI）加密 API Key，不可用时降级为明文并标注
+  - `main/connections-store.ts`：`connections.json`（原子写）+ **脱敏视图**（渲染层只拿到 `hasApiKey` 与 `hint`）
+  - `main/chat-service.ts`：会话管理 + 后台流式转发 + 中止；**错误轮次不写入历史**
+  - `main/index.ts`：`mainWindow` 引用管理 + `emitStream` 注入（窗口销毁时静默丢弃事件）
+- **渲染层**：应用外壳（概览 / 连接 / 对话 三页签）
+  - `features/connections/ConnectionsPanel.tsx`：厂商预设（DeepSeek/智谱/OpenAI/Moonshot/Ollama）、
+    增删改查、连通性测试（回填可用模型到 datalist）
+  - `features/chat/ChatPanel.tsx`：单次订阅流式事件、按 messageId 归位增量、**流式期间输入框保持可用**、
+    停止按钮、token 用量显示
+- **知识卡片**：`knowledge/cards/008-streaming-sse-pitfalls.md`
+
+**验证方式（4 项全绿）**
+| 项 | 命令 | 结果 |
+|----|------|------|
+| 类型检查 | `npm run typecheck` | 通过（4 个 workspace） |
+| 静态检查 | `npm run lint` | 通过，0 error / 0 warning |
+| 单元测试 | `npm run test` | **54/54**（新增 35 例：SSE 边界 13 + provider 端到端 22） |
+| 端到端冒烟 | `npm run smoke` | `SMOKE OK …（v1 / primary）` |
+
+**关键测试用例（用真实本地 SSE 服务，非打桩）**
+- 「逐字符慢写」极端分片仍正确拼装；中文/Emoji 跨 chunk 不破
+- **无 `[DONE]` 直接断流 → flush 尾包不丢**（首版真实缺陷，被此用例当场抓出）
+- 401 → `http_error(status=401)`；`data` 内 error → `bad_response`；全垃圾负载 → 报错而非静默成功
+- 用户中止 → `done(aborted)` 而非抛错；端口无人监听 → `network_error`
+- 请求体断言：`stream=true`、model/temperature/max_tokens 与 `Bearer` 鉴权头
+
+**回退点**：tag `v0.2.0-w2`（上一版 `v0.1.2-review`）
+
+---
+
 ## [v0.1.2-review] — 2026-09-18 19:52
 
 **类型**：**复核修复**（对象：`v0.1.1-w1`；按用户约定「下次任务前复核两遍」执行）

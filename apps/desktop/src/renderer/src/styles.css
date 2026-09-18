@@ -4,9 +4,12 @@
   --bg-container: #1f1f1f;
   --text: #f5f5f5;
   --text-secondary: #a6a6a6;
+  --primary: #2f6feb;
   --success: #4ec26a;
   --warning: #d89614;
+  --danger: #cf222e;
   --border: rgba(255, 255, 255, 0.14);
+  --radius: 8px;
 }
 
 * {
@@ -28,35 +31,86 @@ body {
   line-height: 1.6;
 }
 
-.p0-shell {
+/* ------------------------------ 布局 ------------------------------ */
+
+.app-root {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 48px 32px;
+  height: 100%;
 }
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-container);
+}
+
+.app-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.app-tab {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.app-tab:hover {
+  color: var(--text);
+}
+
+.app-tab-active {
+  background: rgba(47, 111, 235, 0.16);
+  border-color: var(--primary);
+  color: var(--text);
+}
+
+.app-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+}
+
+.w2-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+/* ------------------------------ 卡片 ------------------------------ */
 
 .p0-title {
   margin: 0;
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 600;
 }
 
 .p0-subtitle {
   margin: 0;
   color: var(--text-secondary);
+  font-size: 13px;
 }
 
 .p0-card {
   background: var(--bg-container);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 16px 20px;
 }
 
 .p0-card h2 {
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
@@ -76,6 +130,7 @@ body {
 .p0-kv dd {
   margin: 0;
   font-family: Consolas, 'Cascadia Mono', monospace;
+  word-break: break-all;
 }
 
 .p0-ok {
@@ -88,4 +143,220 @@ body {
 
 .p0-err {
   color: #ff7875;
+}
+
+code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+/* ------------------------------ 表单 ------------------------------ */
+
+.w2-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.w2-form label,
+.w2-chat-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+input,
+select,
+textarea {
+  background: #101010;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 1px solid var(--primary);
+  border-color: var(--primary);
+}
+
+.w2-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.w2-chip {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.w2-chip:hover {
+  color: var(--text);
+  border-color: var(--primary);
+}
+
+.w2-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+button.w2-btn,
+button.w2-btn-primary,
+button.w2-btn-danger {
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+
+button.w2-btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+button.w2-btn-danger {
+  color: #ff9c9c;
+  border-color: rgba(207, 34, 46, 0.5);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ------------------------------ 列表 ------------------------------ */
+
+.w2-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.w2-list-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.w2-list-item:first-child {
+  border-top: none;
+}
+
+.w2-list-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* ------------------------------ 对话 ------------------------------ */
+
+.w2-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.w2-chat-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.w2-chat-scroll {
+  flex: 1;
+  min-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-container);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.w2-bubble-user,
+.w2-bubble-agent {
+  max-width: 88%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.w2-bubble-user {
+  align-self: flex-end;
+  background: rgba(47, 111, 235, 0.18);
+}
+
+.w2-bubble-agent {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.w2-bubble-role {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.w2-caret {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  margin-left: 2px;
+  background: var(--text);
+  vertical-align: text-bottom;
+  animation: w2-blink 1s steps(2, start) infinite;
+}
+
+@keyframes w2-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .w2-caret {
+    animation: none;
+  }
+}
+
+.w2-chat-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.w2-chat-input textarea {
+  resize: vertical;
 }

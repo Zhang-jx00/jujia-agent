@@ -48,3 +48,89 @@ export const configSnapshotSchema = z.object({
 });
 
 export type ConfigSnapshot = z.infer<typeof configSnapshotSchema>;
+
+/* ------------------------------------------------------------------ *
+ * W2：连接（Connection）与流式对话
+ * 纪律：apiKey 永不进入渲染层。渲染层只能看到 hasApiKey / apiKeyHint。
+ * ------------------------------------------------------------------ */
+
+/** 协议档位。W2 只实现 OpenAI 兼容；Anthropic 档在 W3+ 补。 */
+export const apiFormatSchema = z.enum(['openai-compatible']);
+export type ApiFormat = z.infer<typeof apiFormatSchema>;
+
+export const connectionInputSchema = z.object({
+  name: z.string().min(1).max(64),
+  baseUrl: z.string().min(1).max(300),
+  apiFormat: apiFormatSchema,
+  model: z.string().min(1).max(128),
+  /** 创建时必填；更新时省略表示「不改动已有密钥」 */
+  apiKey: z.string().max(500).optional(),
+});
+export type ConnectionInput = z.infer<typeof connectionInputSchema>;
+
+/** 渲染层可见的连接视图（脱敏） */
+export const connectionViewSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  baseUrl: z.string(),
+  apiFormat: apiFormatSchema,
+  model: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  hasApiKey: z.boolean(),
+  /** 仅用于让用户确认「填的是哪一把」，例如 `sk-…c3f9` */
+  apiKeyHint: z.string().nullable(),
+});
+export type ConnectionView = z.infer<typeof connectionViewSchema>;
+
+export const testResultSchema = z.object({
+  ok: z.boolean(),
+  message: z.string(),
+  models: z.array(z.string()).max(200).default([]),
+  latencyMs: z.number().int().nonnegative().default(0),
+});
+export type TestResult = z.infer<typeof testResultSchema>;
+
+/* ---------------------------- 流式事件 ---------------------------- */
+
+export const streamEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('text_delta'),
+    sessionId: z.string(),
+    messageId: z.string(),
+    seq: z.number().int().nonnegative(),
+    delta: z.string(),
+  }),
+  z.object({
+    type: z.literal('usage'),
+    sessionId: z.string(),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+  }),
+  z.object({
+    type: z.literal('error'),
+    sessionId: z.string(),
+    code: z.string(),
+    message: z.string(),
+  }),
+  z.object({
+    type: z.literal('done'),
+    sessionId: z.string(),
+    reason: z.enum(['stop', 'length', 'aborted', 'error']),
+  }),
+]);
+export type StreamEvent = z.infer<typeof streamEventSchema>;
+
+export const chatSendResultSchema = z.object({
+  sessionId: z.string(),
+  messageId: z.string(),
+  accepted: z.boolean(),
+});
+export type ChatSendResult = z.infer<typeof chatSendResultSchema>;
+
+/** 会话历史里的一条消息（渲染层回显用） */
+export const chatMessageSchema = z.object({
+  role: z.enum(['system', 'user', 'assistant']),
+  content: z.string(),
+});
+export type ChatMessageView = z.infer<typeof chatMessageSchema>;

@@ -9,6 +9,21 @@ export const IPC = {
   CONFIG_GET: 'config:get',
   /** renderer → main：改写应用配置 */
   CONFIG_SET: 'config:set',
+
+  /* ---------------- W2：连接与对话 ---------------- */
+  /** 连接：列表 / 新增 / 更新 / 删除 / 连通性测试 */
+  CONNECTION_LIST: 'connection:list',
+  CONNECTION_CREATE: 'connection:create',
+  CONNECTION_UPDATE: 'connection:update',
+  CONNECTION_DELETE: 'connection:delete',
+  CONNECTION_TEST: 'connection:test',
+  /** 对话：发起 / 中止 / 读取历史 */
+  CHAT_SEND: 'chat:send',
+  CHAT_STOP: 'chat:stop',
+  CHAT_HISTORY: 'chat:history',
+  /** main → renderer：流式事件推送 */
+  CHAT_STREAM: 'chat:stream',
+
   /** main → renderer：应用状态变化广播（预留） */
   APP_STATE_CHANGED: 'app:state-changed',
 } as const;
