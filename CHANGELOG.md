@@ -6,6 +6,41 @@
 
 ---
 
+## [v0.2.1-vendor] — 2026-09-18 22:22
+
+**类型**：复核 002 前置项 · **厂商接口与模型信息联网核实**（用户明确要求：不得引用过时或已废弃内容）
+**范围**：只改预设数据与文档，不改协议实现。
+
+**核实方式**：① 抓取官方文档页面；② 用无效 Key 实测端点（401=路径有效 / 404=路径错误 / 000=不可达）。
+
+**核实发现（含废弃项）**
+| 项 | 原预设（已过时） | 核实后的当前值 | 证据 |
+|----|-----------------|---------------|------|
+| DeepSeek 模型 | `deepseek-chat` | **`deepseek-flash`** | 官方文档：`deepseek-chat`/`deepseek-reasoner` **2026-07-24 弃用**；现行为 `deepseek-flash`(V4.1-Flash) 与 `deepseek-v4-pro` |
+| DeepSeek 端点 | — | `/v1/chat/completions` 与 `/chat/completions` **均返回 401** | 实测：两条路径都有效 |
+| 智谱模型 | `glm-4-plus` | **`glm-5.3`**（旗舰） | 官方模型概览：`glm-4-plus` 已不在列表中；另有免费额度 `glm-4.7-flash` |
+| Moonshot 模型 | `moonshot-v1-8k` | **`kimi-k2.6`** | 官方平台页：K2.6 为最新最智能模型；`moonshot-v1` 属第一代 |
+| OpenAI 模型 | `gpt-4o-mini` | **不再预设** | 多方资料一致：`gpt-4o`/`gpt-4o-mini` 已废弃；官方文档站对自动化访问返回 403，未取得可信 ID 列表 |
+| Ollama 模型 | `qwen2.5:7b` | **不再预设**（改由运行时读取本机列表） | 模型取决于本机已 pull 内容；官方推荐工具调用用 `qwen3` 系列 |
+| OpenAI 端点 | — | 本机网络 **000（不可达）** | 实测：与 github.com 首页被阻断同源 |
+
+**设计原则（由此确定）**：**能自动发现的就不预设，能核实到官方 ID 的才写死。**
+对模型迭代极快（OpenAI）或依赖本机环境（Ollama）的厂商留空模型名，改为点「测试」时通过
+`GET {base}/models` 拉真实列表回填候选——已实测该端点在 DeepSeek / 智谱 / Moonshot 均返回 401（路径有效）。
+
+**改动内容**
+- `ConnectionsPanel.tsx`：更新 5 个厂商预设（含核实日期与废弃说明注释）、新增预设说明提示行、
+  模型输入框占位文案改为引导用户从测试结果中选择
+- 新增知识卡片 `knowledge/cards/009-vendor-api-verification-2026-09.md`：完整核实记录 + 来源 URL +
+  对 W3/W5 的影响（五家均支持 OpenAI 兼容 `tools`；DeepSeek 新增 `thinking` / `reasoning_effort` 参数
+  与 Anthropic 格式端点，属 provider 能力差异，应进 capability registry）
+
+**验证方式**：`npm run typecheck` 通过 · `npm run lint` 0 问题 · `npm run test` **54/54** · `npm run build` 成功
+
+**回退点**：tag `v0.2.1-vendor`（上一版 `v0.2.0-w2`）
+
+---
+
 ## [v0.2.0-w2] — 2026-09-18 21:57
 
 **阶段**：P1 · W2「Connection UI + OpenAI-compatible SSE 流式对话」（`docs/PLAN.md` §6 P1 第 2 行）

@@ -2,13 +2,56 @@ import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ConnectionInput, ConnectionView, TestResult } from '@jujia/shared-ipc';
 
-/** 常用厂商的 OpenAI 兼容端点预设，减少手填出错 */
-const PRESETS: ReadonlyArray<{ label: string; baseUrl: string; model: string }> = [
-  { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
-  { label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-plus' },
-  { label: 'OpenAI', baseUrl: 'https://api.openai.com', model: 'gpt-4o-mini' },
-  { label: 'Moonshot', baseUrl: 'https://api.moonshot.cn', model: 'moonshot-v1-8k' },
-  { label: '本地 Ollama', baseUrl: 'http://127.0.0.1:11434', model: 'qwen2.5:7b' },
+/**
+ * 厂商预设 —— **2026-09-18 依官方文档实测核实**，不可凭记忆改动。
+ *
+ * 核实原则（避免引用过时信息）：
+ * - 能自动发现的就**不预设模型名**（Ollama 取决于本机已 pull 的模型；OpenAI 模型迭代极快），
+ *   点「测试」后由 `/v1/models` 拉真实列表让用户选；
+ * - 只有能从官方文档确认到**当前有效 ID** 的才写死。
+ *
+ * 核实结论摘要（详见 knowledge/cards/009-vendor-api-verification-2026-09.md）：
+ * - DeepSeek：`deepseek-chat` / `deepseek-reasoner` 已于 **2026-07-24 弃用**，
+ *   现行模型为 `deepseek-flash`（V4.1-Flash）与 `deepseek-v4-pro`；base `https://api.deepseek.com`
+ * - 智谱：现行旗舰 `glm-5.3`，另有免费额度模型 `glm-4.7-flash`；
+ *   base `https://open.bigmodel.cn/api/paas/v4`（原 `glm-4-plus` 已不在模型列表中）
+ * - Moonshot：最新 `kimi-k2.6`（其次 `kimi-k2.5`；`moonshot-v1-8k` 属第一代）；
+ *   base 国内 `https://api.moonshot.cn/v1`、全球 `https://api.moonshot.ai/v1`
+ * - OpenAI：`gpt-4o` / `gpt-4o-mini` 已废弃；base `https://api.openai.com/v1`
+ *   （注：本机网络对 api.openai.com 不通，实测返回 000）
+ * - Ollama：base `http://127.0.0.1:11434`（自动补 `/v1`），apiKey 任意非空即可
+ */
+const PRESETS: ReadonlyArray<{ label: string; baseUrl: string; model: string; note: string }> = [
+  {
+    label: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com',
+    model: 'deepseek-flash',
+    note: 'deepseek-chat / deepseek-reasoner 已于 2026-07-24 弃用；现行为 deepseek-flash 与 deepseek-v4-pro',
+  },
+  {
+    label: '智谱 GLM',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    model: 'glm-5.3',
+    note: '现行旗舰 glm-5.3；预算敏感可改用免费额度模型 glm-4.7-flash',
+  },
+  {
+    label: 'Kimi（Moonshot）',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'kimi-k2.6',
+    note: '最新 kimi-k2.6；全球站为 https://api.moonshot.ai/v1',
+  },
+  {
+    label: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    model: '',
+    note: '模型迭代快（gpt-4o 系列已废弃），建议点「测试」后从返回列表中选择',
+  },
+  {
+    label: '本地 Ollama',
+    baseUrl: 'http://127.0.0.1:11434',
+    model: '',
+    note: '模型取决于本机已 pull 的内容，点「测试」即可读取本机模型列表',
+  },
 ];
 
 const emptyForm: ConnectionInput = {
@@ -31,6 +74,7 @@ export function ConnectionsPanel({ onChanged }: Props): ReactElement {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
+  const [presetNote, setPresetNote] = useState<string>('');
 
   async function refresh(): Promise<void> {
     const list = await window.jujia.connectionList();
@@ -130,14 +174,26 @@ export function ConnectionsPanel({ onChanged }: Props): ReactElement {
               key={p.label}
               type="button"
               className="w2-chip"
-              onClick={() =>
-                setForm((f) => ({ ...f, baseUrl: p.baseUrl, model: p.model, name: f.name || p.label }))
-              }
+              title={p.note}
+              onClick={() => {
+                setForm((f) => ({
+                  ...f,
+                  baseUrl: p.baseUrl,
+                  model: p.model,
+                  name: f.name || p.label,
+                }));
+                setPresetNote(`${p.label}：${p.note}`);
+              }}
             >
               {p.label}
             </button>
           ))}
         </div>
+        {presetNote && (
+          <p className="p0-subtitle" role="note">
+            ℹ {presetNote}
+          </p>
+        )}
 
         <div className="w2-form">
           <label>
@@ -172,7 +228,7 @@ export function ConnectionsPanel({ onChanged }: Props): ReactElement {
             <input
               value={form.model}
               onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-              placeholder="deepseek-chat"
+              placeholder="选预设自动填入，或点「测试」后从候选列表选择"
               list="model-options"
             />
             <datalist id="model-options">
