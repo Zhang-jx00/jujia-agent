@@ -80,7 +80,7 @@ export function sendMessage(
   void (async () => {
     let assistantText = '';
     let seq = 0;
-    let failureReason: 'stop' | 'length' | 'aborted' | 'error' = 'stop';
+    let failureReason: 'stop' | 'length' | 'aborted' | 'error' | 'tool_calls' = 'stop';
     let errored = false;
 
     try {
@@ -115,6 +115,8 @@ export function sendMessage(
             outputTokens: ev.outputTokens,
           });
         } else if (ev.type === 'done') {
+          // 对话页当前未启用工具执行（W5 起改为走 Agent Loop）；
+          // 若模型仍请求了工具，如实把 tool_calls 传给渲染层提示用户，而不是假装成正常结束
           failureReason = ev.reason;
         }
       }

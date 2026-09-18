@@ -6,3 +6,5 @@ export * from './tools/path-guard';
 export * from './tools/registry';
 export * from './tools/executor';
 export * from './tools/builtin/file-tools';
+export * from './providers/tool-call-accumulator';
+export * from './loop/agent-loop';

@@ -42,6 +42,27 @@ sources: 各家官方文档 + 端点实测（见文末 URL 与探测结果）
 - **本机网络限制**：`api.openai.com` 在本环境不可达（000，与 github.com 首页被阻断同源）。
   连接测试失败时 UI 会原文回显错误，需注意区分「密钥错误（401）」与「网络不可达（000）」。
 
+## 三点五、补充核实（2026-09-18 晚，第二轮）
+
+> 起因：用户指出「Kimi K3」等前沿动态，要求不得依赖过时知识。复核后发现**本卡片原记录已有两处过时**。
+
+| 项 | 本卡片原记录 | 复核后的当前事实 | 来源 |
+|----|-------------|-----------------|------|
+| Moonshot 最新模型 | `kimi-k2.6`（2026-04） | **`kimi-k3`**：2026-07-16 发布，**2026-07-27 开源权重**；2.8T MoE（896 专家激活 16），1M 上下文，原生多模态（文/图/视频），支持 function calling / JSON / 流式 / 推理 | 多个来源一致（见下） |
+| Moonshot 次新 | — | **Kimi K2.8 Preview**（2026-09-11，Kimi Work 上线）：性能接近 K3，支持 low/high/max 三档 reasoning effort | 百度百科条目 |
+
+**由此得到的教训（已写入项目约定）**：厂商模型版本**每轮开发前必须重新联网核实**，
+本卡片与 UI 预设都只是「某次核实的快照」，不是长期事实。
+`ConnectionsPanel` 的预设已同步更新为 `kimi-k3`，并在提示中标注发布日期。
+
+### 本轮核实来源（2026-09-18 检索）
+
+- Kimi K3 参数/上下文/能力与发布信息：https://lmmarketcap.com/model/moonshotai-kimi-k3
+- Kimi 系列版本时间线（K2.5→K2.6→K2.7→K3）：https://www.wikiwand.com/en/Kimi_(AI)
+- K3 架构与开源说明（1.56TB 仓库、KDA + AttnRes、MXFP4）：https://insideai.news/news/machine-learning/moonshot-ai-releases-kimi-k3-architecture-with-2-8t-parameters/5466
+- K3 规格汇总与定价：https://moclaw.ai/blog/what-is-kimi-k3
+- K2.8 Preview（2026-09-11）：https://baike.baidu.com/item/Kimi%20Work/67899418
+
 ## 四、核实来源
 
 - DeepSeek 官方文档（首页与模型/价格页）：https://api-docs.deepseek.com/

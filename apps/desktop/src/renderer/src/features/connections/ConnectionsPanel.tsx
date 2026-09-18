@@ -37,8 +37,8 @@ const PRESETS: ReadonlyArray<{ label: string; baseUrl: string; model: string; no
   {
     label: 'Kimi（Moonshot）',
     baseUrl: 'https://api.moonshot.cn/v1',
-    model: 'kimi-k2.6',
-    note: '最新 kimi-k2.6；全球站为 https://api.moonshot.ai/v1',
+    model: 'kimi-k3',
+    note: '最新旗舰 kimi-k3（2026-07-16 发布，7-27 开源权重，1M 上下文）；另有 K2.8 Preview（2026-09-11）；全球站为 https://api.moonshot.ai/v1',
   },
   {
     label: 'OpenAI',

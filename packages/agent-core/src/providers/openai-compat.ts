@@ -1,5 +1,6 @@
 import { createSseParser } from './sse';
-import type { ChatParams, ProviderError, ProviderEvent } from './types';
+import { ToolCallAccumulator, type AssembledToolCall } from './tool-call-accumulator';
+import type { ChatMessage, ChatParams, ProviderError, ProviderEvent } from './types';
 
 /** 可注入的依赖，便于单测打桩（默认用全局 fetch） */
 export interface ProviderDeps {
@@ -49,11 +50,16 @@ export async function* streamChat(
 
   const body: Record<string, unknown> = {
     model: params.model,
-    messages: params.messages,
+    messages: params.messages.map(serializeMessage),
     stream: true,
   };
   if (params.temperature !== undefined) body['temperature'] = params.temperature;
   if (params.maxTokens !== undefined) body['max_tokens'] = params.maxTokens;
+  // 每一轮都要带 tools（协议硬约束，卡片 011）
+  if (params.tools && params.tools.length > 0) {
+    body['tools'] = params.tools;
+    body['tool_choice'] = params.toolChoice ?? 'auto';
+  }
 
   let res: Response;
   try {
@@ -89,7 +95,9 @@ export async function* streamChat(
   const reader = res.body.getReader();
   const decoder = new TextDecoder('utf-8');
   const parser = createSseParser();
+  const toolCalls = new ToolCallAccumulator();
   let finishReason: 'stop' | 'length' = 'stop';
+  let wantsTools = false;
   let received = 0;
   let skipped = 0;
 
@@ -99,11 +107,23 @@ export async function* streamChat(
       if (done) break;
       const text = decoder.decode(value, { stream: true });
       for (const payload of parser.push(text)) {
-        const mapped = mapPayload(payload, (r) => {
-          finishReason = r;
-        });
+        const mapped = mapPayload(
+          payload,
+          (r) => {
+            finishReason = r;
+          },
+          toolCalls,
+          () => {
+            wantsTools = true;
+          },
+        );
         if (mapped === 'done') {
-          yield { type: 'done', reason: finishReason };
+          // 先吐出拼装好的工具调用，再结束：顺序对调用方很重要
+          for (const ev of emitToolCallsIfAny(toolCalls, wantsTools)) yield ev;
+          yield {
+            type: 'done',
+            reason: toolCalls.hasCalls() ? 'tool_calls' : finishReason,
+          };
           return;
         }
         if (mapped === 'skip') {
@@ -117,17 +137,26 @@ export async function* streamChat(
 
     // 流被服务端直接关闭（没有 [DONE]）时，flush 出最后一个事件
     for (const payload of parser.flush()) {
-      const mapped = mapPayload(payload, (r) => {
-        finishReason = r;
-      });
+      const mapped = mapPayload(
+        payload,
+        (r) => {
+          finishReason = r;
+        },
+        toolCalls,
+        () => {
+          wantsTools = true;
+        },
+      );
       if (mapped === 'done') break;
       if (mapped !== 'skip') yield mapped;
     }
 
-    if (received === 0 && skipped > 0) {
+    // 只有垃圾负载且没有工具调用 → 视为上游异常（不能静默成功）
+    if (received === 0 && skipped > 0 && !toolCalls.hasCalls()) {
       throw makeError('bad_response', `收到 ${skipped} 个无法解析的负载，且没有任何文本增量`);
     }
-    yield { type: 'done', reason: finishReason };
+    for (const ev of emitToolCallsIfAny(toolCalls, wantsTools)) yield ev;
+    yield { type: 'done', reason: toolCalls.hasCalls() ? 'tool_calls' : finishReason };
   } catch (err) {
     if (isAbort(err)) {
       yield { type: 'done', reason: 'aborted' };
@@ -143,8 +172,47 @@ export async function* streamChat(
   }
 }
 
+/**
+ * 把消息序列化为协议要求的形态。
+ * 重点：assistant 带工具调用时必须回传 tool_calls，tool 消息必须带配对的 tool_call_id。
+ */
+function serializeMessage(m: ChatMessage): Record<string, unknown> {
+  if (m.role === 'tool') {
+    return { role: 'tool', tool_call_id: m.toolCallId ?? '', content: m.content };
+  }
+  if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+    return {
+      role: 'assistant',
+      content: m.content === '' ? null : m.content,
+      tool_calls: m.toolCalls.map((c) => ({
+        id: c.id,
+        type: 'function',
+        function: { name: c.name, arguments: c.argumentsText },
+      })),
+    };
+  }
+  return { role: m.role, content: m.content };
+}
+
+/** 有工具调用就产出事件（放在 done 之前） */
+function* emitToolCallsIfAny(
+  acc: ToolCallAccumulator,
+  wantsTools: boolean,
+): Generator<ProviderEvent> {
+  if (!acc.hasCalls()) return;
+  const calls: AssembledToolCall[] = acc.finish();
+  if (calls.length > 0 || wantsTools) {
+    yield { type: 'tool_calls', calls };
+  }
+}
+
 /** 解析单条 data 负载；返回 ProviderEvent、'done'、或 'skip' */
-function mapPayload(payload: string, onFinish: (r: 'stop' | 'length') => void): ProviderEvent | 'done' | 'skip' {
+function mapPayload(
+  payload: string,
+  onFinish: (r: 'stop' | 'length') => void,
+  toolCalls: ToolCallAccumulator,
+  onToolCalls: () => void,
+): ProviderEvent | 'done' | 'skip' {
   const trimmed = payload.trim();
   if (trimmed === '') return 'skip';
   if (trimmed === '[DONE]') return 'done';
@@ -169,10 +237,17 @@ function mapPayload(payload: string, onFinish: (r: 'stop' | 'length') => void): 
   if (Array.isArray(choices) && choices.length > 0) {
     const first = choices[0] as Record<string, unknown>;
     const reason = first['finish_reason'];
-    if (reason === 'length') onFinish('length');
+    if (reason === 'tool_calls') onToolCalls();
+    else if (reason === 'length') onFinish('length');
     else if (typeof reason === 'string') onFinish('stop');
 
     const delta = first['delta'] as Record<string, unknown> | undefined;
+    // 首帧通常只有 role、没有 content（卡片 011 第 4 条）
+    const rawToolCalls = delta?.['tool_calls'];
+    if (Array.isArray(rawToolCalls)) {
+      toolCalls.push(rawToolCalls as never);
+    }
+
     const content = delta?.['content'];
     if (typeof content === 'string' && content.length > 0) {
       return { type: 'text_delta', delta: content };

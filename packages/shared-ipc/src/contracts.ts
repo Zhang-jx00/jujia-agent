@@ -116,7 +116,7 @@ export const streamEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('done'),
     sessionId: z.string(),
-    reason: z.enum(['stop', 'length', 'aborted', 'error']),
+    reason: z.enum(['stop', 'length', 'aborted', 'error', 'tool_calls']),
   }),
 ]);
 export type StreamEvent = z.infer<typeof streamEventSchema>;

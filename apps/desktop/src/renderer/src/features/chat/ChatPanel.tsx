@@ -61,7 +61,22 @@ export function ChatPanel({ connections }: Props): ReactElement {
         return;
       }
       // done
-      setBubbles((prev) => prev.map((b) => (b.streaming ? { ...b, streaming: false } : b)));
+      if (event.reason === 'tool_calls') {
+        // 模型想调工具，但对话页还没接工具执行（W5）：必须说明，不能静默当作结束
+        setBubbles((prev) =>
+          prev.map((b) =>
+            b.streaming
+              ? {
+                  ...b,
+                  streaming: false,
+                  error: '模型请求调用工具；当前对话页尚未启用工具执行（W5 起支持）。',
+                }
+              : b,
+          ),
+        );
+      } else {
+        setBubbles((prev) => prev.map((b) => (b.streaming ? { ...b, streaming: false } : b)));
+      }
       setSending(false);
     });
     return unsubscribe;

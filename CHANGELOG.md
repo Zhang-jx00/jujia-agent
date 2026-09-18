@@ -6,6 +6,48 @@
 
 ---
 
+## [v0.4.0-w4] — 2026-09-18 22:52
+
+**阶段**：P1 · W4「三分支 Agent Loop + maxTurns + 工具串行执行」（`docs/PLAN.md` §6 P1 第 4 行）
+**前置**：复核 003（对象 W3）已通过——第一遍全绿；第二遍变异测试 **4/4 全部被拦住**
+（去掉 realpath 校验 / 越界判定改 startsWith / 写工具不再询问 / 拒绝后仍执行）。
+**范围**：Agent Loop 与流式工具调用拼装；**尚未接入对话页**（W5 负责把 chat 改为走 Loop）。
+
+**联网核实（用户要求：不得依赖过时知识）**
+- **Kimi K3 已发布**（2026-07-16，7-27 开源权重）：2.8T MoE、1M 上下文、原生多模态；
+  本卡片 009 原记的 `kimi-k2.6` **已落后两个版本** → 预设更新为 `kimi-k3`，并在卡片中补记来源与时间
+- 核实流式工具调用规范，沉淀为知识卡片 011（见下）
+
+**改动内容**
+- **`providers/tool-call-accumulator.ts`（新增）**：流式 `tool_calls` 拼装器。落实卡片 011 的四条规则：
+  按 `index` 归位（不按到达顺序 append）、`name` 串接、`arguments` 仅在流结束后解析、容忍首帧无 content；
+  解析失败给出 `parseError` 而非抛异常
+- **`providers/openai-compat.ts`**：支持 `tools` / `tool_choice` 参数与 `tool` 角色消息序列化
+  （assistant 带 tool_calls 时回传、tool 消息带配对 `tool_call_id`）；流结束时先产出 `tool_calls` 事件
+  再给出 `done(tool_calls)`
+- **`loop/agent-loop.ts`（新增）**：三分支 Loop
+  - `final`：模型直接答复 → 结束
+  - `tool`：串行执行工具 → 结果作为 `tool` 消息回传 → 继续循环
+  - `handoff`：模型调用内建 `handoff` 工具 → 结束并标记，交由上层处置
+  - **maxTurns 熔断**（默认 8）；工具失败一律翻译成「可回传模型」的文本，不中断对话
+- **契约**：`StreamEvent.done.reason` 增加 `tool_calls`
+
+**验证方式（4 项全绿）**
+| 项 | 结果 |
+|----|------|
+| `npm run typecheck` | 通过 |
+| `npm run lint` | 0 error / 0 warning |
+| `npm run test` | **118/118**（101 → 118；新增拼装器 8 例 + Loop 9 例） |
+| `npm run smoke` | `SMOKE OK …（v1 / primary）；工作区工具链路可用` |
+
+**过程中修掉的 1 个真实缺陷**
+- Loop 里 `calls = ev.calls` 用**赋值**接收工具调用，若 provider 分多次给出 `tool_calls` 事件就会丢掉先到的调用
+  （实测：两个调用只剩第二个）→ 改为按 `index` 合并
+
+**回退点**：tag `v0.4.0-w4`（上一版 `v0.3.0-w3`）
+
+---
+
 ## [v0.3.0-w3] — 2026-09-18 22:41
 
 **阶段**：P1 · W3「工作区选择 + 文件工具（绝对路径 + sandbox 校验 + 写门禁）」（`docs/PLAN.md` §6 P1 第 3 行）
