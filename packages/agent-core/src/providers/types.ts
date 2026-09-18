@@ -25,6 +25,6 @@ export type ProviderEvent =
   | { type: 'done'; reason: 'stop' | 'length' | 'aborted' };
 
 export interface ProviderError extends Error {
-  code: 'http_error' | 'network_error' | 'bad_response';
+  code: 'http_error' | 'network_error' | 'bad_response' | 'timeout';
   status?: number;
 }

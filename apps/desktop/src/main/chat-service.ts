@@ -1,10 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import { streamChat, type ChatMessage } from '@jujia/agent-core';
+import { streamChat, withTimeout, type ChatMessage } from '@jujia/agent-core';
 import type { StreamEvent } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
 
 /** W2 的极简系统提示；W3 起由 memory 模块装配（含 blocks 与压缩） */
 const SYSTEM_PROMPT = '你是俱佳Agent，一个运行在用户 Windows 桌面上的助手。回答简洁、准确，使用中文。';
+
+/**
+ * 单轮对话的整体超时（含流式接收）。
+ *
+ * 复核 002 发现：初版对话链路**没有任何超时**——上游卡住（接受连接但不响应）时会永久挂起，
+ * 用户只能靠「停止」按钮自救。此处补上有界保护；超时会被 agent-core 识别为 `timeout` 错误，
+ * 以「上游在超时时间内没有响应」如实提示用户，而不是伪装成网络错误。
+ * 待 W6 设置页落地后改为用户可调。
+ */
+const CHAT_TIMEOUT_MS = 300_000;
 
 export type StreamEmitter = (event: StreamEvent) => void;
 
@@ -81,7 +91,8 @@ export function sendMessage(
           apiKey,
           model: record.model,
           messages: session.messages,
-          signal: controller.signal,
+          // 用户中止（controller）与整体超时合并：两者语义不同，交由 provider 层分别识别
+          signal: withTimeout(controller.signal, CHAT_TIMEOUT_MS),
         },
         deps,
       );

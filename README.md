@@ -4,7 +4,6 @@
 
 - **形态**：TypeScript + Electron
 - **目标**：系统学习 Agent 全栈知识，并做出属于自己的可运行桌面 Agent
-- **参考**：Yan-Agent（本地 `../Yan-Agent`）、OpenCode、Cline、Claude Code、React Flow/xyflow、tldraw 等开源与官方文档
 
 ## 目录
 

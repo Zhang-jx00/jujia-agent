@@ -6,6 +6,41 @@
 
 ---
 
+## [v0.2.2-review] — 2026-09-18 22:27
+
+**类型**：复核 002 修复（对象 `v0.2.0-w2`；按用户约定「下次任务前复核两遍」执行）
+**范围**：修协议层缺陷 + 补异常路径测试；不含新功能。
+
+**复核结论**：第一遍全绿；第二遍（变异测试 + 异常路径实验）暴露 **2 项严重缺陷**。
+
+**修复内容**
+1. **`isAbort` 漏判超时**（严重）：Node `AbortSignal.timeout()` 抛的是 `TimeoutError`（code=23）而非 `AbortError`，
+   导致「上游超时」被误报为「连接失败」
+   → 新增 `isTimeout()`（含 `cause` 链判定）；`ProviderError` 增加 `timeout` 码；三处 catch 同步处理
+2. **对话链路无超时**（严重）：上游接受连接但不响应时永久挂起（`withTimeout` 写了未接线）
+   → `chat-service` 接入 `withTimeout(controller.signal, 300_000)`，与用户中止语义分离
+3. **流中途断开的契约未锁定**（中）：明确「抛 `network_error` 且已产出增量不得丢失」并以用例锁死
+4. ESLint 补 `varsIgnorePattern` / `caughtErrorsIgnorePattern` 为 `^_`（轻微）
+5. 按用户要求：README 移除「参考 Yan-Agent / OpenCode / Cline 等」一行
+
+**新增测试（54 → 57）**
+- 服务端发送途中强制断开 socket → 增量保留 + `network_error`
+- 上游一直不响应 → 超时识别为 `timeout`（有界，不永久挂起）
+- 用户在等待响应头阶段主动取消 → `done(aborted)`
+
+**验证方式**
+| 项 | 结果 |
+|----|------|
+| `npm run typecheck` | 通过 |
+| `npm run lint` | 0 error / 0 warning |
+| `npm run test` | **57/57** |
+| `npm run smoke` | `SMOKE OK …（v1 / primary）` |
+| **变异测试 ×4** | **4/4 全部被测试拦住**（[DONE] 判定 / flush 尾包 / 中止语义 / usage 字段）；还原用文件备份，未用 `git checkout --` |
+
+**回退点**：tag `v0.2.2-review`（上一版 `v0.2.1-vendor`）
+
+---
+
 ## [v0.2.1-vendor] — 2026-09-18 22:22
 
 **类型**：复核 002 前置项 · **厂商接口与模型信息联网核实**（用户明确要求：不得引用过时或已废弃内容）

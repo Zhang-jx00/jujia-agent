@@ -12,7 +12,15 @@ export default tseslint.config(
     rules: {
       // TS 编译器对未定义标识符的检查比 no-undef 更准（官方建议在 TS 文件中关闭）
       'no-undef': 'off',
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          // 允许显式用 `_` 前缀表示「有意忽略」，例如 `for await (const _ev of gen)`
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
       '@typescript-eslint/consistent-type-imports': 'warn',
       'no-console': 'off',
       // 防 Yan 式巨石文件：单文件逻辑行上限

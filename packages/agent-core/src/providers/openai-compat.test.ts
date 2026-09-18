@@ -239,6 +239,79 @@ describe('streamChat：真实 SSE 端到端', () => {
     ).rejects.toMatchObject({ code: 'network_error' });
   });
 
+  // 异常路径实验（复核 002 第二遍）：真实网络故障下的行为，必须有确定结局
+  it('服务端发送途中强制断开连接 → 已收到的增量保留，并以 network_error 收尾（不挂起、不崩溃）', async () => {
+    const mock = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(sseChunk('前半段'));
+      // 模拟网络中断：直接销毁 socket，既没有 [DONE] 也没有正常结束
+      setTimeout(() => res.socket?.destroy(), 30);
+    });
+    servers.push(mock);
+
+    const received: string[] = [];
+    let failure: unknown;
+    try {
+      for await (const ev of streamChat({
+        baseUrl: mock.baseUrl,
+        apiKey: 'k',
+        model: 'm',
+        messages: [],
+      })) {
+        if (ev.type === 'text_delta') received.push(ev.delta);
+      }
+    } catch (err) {
+      failure = err;
+    }
+
+    // 契约：中断属于网络错误（抛错），但**已经产出的增量不得丢失**——调用方据此保住半截回答
+    expect(received.join('')).toContain('前半段');
+    expect(failure).toMatchObject({ code: 'network_error' });
+  });
+
+  it('上游一直不响应 → 超时被识别为 timeout（不是 network_error，也不是静默 aborted）', async () => {
+    const mock = await startServer(() => {
+      // 刻意什么都不写、不结束：模拟上游卡死
+    });
+    servers.push(mock);
+
+    const started = Date.now();
+    let failure: unknown;
+    try {
+      for await (const _ev of streamChat({
+        baseUrl: mock.baseUrl,
+        apiKey: 'k',
+        model: 'm',
+        messages: [],
+        signal: AbortSignal.timeout(300),
+      })) {
+        // 不应产出任何事件
+      }
+    } catch (err) {
+      failure = err;
+    }
+    const elapsed = Date.now() - started;
+
+    expect(elapsed).toBeLessThan(5_000); // 必须有界，不能一直等
+    // 复核 002 实测：Node 的 AbortSignal.timeout() 抛 TimeoutError，曾被误判为 network_error
+    expect(failure).toMatchObject({ code: 'timeout' });
+  });
+
+  it('用户在「等待响应头」阶段主动取消 → done(aborted)（取消是正常路径）', async () => {
+    const mock = await startServer(() => {
+      // 不响应，等用户取消
+    });
+    servers.push(mock);
+
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 100);
+
+    const events = await collect(
+      streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [], signal: ac.signal }),
+    );
+    expect(events).toEqual([{ type: 'done', reason: 'aborted' }]);
+  });
+
   it('请求体包含必要字段且 stream=true', async () => {
     let seenBody = '';
     let seenAuth = '';

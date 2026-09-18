@@ -72,6 +72,9 @@ export async function* streamChat(
       yield { type: 'done', reason: 'aborted' };
       return;
     }
+    if (isTimeout(err)) {
+      throw makeError('timeout', '上游在超时时间内没有响应（可在设置中调大超时）');
+    }
     throw makeError('network_error', `连接失败：${errText(err)}`);
   }
 
@@ -130,6 +133,9 @@ export async function* streamChat(
       yield { type: 'done', reason: 'aborted' };
       return;
     }
+    if (isTimeout(err)) {
+      throw makeError('timeout', '上游在超时时间内没有响应（可在设置中调大超时）');
+    }
     if (isProviderError(err)) throw err;
     throw makeError('network_error', `流读取中断：${errText(err)}`);
   } finally {
@@ -186,12 +192,42 @@ function mapPayload(payload: string, onFinish: (r: 'stop' | 'length') => void): 
 }
 
 function isAbort(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    ((err as { name?: string }).name === 'AbortError' ||
-      (err as { code?: string }).code === 'ABORT_ERR')
-  );
+  return nameChain(err).includes('AbortError') || codeChain(err).includes('ABORT_ERR');
+}
+
+/**
+ * 超时判定。
+ *
+ * 复核 002 实测（2026-09-18）：Node 的 `AbortSignal.timeout()` 抛出的是
+ * **`TimeoutError`**（`code = 23`），并不是 `AbortError`。
+ * 初版 `isAbort` 只认后者，导致「上游长时间无响应」被误报成 `network_error`——
+ * 用户会看到「连接失败」，而真相是「上游超时」。故单独判定，并给出可区分的错误语义。
+ */
+function isTimeout(err: unknown): boolean {
+  return nameChain(err).includes('TimeoutError') || codeChain(err).includes('23');
+}
+
+/** 错误对象及其 cause 链上的 name 集合（undici 有时把真实原因包在 cause 里） */
+function nameChain(err: unknown): string[] {
+  const out: string[] = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur && typeof cur === 'object'; i += 1) {
+    const name = (cur as { name?: unknown }).name;
+    if (typeof name === 'string') out.push(name);
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return out;
+}
+
+function codeChain(err: unknown): string[] {
+  const out: string[] = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur && typeof cur === 'object'; i += 1) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string' || typeof code === 'number') out.push(String(code));
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return out;
 }
 
 function isProviderError(err: unknown): err is ProviderError {
@@ -228,6 +264,7 @@ export async function listModels(
     });
   } catch (err) {
     if (isAbort(err)) throw makeError('network_error', '请求被取消');
+    if (isTimeout(err)) throw makeError('timeout', '上游在超时时间内没有响应');
     throw makeError('network_error', `连接失败：${errText(err)}`);
   }
 
