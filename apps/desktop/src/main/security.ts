@@ -3,6 +3,33 @@ import { shell } from 'electron';
 import { SECURITY_BASELINE } from '@jujia/shared-ipc';
 
 /**
+ * 安全基线的**字面量真值**——断言唯一依据，刻意不复用 SECURITY_BASELINE。
+ *
+ * 复核发现（2026-09-18 第二遍）：初版 `assertSecureWebPreferences` 既用 SECURITY_BASELINE
+ * 生成配置、又用同一个常量做断言，属**自引用校验**：一旦常量被误改为不安全值，
+ * 两层会同时失效而不报错。此处改为独立字面量，并对常量本身做一致性断言。
+ */
+const REQUIRED_SECURE = {
+  contextIsolation: true,
+  sandbox: true,
+  nodeIntegration: false,
+  webSecurity: true,
+  webviewTag: false,
+} as const;
+
+/** 常量必须与字面量真值一致；否则说明基线被改坏，直接拒绝启动 */
+export function assertBaselineConstantIntact(): void {
+  for (const [key, expected] of Object.entries(REQUIRED_SECURE)) {
+    const actual = (SECURITY_BASELINE as Record<string, unknown>)[key];
+    if (actual !== expected) {
+      throw new Error(
+        `[security] SECURITY_BASELINE.${key} 被改为 ${String(actual)}，应为 ${String(expected)}`,
+      );
+    }
+  }
+}
+
+/**
  * 唯一的安全 webPreferences 模板。
  * 所有 BrowserWindow / WebContentsView 必须使用它，禁止各自手写。
  *
@@ -15,17 +42,19 @@ export function secureWebPreferences(preload: string): WebPreferences {
     sandbox: SECURITY_BASELINE.sandbox,
     nodeIntegration: SECURITY_BASELINE.nodeIntegration,
     webSecurity: SECURITY_BASELINE.webSecurity,
-    webviewTag: false,
+    webviewTag: SECURITY_BASELINE.webviewTag,
     preload,
   };
 }
 
-/** 安全基线自检：任一不符直接抛错，拒绝启动（fail closed）。 */
+/** 安全基线自检：任一不符直接抛错，拒绝启动（fail closed）。断言依据为字面量真值。 */
 export function assertSecureWebPreferences(prefs: WebPreferences): void {
-  if (prefs.contextIsolation !== SECURITY_BASELINE.contextIsolation) {
+  assertBaselineConstantIntact();
+
+  if (prefs.contextIsolation !== REQUIRED_SECURE.contextIsolation) {
     throw new Error('[security] contextIsolation 必须为 true');
   }
-  if (prefs.sandbox !== SECURITY_BASELINE.sandbox) {
+  if (prefs.sandbox !== REQUIRED_SECURE.sandbox) {
     throw new Error('[security] sandbox 必须为 true');
   }
   if (prefs.nodeIntegration === true) {

@@ -1,12 +1,17 @@
 import { join } from 'node:path';
 import { app, BrowserWindow } from 'electron';
 import { registerIpcHandlers } from './ipc';
+import { ensureConfigFile } from './config-store';
+import { getDataRoot } from './paths';
 import {
   applySecurityBaseline,
   assertSecureWebPreferences,
   openExternalIfSafe,
   secureWebPreferences,
 } from './security';
+
+// 固定应用名：让 userData 路径可预期（%APPDATA%\JujiaAgent），避免随包名变化漂移
+app.setName('JujiaAgent');
 
 const isSmoke = process.argv.includes('--smoke');
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
@@ -100,38 +105,65 @@ if (!app.requestSingleInstanceLock()) {
     });
   });
 
-  void app.whenReady().then(() => {
-    registerIpcHandlers();
-    const win = createMainWindow();
+  /**
+   * 冒烟看门狗：必须在任何 await 之前注册。
+   *
+   * 复核发现（2026-09-18 第二遍）：初版把超时定时器放在 `await ensureConfigFile()` 之后，
+   * 一旦启动阶段抛错（未捕获的 Promise rejection），进程既没有窗口也没有定时器，
+   * 会变成永不退出的僵尸进程（实测挂死 7 分钟）。
+   */
+  const smokeWatchdog = isSmoke
+    ? setTimeout(() => {
+        console.error('SMOKE FAIL: 启动流程 20s 内未完成（可能卡在启动阶段）');
+        app.exit(1);
+      }, 20_000)
+    : undefined;
 
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
-    });
+  void app
+    .whenReady()
+    .then(async () => {
+      registerIpcHandlers();
 
-    if (!isSmoke) return;
+      // 首次启动落盘默认配置（原子写），使「写 → 备份 → 损坏恢复」链路在运行时真实可达
+      const snapshot = await ensureConfigFile();
+      console.log(
+        `[main] 数据根目录: ${getDataRoot()} · 配置 v${snapshot.version} (${snapshot.source})` +
+          (snapshot.recovered
+            ? ` · ⚠ 本次启动已从${snapshot.recoveredFrom === 'backup' ? '备份 .bak' : '默认值'}恢复（${snapshot.recoveredAt ?? '未知时间'}）`
+            : ''),
+      );
 
-    const timeout = setTimeout(() => {
-      console.error('SMOKE FAIL: 渲染层 20s 内未完成加载');
+      const win = createMainWindow();
+
+      app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+      });
+
+      if (!isSmoke) return;
+
+      win.webContents.once('did-finish-load', () => {
+        runSmoke(win)
+          .then(({ configVersion, configSource }) => {
+            if (smokeWatchdog) clearTimeout(smokeWatchdog);
+            console.log(
+              'SMOKE OK: 主进程 + 预加载桥 + 渲染层 + IPC 全链路就绪；' +
+                `渲染层无 Node 泄漏；原子配置读取成功（v${configVersion} / ${configSource}）`,
+            );
+            app.exit(0);
+          })
+          .catch((err: unknown) => {
+            if (smokeWatchdog) clearTimeout(smokeWatchdog);
+            console.error('SMOKE FAIL:', err instanceof Error ? err.message : err);
+            app.exit(1);
+          });
+      });
+    })
+    .catch((err: unknown) => {
+      // 启动阶段任何异常都必须可见并 fail fast，绝不留下无窗口的僵尸进程
+      console.error('[main] 启动失败:', err instanceof Error ? err.message : err);
+      if (smokeWatchdog) clearTimeout(smokeWatchdog);
       app.exit(1);
-    }, 20_000);
-
-    win.webContents.once('did-finish-load', () => {
-      runSmoke(win)
-        .then(({ configVersion, configSource }) => {
-          clearTimeout(timeout);
-          console.log(
-            'SMOKE OK: 主进程 + 预加载桥 + 渲染层 + IPC 全链路就绪；' +
-              `渲染层无 Node 泄漏；原子配置读取成功（v${configVersion} / ${configSource}）`,
-          );
-          app.exit(0);
-        })
-        .catch((err: unknown) => {
-          clearTimeout(timeout);
-          console.error('SMOKE FAIL:', err instanceof Error ? err.message : err);
-          app.exit(1);
-        });
     });
-  });
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();

@@ -32,6 +32,7 @@ TEMP_PATTERNS = [
     "*.temp",
     "~*",
     "*.bak",
+    "*.corrupt-*",       # json-store 隔离的损坏文件（保留 30 天可回溯）
     "*.swp",
     ".DS_Store",
     "Thumbs.db",

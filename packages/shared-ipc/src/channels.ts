@@ -15,10 +15,11 @@ export const IPC = {
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
 
-/** 安全基线快照，用于自检「安全开关是否被误改」。 */
+/** 安全基线快照，用于自检「安全开关是否被误改」。字段与 apps/desktop 的 REQUIRED_SECURE 一一对应。 */
 export const SECURITY_BASELINE = {
   contextIsolation: true,
   sandbox: true,
   nodeIntegration: false,
   webSecurity: true,
+  webviewTag: false,
 } as const;

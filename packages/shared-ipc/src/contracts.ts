@@ -37,6 +37,14 @@ export const configSnapshotSchema = z.object({
   version: z.number().int().nonnegative(),
   source: z.enum(['primary', 'backup', 'default']),
   recovered: z.boolean(),
+  /**
+   * 本次会话中发生过的恢复来源（没有则为 null）。
+   *
+   * 为什么需要它：自愈写入完成后，磁盘上已经是健康的 primary，
+   * 单看 `source` 无法再看出「本次启动曾经损坏过」，用户会被静默糊弄过去。
+   */
+  recoveredFrom: z.enum(['backup', 'default']).nullable().default(null),
+  recoveredAt: z.string().nullable().default(null),
 });
 
 export type ConfigSnapshot = z.infer<typeof configSnapshotSchema>;

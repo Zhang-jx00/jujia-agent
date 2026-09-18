@@ -1,7 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { assertSecureWebPreferences, isAllowedNavigation, safeProtocol } from './security';
+import { SECURITY_BASELINE } from '@jujia/shared-ipc';
+import {
+  assertBaselineConstantIntact,
+  assertSecureWebPreferences,
+  isAllowedNavigation,
+  safeProtocol,
+} from './security';
 
 const preload = 'C:/app/out/preload/index.js';
+
+describe('SECURITY_BASELINE 字面量真值守卫', () => {
+  // 复核发现（第二遍）：断言若复用常量本身会形成自引用校验，常量被改坏时不报错。
+  // 此用例把真值写死，任何把常量改成不安全值的改动都会在此失败。
+  it('常量必须与字面量真值完全一致', () => {
+    expect(SECURITY_BASELINE).toEqual({
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      webviewTag: false,
+    });
+    expect(() => assertBaselineConstantIntact()).not.toThrow();
+  });
+});
 
 describe('assertSecureWebPreferences（安全基线 fail-closed）', () => {
   it('默认模板通过自检', () => {

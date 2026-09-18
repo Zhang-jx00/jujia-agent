@@ -94,13 +94,24 @@ export function App(): ReactElement {
 
           <section className="p0-card">
             <h2>配置（原子存储，含损坏自愈）</h2>
+            {state.loaded.config.recovered && (
+              <p className="p0-warn" role="status">
+                ⚠ 本次启动检测到配置不可用，已从
+                {state.loaded.config.recoveredFrom === 'backup' ? '备份 .bak' : '默认值'}
+                自愈写回
+                {state.loaded.config.recoveredAt
+                  ? `（${state.loaded.config.recoveredAt}）`
+                  : ''}
+                。损坏文件已隔离为 <code>*.corrupt-*</code> 保留现场。
+              </p>
+            )}
             <dl className="p0-kv">
               <dt>schema 版本</dt>
               <dd>{state.loaded.config.version}</dd>
               <dt>读取来源</dt>
               <dd className={state.loaded.config.recovered ? 'p0-warn' : 'p0-ok'}>
                 {sourceLabel[state.loaded.config.source]}
-                {state.loaded.config.recovered ? '（已从损坏中恢复）' : ''}
+                {state.loaded.config.recovered ? '（本次启动发生过恢复）' : ''}
               </dd>
               <dt>主题</dt>
               <dd>{state.loaded.config.config.theme}</dd>

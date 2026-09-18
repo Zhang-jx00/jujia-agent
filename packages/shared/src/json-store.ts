@@ -84,8 +84,18 @@ export async function atomicWriteJson(filePath: string, payload: unknown): Promi
     }
 
     if (await exists(target)) {
-      await rename(target, `${target}.bak`);
+      // 复核发现（2026-09-18 第二遍）：若主文件已损坏，把它 rename 成 .bak 会用垃圾
+      // 覆盖掉本来健康的备份，等于亲手毁掉唯一的救援副本。
+      // 因此只在主文件可解析时才转存 .bak；损坏文件改名为 .corrupt-<ts> 留证。
+      if (await isParseableJsonFile(target)) {
+        await rename(target, `${target}.bak`);
+      } else {
+        const quarantine = `${target}.corrupt-${Date.now()}`;
+        await rename(target, quarantine);
+        console.warn(`[json-store] 主文件损坏，已隔离为 ${quarantine}，保留原 .bak 不被覆盖`);
+      }
     }
+
     try {
       await rename(tmp, target);
     } catch (err) {
@@ -93,6 +103,18 @@ export async function atomicWriteJson(filePath: string, payload: unknown): Promi
       throw err;
     }
   });
+}
+
+/** 判断文件是否存在且可被 JSON.parse（用于决定是否值得转存为备份） */
+async function isParseableJsonFile(path: string): Promise<boolean> {
+  try {
+    const raw = await readFile(path, 'utf8');
+    if (raw.trim() === '') return false;
+    JSON.parse(raw);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readCandidate<T>(

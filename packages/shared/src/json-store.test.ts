@@ -61,6 +61,32 @@ describe('atomicWriteJson', () => {
     expect(parsed.version).toBe(1); // 文件始终是完整 JSON
     expect((await readdir(dir)).filter((n) => n.endsWith('.tmp'))).toEqual([]);
   });
+
+  // 复核发现（2026-09-18 第二遍，运行时损坏恢复实验暴露）：
+  // 初版把主文件无条件 rename 成 .bak，若主文件已损坏，就会用垃圾覆盖掉
+  // 本来健康的备份——等于亲手毁掉唯一的救援副本。此用例锁死该行为。
+  it('主文件损坏时写入：不得覆盖健康 .bak，并隔离损坏文件为 .corrupt-*', async () => {
+    await atomicWriteJson(file, { version: 1, data: { theme: 'dark', workspace: null } });
+    await atomicWriteJson(file, { version: 1, data: { theme: 'light', workspace: 'D:/new' } });
+    const healthyBak = await readFile(`${file}.bak`, 'utf8');
+    expect(healthyBak).toContain('"dark"');
+
+    // 模拟断电：主文件被截断
+    await writeFile(file, '{"version":1,"data":{"theme":"lig', 'utf8');
+
+    // 自愈写回（真实场景中由 ensureConfigFile 触发）
+    await atomicWriteJson(file, { version: 1, data: { theme: 'light', workspace: 'D:/new' } });
+
+    // .bak 必须保持健康内容，未被截断垃圾覆盖
+    expect(await readFile(`${file}.bak`, 'utf8')).toBe(healthyBak);
+
+    // 损坏文件被隔离留证
+    const quarantined = (await readdir(dir)).filter((n) => n.includes('.corrupt-'));
+    expect(quarantined).toHaveLength(1);
+
+    // 主文件已恢复正常
+    expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({ version: 1 });
+  });
 });
 
 describe('readJsonSafe 的三级降级', () => {
