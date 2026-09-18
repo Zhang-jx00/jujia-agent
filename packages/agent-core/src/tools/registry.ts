@@ -1,0 +1,62 @@
+import { FILE_TOOLS } from './builtin/file-tools';
+import type { StoredTool } from './types';
+
+/**
+ * 工具注册表。
+ * 纪律：模型只能调用注册表里的工具；未注册的名字一律拒绝，
+ * 不做「模糊匹配」或「猜一个相近的」——那会让路径/权限校验失去意义。
+ */
+export class ToolRegistry {
+  private readonly tools = new Map<string, StoredTool>();
+
+  constructor(defs: ReadonlyArray<StoredTool> = []) {
+    for (const def of defs) this.register(def);
+  }
+
+  register(def: StoredTool): void {
+    if (this.tools.has(def.name)) {
+      throw new Error(`工具名重复注册：${def.name}`);
+    }
+    this.tools.set(def.name, def);
+  }
+
+  get(name: string): StoredTool {
+    const def = this.tools.get(name);
+    if (!def) {
+      throw new Error(`未注册的工具：${name}（可用：${this.names().join(', ') || '无'}）`);
+    }
+    return def;
+  }
+
+  has(name: string): boolean {
+    return this.tools.has(name);
+  }
+
+  names(): string[] {
+    return [...this.tools.keys()].sort();
+  }
+
+  all(): ReadonlyArray<StoredTool> {
+    return [...this.tools.values()];
+  }
+
+  /** 转换为 OpenAI `tools` 参数（只暴露 name/description/parameters，不泄露内部实现） */
+  toOpenAiTools(): Array<{
+    type: 'function';
+    function: { name: string; description: string; parameters: unknown };
+  }> {
+    return this.all().map((def) => ({
+      type: 'function' as const,
+      function: {
+        name: def.name,
+        description: def.description,
+        parameters: def.parameters,
+      },
+    }));
+  }
+}
+
+/** 默认注册表：内置文件工具（后续阶段在此追加 run_command / git 等） */
+export function createDefaultRegistry(): ToolRegistry {
+  return new ToolRegistry(FILE_TOOLS);
+}

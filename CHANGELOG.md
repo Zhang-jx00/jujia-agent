@@ -6,6 +6,62 @@
 
 ---
 
+## [v0.3.0-w3] — 2026-09-18 22:41
+
+**阶段**：P1 · W3「工作区选择 + 文件工具（绝对路径 + sandbox 校验 + 写门禁）」（`docs/PLAN.md` §6 P1 第 3 行）
+**范围**：路径沙箱 + 内置文件工具 + 权限门 + 工作区选择；不含 Agent Loop（W4）与完整权限状态机（W5）。
+
+**改动内容**
+
+*1) `packages/agent-core/src/tools/`（新增，可单测、无 Electron 依赖）*
+- `path-guard.ts`：**路径沙箱（本项目安全核心）**——逐条拒绝 Windows 特有绕过手法
+  （设备路径、UNC、备用数据流 ADS、尾随点/空格、保留设备名、空字符），
+  越界判定用 `path.relative` 而非字符串前缀；再用 **realpath 校验**拦截符号链接/junction 逃逸
+- `builtin/file-tools.ts`：`read_file` / `write_file` / `list_dir`；读取超限**如实标注截断**，
+  写入有大小上限；所有路径先过 guard
+- `executor.ts`：**权限门唯一入口**——`read` 自动放行，`write`/`exec` 一律询问；
+  拒绝与超时是**两种不同结果**（文案与 `decision` 均区分）；支持「本次会话总是允许」
+- `registry.ts`：工具注册表，未注册名字直接报错（不做模糊匹配）；
+  `toOpenAiTools()` 只导出 `name/description/parameters`，不泄露内部实现
+
+*2) 主进程*
+- `workspace.ts`：工作区存于 `config.json`；**路径只能由系统目录对话框产生**，
+  不接受渲染层传来的任意路径（否则边界形同虚设）；校验存在/是目录/可写
+- `permission-bridge.ts`：把权限询问接到渲染层并带超时；**窗口关闭或渲染进程崩溃时
+  所有挂起请求立刻按超时收尾**，不留无上界的等待
+- `ipc.ts`：新增 `WORKSPACE_GET/PICK/CLEAR`、`PERMISSION_REQUEST/RESOLVE`、`TOOL_RUN`
+
+*3) 渲染层*
+- `features/workspace/WorkspaceCard.tsx`：工作区卡片 + **工具自检台**（一键试跑三个工具、
+  一键填入越界路径）——让 W3 验收标准可人工复核，也是 M2 的验收入口
+- `features/permission/PermissionDialog.tsx`：审批弹窗（允许一次 / 本次会话总是允许 / 拒绝），
+  串行排队避免「批量误批」，按钮不做危险默认焦点
+
+**验证方式（4 项全绿）**
+| 项 | 结果 |
+|----|------|
+| `npm run typecheck` | 通过（4 个 workspace） |
+| `npm run lint` | 0 error / 0 warning |
+| `npm run test` | **101/101**（57 → 101；新增 path-guard 28 例 + 工具执行 16 例） |
+| `npm run smoke` | `SMOKE OK … 工作区工具链路可用（工作区=未选择，list_dir=已拦截）` |
+
+**对抗性用例（安全基线，不允许放宽）**
+- 越界拦截：`..` 多级、绝对路径指向外部、`ws` vs `ws2` **前缀陷阱**、UNC、设备路径、ADS、
+  尾随点/空格、Windows 保留设备名
+- 逃逸防护：**junction 指向工作区外 → 拒绝**；指向内部 → 放行
+- 权限门：**用户拒绝时磁盘必须没被动过**（关键断言）；超时与拒绝文案不同；
+  「总是允许」写入会话白名单后不再询问；参数不合法不打扰用户
+- 过度拦截防护：工作区内含 `..` 但未越界的路径**必须放行**（修复首版误判）
+
+**过程中修掉的 3 个真实缺陷**
+1. `input.trim()` 提前吃掉尾随空格，等于绕过「以空格结尾」检测（防护被自己的规范化绕过）
+2. `..` 片段被「尾随点」规则命中，导致 `sub/../a.txt` 这类**工作区内合法路径被误拒**（过度拦截）
+3. 工作区根目录不存在时 realpath 返回 null 未处理 → 改为直接拒绝（fail closed）
+
+**回退点**：tag `v0.3.0-w3`（上一版 `v0.2.2-review`）
+
+---
+
 ## [v0.2.2-review] — 2026-09-18 22:27
 
 **类型**：复核 002 修复（对象 `v0.2.0-w2`；按用户约定「下次任务前复核两遍」执行）

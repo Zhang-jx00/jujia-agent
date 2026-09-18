@@ -3,6 +3,8 @@ import type { ReactElement } from 'react';
 import type { AppInfo, ConfigSnapshot, ConnectionView } from '@jujia/shared-ipc';
 import { ConnectionsPanel } from './features/connections/ConnectionsPanel';
 import { ChatPanel } from './features/chat/ChatPanel';
+import { WorkspaceCard } from './features/workspace/WorkspaceCard';
+import { PermissionDialog } from './features/permission/PermissionDialog';
 
 interface Loaded {
   info: AppInfo;
@@ -100,6 +102,9 @@ export function App(): ReactElement {
         )}
         {state.phase === 'ready' && tab === 'chat' && <ChatPanel connections={connections} />}
       </main>
+
+      {/* 权限审批弹窗挂在最外层：任何页面触发的工具调用都能被审批 */}
+      <PermissionDialog />
     </div>
   );
 }
@@ -152,6 +157,8 @@ function Overview({ info, config }: { info: AppInfo; config: ConfigSnapshot }): 
           <dd>{config.config.workspace ?? '（未选择）'}</dd>
         </dl>
       </section>
+
+      <WorkspaceCard />
 
       <section className="p0-card">
         <h2>安全基线（任一为否即拒绝启动）</h2>

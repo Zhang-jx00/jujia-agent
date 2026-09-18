@@ -360,3 +360,53 @@ button:disabled {
 .w2-chat-input textarea {
   resize: vertical;
 }
+
+/* ---------------------------- 权限弹窗 ---------------------------- */
+
+.w3-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.w3-dialog {
+  width: min(560px, 92vw);
+  background: var(--bg-container);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.w3-dialog h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.w3-dialog pre,
+.w3-probe pre {
+  background: #101010;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 8px 0 0;
+}
+
+.w3-dialog details summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.w3-probe {
+  margin-top: 12px;
+}

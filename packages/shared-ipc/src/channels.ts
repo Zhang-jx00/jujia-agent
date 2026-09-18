@@ -24,6 +24,18 @@ export const IPC = {
   /** main → renderer：流式事件推送 */
   CHAT_STREAM: 'chat:stream',
 
+  /* ---------------- W3：工作区与权限 ---------------- */
+  /** 工作区：读取当前 / 弹出目录选择 / 清除 */
+  WORKSPACE_GET: 'workspace:get',
+  WORKSPACE_PICK: 'workspace:pick',
+  WORKSPACE_CLEAR: 'workspace:clear',
+  /** main → renderer：请求权限审批（写/执行类工具） */
+  PERMISSION_REQUEST: 'permission:request',
+  /** renderer → main：回填用户的审批结果 */
+  PERMISSION_RESOLVE: 'permission:resolve',
+  /** renderer → main：在工作区内执行一个已注册的工具（经权限门） */
+  TOOL_RUN: 'tool:run',
+
   /** main → renderer：应用状态变化广播（预留） */
   APP_STATE_CHANGED: 'app:state-changed',
 } as const;

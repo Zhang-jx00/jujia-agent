@@ -10,6 +10,15 @@ import {
   openExternalIfSafe,
   secureWebPreferences,
 } from './security';
+import { makeStreamSender, PermissionBridge } from './permission-bridge';
+
+/**
+ * 权限审批桥：把 agent-core 的权限询问接到渲染层弹窗。
+ * 超时与「窗口消失」都必须有确定结局，不能留下无上界的等待。
+ */
+const permissionBridge = new PermissionBridge({
+  send: makeStreamSender(() => mainWindow),
+});
 
 // 固定应用名：让 userData 路径可预期（%APPDATA%\JujiaAgent），避免随包名变化漂移
 app.setName('JujiaAgent');
@@ -65,6 +74,23 @@ function createMainWindow(): BrowserWindow {
   }
 
   return win;
+}
+
+/**
+ * W3 端到端断言：工作区读取 + 工具执行链路在真实运行时可用。
+ * 未选择工作区时必须给出**可读的中文提示**，而不是抛错或静默失败。
+ */
+async function runSmokeWorkspaceProbe(
+  win: BrowserWindow,
+): Promise<{ workspaceRoot: string | null; toolOk: boolean; toolMessage: string }> {
+  const [workspaceRoot, toolOk, toolMessage] = (await win.webContents.executeJavaScript(
+    `(async () => {
+       const ws = await window.jujia.workspaceGet();
+       const tr = await window.jujia.toolRun('list_dir', {});
+       return [ws.root, tr.ok, tr.content.slice(0, 80)];
+     })()`,
+  )) as [string | null, boolean, string];
+  return { workspaceRoot, toolOk, toolMessage };
 }
 
 /** 冒烟检查：渲染层必须「拿得到 IPC 结果」且「碰不到 Node 能力」。 */
@@ -138,7 +164,11 @@ if (!app.requestSingleInstanceLock()) {
   void app
     .whenReady()
     .then(async () => {
-      registerIpcHandlers({ emitStream });
+      registerIpcHandlers({
+        emitStream,
+        permission: permissionBridge,
+        getWindow: () => mainWindow,
+      });
 
       // 首次启动落盘默认配置（原子写），使「写 → 备份 → 损坏恢复」链路在运行时真实可达
       const snapshot = await ensureConfigFile();
@@ -159,11 +189,23 @@ if (!app.requestSingleInstanceLock()) {
 
       win.webContents.once('did-finish-load', () => {
         runSmoke(win)
-          .then(({ configVersion, configSource }) => {
+          .then(async ({ configVersion, configSource }) => {
+            const probe = await runSmokeWorkspaceProbe(win);
             if (smokeWatchdog) clearTimeout(smokeWatchdog);
+
+            // 未选择工作区时，工具必须给出可读提示而不是抛错/静默
+            if (probe.workspaceRoot === null) {
+              if (probe.toolOk || !probe.toolMessage.includes('工作区')) {
+                console.error(`SMOKE FAIL: 未选工作区时工具行为不符预期 → ${probe.toolMessage}`);
+                app.exit(1);
+                return;
+              }
+            }
+
             console.log(
               'SMOKE OK: 主进程 + 预加载桥 + 渲染层 + IPC 全链路就绪；' +
-                `渲染层无 Node 泄漏；原子配置读取成功（v${configVersion} / ${configSource}）`,
+                `渲染层无 Node 泄漏；原子配置读取成功（v${configVersion} / ${configSource}）；` +
+                `工作区工具链路可用（工作区=${probe.workspaceRoot ?? '未选择'}，list_dir=${probe.toolOk ? 'ok' : '已拦截'}）`,
             );
             app.exit(0);
           })

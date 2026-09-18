@@ -7,8 +7,12 @@ import {
   chatSendResultSchema,
   configSnapshotSchema,
   connectionViewSchema,
+  permissionDecisionSchema,
+  permissionRequestSchema,
   streamEventSchema,
   testResultSchema,
+  toolRunResultSchema,
+  workspaceInfoSchema,
   type AppConfig,
   type AppInfo,
   type ChatMessageView,
@@ -16,8 +20,12 @@ import {
   type ConfigSnapshot,
   type ConnectionInput,
   type ConnectionView,
+  type PermissionDecisionPayload,
+  type PermissionRequestPayload,
   type StreamEvent,
   type TestResult,
+  type ToolRunResult,
+  type WorkspaceInfo,
 } from '@jujia/shared-ipc';
 
 /**
@@ -81,6 +89,48 @@ const api = {
     return z
       .array(chatMessageSchema)
       .parse(await ipcRenderer.invoke(IPC.CHAT_HISTORY, sessionId));
+  },
+
+  /* ---------------------- W3：工作区与工具 ---------------------- */
+
+  async workspaceGet(): Promise<WorkspaceInfo> {
+    return workspaceInfoSchema.parse(await ipcRenderer.invoke(IPC.WORKSPACE_GET));
+  },
+
+  /** 弹出系统目录选择框（路径只能由用户选择产生，渲染层无法直接指定） */
+  async workspacePick(): Promise<WorkspaceInfo> {
+    return workspaceInfoSchema.parse(await ipcRenderer.invoke(IPC.WORKSPACE_PICK));
+  },
+
+  async workspaceClear(): Promise<WorkspaceInfo> {
+    return workspaceInfoSchema.parse(await ipcRenderer.invoke(IPC.WORKSPACE_CLEAR));
+  },
+
+  async toolRun(toolName: string, args: Record<string, unknown>): Promise<ToolRunResult> {
+    return toolRunResultSchema.parse(await ipcRenderer.invoke(IPC.TOOL_RUN, { toolName, args }));
+  },
+
+  /** 订阅权限审批请求；返回取消订阅函数 */
+  onPermissionRequest(listener: (req: PermissionRequestPayload) => void): () => void {
+    const handler = (_e: unknown, payload: unknown): void => {
+      const parsed = permissionRequestSchema.safeParse(payload);
+      if (!parsed.success) {
+        console.error('[preload] 丢弃不符合契约的权限请求:', parsed.error.message);
+        return;
+      }
+      listener(parsed.data);
+    };
+    ipcRenderer.on(IPC.PERMISSION_REQUEST, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC.PERMISSION_REQUEST, handler);
+    };
+  },
+
+  async permissionResolve(id: string, decision: PermissionDecisionPayload): Promise<boolean> {
+    const parsed = permissionDecisionSchema.parse(decision);
+    return z.boolean().parse(
+      await ipcRenderer.invoke(IPC.PERMISSION_RESOLVE, { id, decision: parsed }),
+    );
   },
 
   /** 订阅流式事件；返回取消订阅函数 */

@@ -6,7 +6,10 @@ import {
   chatSendResultSchema,
   configSnapshotSchema,
   connectionInputSchema,
+  permissionDecisionSchema,
   testResultSchema,
+  toolRunResultSchema,
+  workspaceInfoSchema,
   type AppConfig,
   type AppInfo,
   type ChatSendResult,
@@ -14,8 +17,12 @@ import {
   type ConnectionView,
   type StreamEvent,
   type TestResult,
+  type ToolRunResult,
 } from '@jujia/shared-ipc';
+import { createDefaultRegistry, runTool, type ToolRegistry } from '@jujia/agent-core';
 import { listModels } from '@jujia/agent-core';
+import { clearWorkspace, getWorkspaceInfo, pickWorkspace } from './workspace';
+import type { PermissionBridge } from './permission-bridge';
 import { getDataRoot } from './paths';
 import { readConfigSnapshot, writeConfig } from './config-store';
 import {
@@ -30,6 +37,12 @@ import { getHistory, sendMessage, stopMessage } from './chat-service';
 export interface IpcDeps {
   /** 把流式事件推给渲染层（由 main/index.ts 注入，便于测试与窗口重建） */
   emitStream: (event: StreamEvent) => void;
+  /** 权限审批桥（W3）：写/执行类工具经它询问用户 */
+  permission: PermissionBridge;
+  /** 取当前主窗口（目录选择对话框需要作为父窗口） */
+  getWindow?: () => Electron.BrowserWindow | undefined;
+  /** 工具注册表（默认内置文件工具；W4+ 会注入更多） */
+  registry?: ToolRegistry;
   /** 测试用：覆盖 fetch */
   fetcher?: typeof fetch;
 }
@@ -151,5 +164,59 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.CHAT_HISTORY, async (_e, sessionId: unknown) => {
     if (typeof sessionId !== 'string' || sessionId === '') return [];
     return getHistory(sessionId);
+  });
+
+  /* ---------------------- W3：工作区与工具执行 ---------------------- */
+
+  ipcMain.handle(IPC.WORKSPACE_GET, async () => workspaceInfoSchema.parse(await getWorkspaceInfo()));
+
+  ipcMain.handle(IPC.WORKSPACE_PICK, async () =>
+    workspaceInfoSchema.parse(await pickWorkspace(deps.getWindow?.())),
+  );
+
+  ipcMain.handle(IPC.WORKSPACE_CLEAR, async () =>
+    workspaceInfoSchema.parse(await clearWorkspace()),
+  );
+
+  ipcMain.handle(IPC.PERMISSION_RESOLVE, async (_e, payload: unknown): Promise<boolean> => {
+    const { id, decision } = (payload ?? {}) as { id?: unknown; decision?: unknown };
+    if (typeof id !== 'string' || id === '') return false;
+    const parsed = permissionDecisionSchema.safeParse(decision);
+    if (!parsed.success) return false;
+    return deps.permission.settle(id, parsed.data);
+  });
+
+  ipcMain.handle(IPC.TOOL_RUN, async (_e, payload: unknown): Promise<ToolRunResult> => {
+    const { toolName, args } = (payload ?? {}) as { toolName?: unknown; args?: unknown };
+    if (typeof toolName !== 'string' || toolName === '') {
+      throw new Error('缺少工具名');
+    }
+
+    const info = await getWorkspaceInfo();
+    if (!info.root || !info.valid) {
+      return toolRunResultSchema.parse({
+        ok: false,
+        toolName,
+        content: `无法执行：${info.message}。请先在「概览」页选择工作区。`,
+        durationMs: 0,
+        asked: false,
+        decision: null,
+        paths: [],
+      });
+    }
+
+    const registry = deps.registry ?? createDefaultRegistry();
+    const tool = registry.get(toolName);
+    const res = await runTool(tool, args ?? {}, { workspaceRoot: info.root }, deps.permission.resolve);
+
+    return toolRunResultSchema.parse({
+      ok: res.outcome.ok,
+      toolName,
+      content: res.outcome.content,
+      durationMs: res.durationMs,
+      asked: res.asked,
+      decision: res.decision ?? null,
+      paths: res.outcome.evidence?.paths ?? [],
+    });
   });
 }

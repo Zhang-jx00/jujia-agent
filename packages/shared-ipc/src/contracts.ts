@@ -134,3 +134,49 @@ export const chatMessageSchema = z.object({
   content: z.string(),
 });
 export type ChatMessageView = z.infer<typeof chatMessageSchema>;
+
+/* ------------------------------------------------------------------ *
+ * W3：工作区与权限审批
+ * ------------------------------------------------------------------ */
+
+export const workspaceInfoSchema = z.object({
+  /** 绝对路径；未选择时为 null */
+  root: z.string().nullable(),
+  /** 是否真实存在且是目录 */
+  valid: z.boolean(),
+  /** 是否可写（决定写工具能否工作） */
+  writable: z.boolean(),
+  /** 人类可读的说明（例如「目录不存在」） */
+  message: z.string(),
+});
+export type WorkspaceInfo = z.infer<typeof workspaceInfoSchema>;
+
+/** 权限审批请求（main → renderer） */
+export const permissionRequestSchema = z.object({
+  id: z.string(),
+  toolName: z.string(),
+  kind: z.enum(['read', 'write', 'exec']),
+  summary: z.string(),
+  args: z.unknown(),
+  paths: z.array(z.string()),
+});
+export type PermissionRequestPayload = z.infer<typeof permissionRequestSchema>;
+
+export const permissionDecisionSchema = z.enum(['allow_once', 'allow_always', 'deny', 'timeout']);
+export type PermissionDecisionPayload = z.infer<typeof permissionDecisionSchema>;
+
+/** 工具活动（供 UI 展示工具卡；W3 先落最小字段） */
+/** 工具执行结果（W3：直接执行形态，供工作区自检与 M2 验收使用） */
+export const toolRunResultSchema = z.object({
+  ok: z.boolean(),
+  toolName: z.string(),
+  /** 回给模型/UI 的文本 */
+  content: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  /** 是否触发了权限询问 */
+  asked: z.boolean(),
+  decision: permissionDecisionSchema.nullable(),
+  /** 涉及的工作区内路径 */
+  paths: z.array(z.string()),
+});
+export type ToolRunResult = z.infer<typeof toolRunResultSchema>;
