@@ -6,6 +6,44 @@
 
 ---
 
+## [v0.1.1-w1] — 2026-09-18 19:28
+
+**阶段**：P1 · W1「原子存储 + 契约打通」（`docs/PLAN.md` §6 P1 第 1 行）
+**范围**：新增 `packages/shared`（原子 JSON 存储）+ 把它接进真实运行链路；不含任何 UI 业务功能。
+
+**改动内容**
+- **新增 `packages/shared`**：`json-store.ts` 实现六条设计约束
+  1. 先写临时文件再 rename（避免半截 JSON）
+  2. `fsync` 后再 rename（避免「rename 成功但内容丢」）
+  3. 覆盖前旧文件转 `.bak`（可回滚上一版）
+  4. 读取三级降级：主文件 → `.bak` → 默认值，并返回 `source` / `recovered` 供 UI 如实提示
+  5. 同路径写入**串行化**（避免并发覆盖，对应 Yan 的配置竞态教训）
+  6. 带 `{version, updatedAt, data}` 信封 + `migrate` 钩子（为 schema 变更预留）
+- **契约扩展** `packages/shared-ipc`：`appConfigSchema`、`configSnapshotSchema`、`IPC.CONFIG_GET` / `CONFIG_SET`
+- **主进程**：新增 `main/config-store.ts`（配置读写封装），`IPC.CONFIG_SET` 只接受已知字段并显式剔除 `undefined`
+- **预加载桥**：新增 `configGet()` / `configSet()`，全部经 zod 校验后才返回渲染层
+- **渲染层**：展示配置 schema 版本 / 读取来源 / 是否从损坏中恢复（`data-config-*` 供冒烟断言）
+- **冒烟强化**：除 Node 泄漏检查外，新增「配置读取链路已打通」断言
+- **静态检查**：`.mjs` 工具脚本补充 Node 全局声明；TS 文件关闭 `no-undef`（官方建议，交给编译器）
+
+**验证方式（4 项全绿）**
+| 项 | 命令 | 结果 |
+|----|------|------|
+| 类型检查 | `npm run typecheck` | 通过（3 个 workspace 全清） |
+| 静态检查 | `npm run lint` | 通过，0 error / 0 warning |
+| 单元测试 | `npm run test` | **19/19**（json-store 9 例 + 安全基线 10 例） |
+| 端到端冒烟 | `npm run smoke` | `SMOKE OK …原子配置读取成功（v1 / default）` |
+
+**关键测试用例（对应真实事故场景）**
+- 「主文件半截损坏（模拟断电）→ 自动回退 `.bak` 并标记 `recovered`」 ✅
+- 「主文件与 `.bak` 均损坏 → 回退默认值且不抛异常」 ✅
+- 「12 路并发写同一文件 → 结果始终是完整 JSON，无残留 `.tmp`」 ✅
+- 「旧版本信封 → 先 `migrate` 再 `validate`，`detectedVersion` 更新为当前版本」 ✅
+
+**回退点**：tag `v0.1.1-w1`（上一版 `v0.1.0-p0`）
+
+---
+
 ## [v0.1.0-p0] — 2026-09-18 19:19
 
 **阶段**：P0 · W0 环境与脚手架（`docs/PLAN.md` §6 P0）

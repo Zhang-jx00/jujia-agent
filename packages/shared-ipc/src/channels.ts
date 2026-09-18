@@ -5,6 +5,10 @@
 export const IPC = {
   /** renderer → main：读取应用与运行时信息（P0 冒烟用） */
   APP_INFO: 'app:info',
+  /** renderer → main：读取应用配置（W1 打通原子存储在真实运行时的读写） */
+  CONFIG_GET: 'config:get',
+  /** renderer → main：改写应用配置 */
+  CONFIG_SET: 'config:set',
   /** main → renderer：应用状态变化广播（预留） */
   APP_STATE_CHANGED: 'app:state-changed',
 } as const;

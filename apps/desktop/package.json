@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@jujia/shared": "*",
     "@jujia/shared-ipc": "*",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"

@@ -1,26 +1,36 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import type { AppInfo } from '@jujia/shared-ipc';
+import type { AppInfo, ConfigSnapshot } from '@jujia/shared-ipc';
+
+interface Loaded {
+  info: AppInfo;
+  config: ConfigSnapshot;
+}
 
 type LoadState =
   | { phase: 'loading' }
-  | { phase: 'ready'; info: AppInfo }
+  | { phase: 'ready'; loaded: Loaded }
   | { phase: 'error'; message: string };
 
+const sourceLabel: Record<ConfigSnapshot['source'], string> = {
+  primary: '主文件',
+  backup: '备份 .bak',
+  default: '默认值',
+};
+
 /**
- * P0 阶段壳页面。
- * 作用：证明「main ↔ preload 桥 ↔ renderer」全链路打通，并可视化安全基线。
- * `data-smoke="ok"` 是 `npm run smoke` 的验收标记，仅在拿到 IPC 结果后才置位。
+ * P0/P1 壳页面。
+ * 作用：证明「main ↔ 预加载桥 ↔ renderer ↔ 原子存储」全链路打通，并可视化安全基线。
+ * `data-smoke="ok"` 仅在 IPC 全部返回且配置读取成功后才置位，供 `npm run smoke` 断言。
  */
 export function App(): ReactElement {
   const [state, setState] = useState<LoadState>({ phase: 'loading' });
 
   useEffect(() => {
     let alive = true;
-    window.jujia
-      .appInfo()
-      .then((info) => {
-        if (alive) setState({ phase: 'ready', info });
+    Promise.all([window.jujia.appInfo(), window.jujia.configGet()])
+      .then(([info, config]) => {
+        if (alive) setState({ phase: 'ready', loaded: { info, config } });
       })
       .catch((err: unknown) => {
         if (alive) {
@@ -35,16 +45,21 @@ export function App(): ReactElement {
   const smokeMarker = state.phase === 'ready' ? 'ok' : state.phase;
 
   return (
-    <main className="p0-shell" data-smoke={smokeMarker}>
+    <main
+      className="p0-shell"
+      data-smoke={smokeMarker}
+      data-config-version={state.phase === 'ready' ? state.loaded.config.version : ''}
+      data-config-source={state.phase === 'ready' ? state.loaded.config.source : ''}
+    >
       <header>
         <h1 className="p0-title">俱佳Agent</h1>
-        <p className="p0-subtitle">P0 · 工程底座与安全壳（开发计划 docs/PLAN.md）</p>
+        <p className="p0-subtitle">P0 底座 + W1 原子存储（开发计划 docs/PLAN.md）</p>
       </header>
 
       {state.phase === 'loading' && (
         <section className="p0-card">
           <h2>状态</h2>
-          <p>正在通过 IPC 读取运行时信息…</p>
+          <p>正在通过 IPC 读取运行时信息与配置…</p>
         </section>
       )}
 
@@ -62,18 +77,35 @@ export function App(): ReactElement {
             <dl className="p0-kv">
               <dt>应用</dt>
               <dd>
-                {state.info.name} v{state.info.version}
+                {state.loaded.info.name} v{state.loaded.info.version}
               </dd>
               <dt>Electron</dt>
-              <dd>{state.info.electron}</dd>
+              <dd>{state.loaded.info.electron}</dd>
               <dt>Chromium</dt>
-              <dd>{state.info.chrome}</dd>
+              <dd>{state.loaded.info.chrome}</dd>
               <dt>Node</dt>
-              <dd>{state.info.node}</dd>
+              <dd>{state.loaded.info.node}</dd>
               <dt>平台</dt>
-              <dd>{state.info.platform}</dd>
+              <dd>{state.loaded.info.platform}</dd>
               <dt>数据目录</dt>
-              <dd>{state.info.dataRoot}</dd>
+              <dd>{state.loaded.info.dataRoot}</dd>
+            </dl>
+          </section>
+
+          <section className="p0-card">
+            <h2>配置（原子存储，含损坏自愈）</h2>
+            <dl className="p0-kv">
+              <dt>schema 版本</dt>
+              <dd>{state.loaded.config.version}</dd>
+              <dt>读取来源</dt>
+              <dd className={state.loaded.config.recovered ? 'p0-warn' : 'p0-ok'}>
+                {sourceLabel[state.loaded.config.source]}
+                {state.loaded.config.recovered ? '（已从损坏中恢复）' : ''}
+              </dd>
+              <dt>主题</dt>
+              <dd>{state.loaded.config.config.theme}</dd>
+              <dt>工作区</dt>
+              <dd>{state.loaded.config.config.workspace ?? '（未选择）'}</dd>
             </dl>
           </section>
 
@@ -81,13 +113,13 @@ export function App(): ReactElement {
             <h2>安全基线（任一为否即拒绝启动）</h2>
             <dl className="p0-kv">
               <dt>contextIsolation</dt>
-              <dd className="p0-ok">{String(state.info.security.contextIsolation)}</dd>
+              <dd className="p0-ok">{String(state.loaded.info.security.contextIsolation)}</dd>
               <dt>sandbox</dt>
-              <dd className="p0-ok">{String(state.info.security.sandbox)}</dd>
+              <dd className="p0-ok">{String(state.loaded.info.security.sandbox)}</dd>
               <dt>nodeIntegration</dt>
-              <dd>{String(state.info.security.nodeIntegration)}</dd>
+              <dd>{String(state.loaded.info.security.nodeIntegration)}</dd>
               <dt>webSecurity</dt>
-              <dd className="p0-ok">{String(state.info.security.webSecurity)}</dd>
+              <dd className="p0-ok">{String(state.loaded.info.security.webSecurity)}</dd>
             </dl>
           </section>
         </>

@@ -10,11 +10,33 @@ export default tseslint.config(
   {
     files: ['**/*.{ts,tsx}'],
     rules: {
+      // TS 编译器对未定义标识符的检查比 no-undef 更准（官方建议在 TS 文件中关闭）
+      'no-undef': 'off',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/consistent-type-imports': 'warn',
       'no-console': 'off',
       // 防 Yan 式巨石文件：单文件逻辑行上限
       'max-lines': ['error', { max: 800, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  {
+    // 构建/工具脚本（纯 Node ESM/CJS）
+    files: ['**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        URL: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        __dirname: 'readonly',
+        Buffer: 'readonly',
+      },
+    },
+    rules: {
+      'no-console': 'off',
     },
   },
 );

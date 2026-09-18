@@ -20,3 +20,23 @@ export const appInfoSchema = z.object({
 });
 
 export type AppInfo = z.infer<typeof appInfoSchema>;
+
+/** 应用配置（Phase 1 先落两个字段，设置页在 W6 扩） */
+export const appConfigSchema = z.object({
+  theme: z.enum(['light', 'dark']),
+  workspace: z.string().nullable(),
+});
+
+export type AppConfig = z.infer<typeof appConfigSchema>;
+
+export const defaultAppConfig = (): AppConfig => ({ theme: 'dark', workspace: null });
+
+/** 配置读取结果：带上「来源」与「是否从损坏中恢复」，供 UI 如实提示用户 */
+export const configSnapshotSchema = z.object({
+  config: appConfigSchema,
+  version: z.number().int().nonnegative(),
+  source: z.enum(['primary', 'backup', 'default']),
+  recovered: z.boolean(),
+});
+
+export type ConfigSnapshot = z.infer<typeof configSnapshotSchema>;

@@ -47,20 +47,29 @@ function createMainWindow(): BrowserWindow {
 }
 
 /** 冒烟检查：渲染层必须「拿得到 IPC 结果」且「碰不到 Node 能力」。 */
-async function runSmoke(win: BrowserWindow): Promise<void> {
+async function runSmoke(win: BrowserWindow): Promise<{ configVersion: string; configSource: string }> {
   // did-finish-load 早于 React 首帧与 IPC 回包，需要轮询等待（实测 2026-09-18）
   const deadline = Date.now() + 8_000;
   let marker = 'missing';
   let nodeLeak = false;
+  let configVersion = '';
+  let configSource = '';
 
   while (Date.now() < deadline) {
-    [marker, nodeLeak] = (await win.webContents.executeJavaScript(
-      `[
-         document.querySelector('[data-smoke]')?.getAttribute('data-smoke') ?? 'missing',
-         typeof window.require !== 'undefined' || typeof window.process !== 'undefined'
-           || typeof window.module !== 'undefined'
-       ]`,
-    )) as [string, boolean];
+    const result = (await win.webContents.executeJavaScript(
+      `(() => {
+         const el = document.querySelector('[data-smoke]');
+         return [
+           el?.getAttribute('data-smoke') ?? 'missing',
+           typeof window.require !== 'undefined' || typeof window.process !== 'undefined'
+             || typeof window.module !== 'undefined',
+           el?.getAttribute('data-config-version') ?? '',
+           el?.getAttribute('data-config-source') ?? '',
+         ];
+       })()`,
+    )) as [string, boolean, string, string];
+
+    [marker, nodeLeak, configVersion, configSource] = result;
 
     if (marker === 'ok' || marker === 'error') break;
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -68,6 +77,9 @@ async function runSmoke(win: BrowserWindow): Promise<void> {
 
   if (marker !== 'ok') throw new Error(`渲染层未就绪或 IPC 失败（marker=${marker}）`);
   if (nodeLeak) throw new Error('检测到 Node 全局对象泄漏到渲染层');
+  if (!configVersion) throw new Error('配置读取链路未打通（data-config-version 为空）');
+
+  return { configVersion, configSource };
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -105,9 +117,12 @@ if (!app.requestSingleInstanceLock()) {
 
     win.webContents.once('did-finish-load', () => {
       runSmoke(win)
-        .then(() => {
+        .then(({ configVersion, configSource }) => {
           clearTimeout(timeout);
-          console.log('SMOKE OK: 主进程 + 预加载桥 + 渲染层 + IPC 全链路就绪，且渲染层无 Node 泄漏');
+          console.log(
+            'SMOKE OK: 主进程 + 预加载桥 + 渲染层 + IPC 全链路就绪；' +
+              `渲染层无 Node 泄漏；原子配置读取成功（v${configVersion} / ${configSource}）`,
+          );
           app.exit(0);
         })
         .catch((err: unknown) => {

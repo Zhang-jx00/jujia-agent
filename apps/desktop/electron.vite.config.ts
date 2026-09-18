@@ -12,7 +12,7 @@ import react from '@vitejs/plugin-react';
  * 但 @jujia/* 是本仓库的 TS 源码包（无 build 产物），必须打包进产物，
  * 否则运行时会出现 ERR_MODULE_NOT_FOUND（2026-09-18 实测）。
  */
-const INTERNAL_PACKAGES = ['@jujia/shared-ipc'];
+const INTERNAL_PACKAGES = ['@jujia/shared', '@jujia/shared-ipc'];
 
 export default defineConfig({
   main: {
