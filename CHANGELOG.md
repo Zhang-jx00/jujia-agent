@@ -6,6 +6,26 @@
 
 ---
 
+## [v0.5.0-w5a] 补充 · 2026-09-18 23:01
+
+**新增文档**：`docs/PRODUCT-GOAL.md`（产品最终目标）——用户要求明确「产品最终形态」以便对照预期。
+
+**本轮联网核实（2026-09-16/17/18 动态，来源见文档 §8）**
+- **DeepSeek V4.1-Flash**（552B MoE，激活 8–16B，原生视觉）据 Terminal-Bench 2.1 在编码与安全基准上
+  超过 GPT-5.6 Sol 与 Kimi K3；**OpenAI GPT-6 Astra**（面向自主计算机使用，Agents' Last Exam SOTA）；
+  Meta Muse Spark 1.3（会主动澄清与**确认关键操作**）；开源 agent 模型 Occamy-1.0（35B/3B 激活）
+- 范式变化：**持久化 agent + 异步执行成为默认 UX**（Claude Code Projects / Cursor Projects）；
+  Google 为 managed agents 引入 **Credentials API（占位符把密钥挡在模型上下文外）** 与 Files API；
+  **MCP 已成事实标准**（Google Home MCP）；Grok Bot 集成 1Password（**每次填充都需批准**）
+- 反面经验：有资料警告**激进压缩对话历史**会损坏隐藏推理与缓存前缀 → 本项目明确不采用
+
+**由此对目标文档做出的取舍**：坚持本地单机路线（隐私优先）、权限判定用**确定性规则**而非模型判断、
+不自造插件协议而直接接入 MCP、密钥不仅不进渲染层还要**不进模型上下文**（待补）。
+
+**验证**：复核 005 第一遍全绿（git 干净 · typecheck · lint · 141/141）
+
+---
+
 ## [v0.5.0-w5a] — 2026-09-18 22:58
 
 **阶段**：P1 · W5（第一部分）「权限队列与分级策略」
