@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readFileTool, writeFileTool } from './builtin/file-tools';
-import { runTool, type PermissionDecision, type PermissionRequest } from './executor';
+import {
+  runTool,
+  type PermissionAnswer,
+  type PermissionDecision,
+  type PermissionRequest,
+} from './executor';
 import { createDefaultRegistry, ToolRegistry } from './registry';
 import { ToolError } from './types';
 
@@ -16,8 +21,8 @@ import { ToolError } from './types';
 let root: string;
 const ctx = (): { workspaceRoot: string } => ({ workspaceRoot: root });
 
-function fixedResolver(decision: PermissionDecision): {
-  resolver: (req: PermissionRequest) => Promise<PermissionDecision>;
+function fixedResolver(decision: PermissionDecision | PermissionAnswer): {
+  resolver: (req: PermissionRequest) => Promise<PermissionDecision | PermissionAnswer>;
   asked: PermissionRequest[];
 } {
   const asked: PermissionRequest[] = [];
@@ -113,6 +118,61 @@ describe('权限门策略', () => {
     );
     expect(second.asked).toHaveLength(0);
     expect(res.outcome.ok).toBe(true);
+  });
+
+  it('edit：允许但改参数 → 用**改后**的参数执行（不是原始参数）', async () => {
+    // 场景：Agent 想写 note.md，用户把路径改成 safe/note.md 再放行
+    const { resolver, asked } = fixedResolver({
+      decision: 'edit',
+      updatedArgs: { path: 'safe/note.md', content: '用户改过的内容' },
+    });
+
+    const res = await runTool(
+      writeFileTool,
+      { path: 'note.md', content: '模型原本想写的内容' },
+      ctx(),
+      resolver,
+    );
+
+    expect(asked).toHaveLength(1);
+    expect(res.decision).toBe('edit');
+    expect(res.outcome.ok).toBe(true);
+    // 改后的路径被写入，原始路径不存在
+    expect(await readFile(join(root, 'safe', 'note.md'), 'utf8')).toBe('用户改过的内容');
+    await expect(stat(join(root, 'note.md'))).rejects.toThrow();
+  });
+
+  it('edit：改后的参数不合法 → 如实报错且不执行', async () => {
+    const { resolver } = fixedResolver({ decision: 'edit', updatedArgs: { path: 123 } });
+
+    const res = await runTool(
+      writeFileTool,
+      { path: 'a.txt', content: 'x' },
+      ctx(),
+      resolver,
+    );
+
+    expect(res.outcome.ok).toBe(false);
+    expect(res.outcome.content).toContain('经用户修改后');
+    await expect(stat(join(root, 'a.txt'))).rejects.toThrow();
+  });
+
+  it('edit：改后的路径仍受沙箱约束（越界照样拒绝且不落盘）', async () => {
+    const { resolver } = fixedResolver({
+      decision: 'edit',
+      updatedArgs: { path: '../escaped.txt', content: 'x' },
+    });
+
+    const res = await runTool(
+      writeFileTool,
+      { path: 'ok.txt', content: 'x' },
+      ctx(),
+      resolver,
+    );
+
+    expect(res.outcome.ok).toBe(false);
+    expect(res.outcome.content).toContain('path_denied');
+    await expect(stat(join(root, '..', 'escaped.txt'))).rejects.toThrow();
   });
 
   it('参数不合法 → 直接失败，不打扰用户', async () => {

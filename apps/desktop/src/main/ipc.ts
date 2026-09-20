@@ -179,11 +179,15 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(IPC.PERMISSION_RESOLVE, async (_e, payload: unknown): Promise<boolean> => {
-    const { id, decision } = (payload ?? {}) as { id?: unknown; decision?: unknown };
+    const { id, decision, updatedArgs } = (payload ?? {}) as {
+      id?: unknown;
+      decision?: unknown;
+      updatedArgs?: unknown;
+    };
     if (typeof id !== 'string' || id === '') return false;
     const parsed = permissionDecisionSchema.safeParse(decision);
     if (!parsed.success) return false;
-    return deps.permission.settle(id, parsed.data);
+    return deps.permission.settle(id, parsed.data, updatedArgs);
   });
 
   ipcMain.handle(IPC.TOOL_RUN, async (_e, payload: unknown): Promise<ToolRunResult> => {

@@ -410,3 +410,11 @@ button:disabled {
 .w3-probe {
   margin-top: 12px;
 }
+
+.w3-args-edit {
+  width: 100%;
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 8px;
+}

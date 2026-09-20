@@ -6,6 +6,47 @@
 
 ---
 
+## [v0.5.2-w5b] — 2026-09-20 13:08
+
+**阶段**：P1 · W5（第二部分）「审批 `edit` 决策」
+**前置**：复核 005 第一遍全绿（git 干净 · typecheck · lint · 141/141）
+**范围**：`edit`（允许但先改参数再执行）贯通全链路 + 审批弹窗 UI。对话页改走 Agent Loop 留待下一步。
+
+**本轮联网核实（2026-09-20，来源见 `knowledge/cards/013`）**
+- **`AGENTS.md` 正成为跨工具通用约定**（Claude Code 已兼容，源自 OpenAI Codex，被称为「面向 Agent 的 README」，
+  项目指令文件正从工具偏好变成**代码库基础设施**）→ 新增待办：读取工作区 `AGENTS.md` 作为项目指令
+- 出现 **Plugin4Shell 零点击 RCE**（影响主流编码 agent）+ **首个因 agent 导致的数据泄露被监管立案**（西班牙 AEPD）
+  → 强印证本项目两条硬约束：样式包/插件**拒绝任意 CSS/JS**；权限**按参数分级 + 敏感路径强制询问**
+- 治理趋势 **default-deny** → W5c 规则表将支持「默认拒绝 + 白名单放行」
+- **阶跃 Step 5 Preview**（600B MoE / 1M 上下文 / 明确面向长程 Agent）印证本项目长任务方向
+
+**改动内容**
+- `executor.ts`：新增 `PermissionAnswer`（`decision` + 可选 `updatedArgs`）；`PermissionResolver`
+  兼容「直接给决策字符串」与「给完整答复」两种返回；`edit` 时用**用户改过的参数重新过一遍工具校验**，
+  校验失败则如实报错且**不执行**
+- 契约：`permissionDecisionSchema` 增加 `edit`；新增 `permissionAnswerSchema`
+- 主进程：`PermissionBridge.settle()` 支持携带 `updatedArgs`；IPC 回填解析 `updatedArgs`
+- 预加载：`permissionResolve(id, decision, updatedArgs?)`
+- 审批弹窗：新增「**允许并修改参数…**」→ 就地编辑 JSON，点「按修改执行」才提交；
+  **JSON 不合法就地报错且不执行任何操作**
+
+**验证方式（4 项全绿）**
+| 项 | 结果 |
+|----|------|
+| `npm run typecheck` | 通过 |
+| `npm run lint` | 0 error / 0 warning |
+| `npm run test` | **144/144**（141 → 144） |
+| `npm run smoke` | `SMOKE OK … 工作区工具链路可用` |
+
+**新增测试（3 例，全部针对"改后参数"的安全语义）**
+- `edit` 用**改后**的参数执行：原路径不存在、改后路径内容正确（证明不是照原参数执行）
+- `edit` 的改后参数不合法 → 如实报错且不落盘
+- `edit` 的改后路径**仍受沙箱约束** → 越界照样 `path_denied` 且不落盘
+
+**回退点**：tag `v0.5.2-w5b`（上一版 `v0.6.0-arch`）
+
+---
+
 ## [v0.6.0-arch] — 2026-09-18 23:12
 
 **类型**：架构级范围扩展（用户要求：轻量类 IDE + 接入自有云主机 + 本地/云端调度 + 高可定制化外观）

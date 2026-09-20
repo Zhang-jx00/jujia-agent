@@ -162,7 +162,14 @@ export const permissionRequestSchema = z.object({
 });
 export type PermissionRequestPayload = z.infer<typeof permissionRequestSchema>;
 
-export const permissionDecisionSchema = z.enum(['allow_once', 'allow_always', 'deny', 'timeout']);
+export const permissionDecisionSchema = z.enum([
+  'allow_once',
+  'allow_always',
+  'deny',
+  'timeout',
+  /** 允许但先改参数（2026 主流框架的四态之一） */
+  'edit',
+]);
 export type PermissionDecisionPayload = z.infer<typeof permissionDecisionSchema>;
 
 /** 工具活动（供 UI 展示工具卡；W3 先落最小字段） */

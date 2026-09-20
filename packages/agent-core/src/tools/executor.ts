@@ -12,7 +12,20 @@ import { ToolError, type StoredTool, type ToolContext, type ToolKind, type ToolO
  *   持久化与更完整的状态机（idle→pending→allow/deny/timeout）属 W5。
  */
 
-export type PermissionDecision = 'allow_once' | 'allow_always' | 'deny' | 'timeout';
+/**
+ * 审批决策。
+ * `edit` = **允许但先修改参数再执行** —— 2026 年主流 Agent 框架已把
+ * approve / edit / reject / respond 视为四态，edit 是一等公民
+ * （例如把 Agent 想写的路径收窄到沙箱内再放行）。见知识卡片 012。
+ */
+export type PermissionDecision = 'allow_once' | 'allow_always' | 'deny' | 'timeout' | 'edit';
+
+/** 审批答复：edit 时须带 updatedArgs */
+export interface PermissionAnswer {
+  decision: PermissionDecision;
+  /** 仅 decision='edit' 时生效：替换后的入参（会重新过一遍工具的参数校验） */
+  updatedArgs?: unknown;
+}
 
 export interface PermissionRequest {
   /** 唯一 id，用于 UI 回填决策 */
@@ -27,7 +40,14 @@ export interface PermissionRequest {
   paths: string[];
 }
 
-export type PermissionResolver = (req: PermissionRequest) => Promise<PermissionDecision>;
+/** 兼容两种返回：直接给决策字符串，或给出带 updatedArgs 的完整答复 */
+export type PermissionResolver = (
+  req: PermissionRequest,
+) => Promise<PermissionDecision | PermissionAnswer>;
+
+function normalizeAnswer(a: PermissionDecision | PermissionAnswer): PermissionAnswer {
+  return typeof a === 'string' ? { decision: a } : a;
+}
 
 export interface RunToolOptions {
   /** 会话内白名单（工具名 → 是否已「总是允许」） */
@@ -82,14 +102,34 @@ export async function runTool(
   if (needsApproval && !alwaysAllowed) {
     asked = true;
     const paths = collectPaths(rawArgs);
-    decision = await resolver({
-      id: newId(),
-      toolName: tool.name,
-      kind: tool.kind,
-      summary: `${tool.name} · ${kindLabel(tool.kind)}`,
-      args: rawArgs,
-      paths,
-    });
+    const answer = normalizeAnswer(
+      await resolver({
+        id: newId(),
+        toolName: tool.name,
+        kind: tool.kind,
+        summary: `${tool.name} · ${kindLabel(tool.kind)}`,
+        args: rawArgs,
+        paths,
+      }),
+    );
+    decision = answer.decision;
+
+    // edit：用用户改过的参数**重新校验**后继续执行（校验失败则如实报错，不执行）
+    if (decision === 'edit') {
+      try {
+        args = tool.parse(answer.updatedArgs);
+      } catch (err) {
+        return {
+          outcome: {
+            ok: false,
+            content: `参数不合法（经用户修改后）：${err instanceof Error ? err.message : String(err)}`,
+          },
+          asked,
+          decision,
+          durationMs: Date.now() - started,
+        };
+      }
+    }
 
     if (decision === 'deny') {
       return {

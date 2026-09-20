@@ -126,10 +126,17 @@ const api = {
     };
   },
 
-  async permissionResolve(id: string, decision: PermissionDecisionPayload): Promise<boolean> {
+  async permissionResolve(
+    id: string,
+    decision: PermissionDecisionPayload,
+    updatedArgs?: unknown,
+  ): Promise<boolean> {
     const parsed = permissionDecisionSchema.parse(decision);
     return z.boolean().parse(
-      await ipcRenderer.invoke(IPC.PERMISSION_RESOLVE, { id, decision: parsed }),
+      await ipcRenderer.invoke(
+        IPC.PERMISSION_RESOLVE,
+        updatedArgs === undefined ? { id, decision: parsed } : { id, decision: parsed, updatedArgs },
+      ),
     );
   },
 

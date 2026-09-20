@@ -1,5 +1,10 @@
 import { IPC, type PermissionDecisionPayload, type StreamEvent } from '@jujia/shared-ipc';
-import type { PermissionDecision, PermissionRequest, PermissionResolver } from '@jujia/agent-core';
+import type {
+  PermissionAnswer,
+  PermissionDecision,
+  PermissionRequest,
+  PermissionResolver,
+} from '@jujia/agent-core';
 
 /**
  * 权限请求桥（W3）：把 agent-core 的 `PermissionResolver` 接到渲染层的审批弹窗。
@@ -21,7 +26,7 @@ export interface PermissionBridgeDeps {
 export class PermissionBridge {
   private readonly pending = new Map<
     string,
-    { resolve: (d: PermissionDecision) => void; timer: NodeJS.Timeout }
+    { resolve: (a: PermissionDecision | PermissionAnswer) => void; timer: NodeJS.Timeout }
   >();
 
   private readonly timeoutMs: number;
@@ -32,7 +37,7 @@ export class PermissionBridge {
 
   /** 提供给 agent-core 的 resolver */
   readonly resolve: PermissionResolver = (req: PermissionRequest) =>
-    new Promise<PermissionDecision>((res) => {
+    new Promise<PermissionDecision | PermissionAnswer>((res) => {
       const sent = this.deps.send(IPC.PERMISSION_REQUEST, req);
       if (!sent) {
         res('timeout');
@@ -46,13 +51,13 @@ export class PermissionBridge {
       this.pending.set(req.id, { resolve: res, timer });
     });
 
-  /** 渲染层回填决策 */
-  settle(id: string, decision: PermissionDecisionPayload): boolean {
+  /** 渲染层回填决策（edit 时带 updatedArgs） */
+  settle(id: string, decision: PermissionDecisionPayload, updatedArgs?: unknown): boolean {
     const entry = this.pending.get(id);
     if (!entry) return false;
     clearTimeout(entry.timer);
     this.pending.delete(id);
-    entry.resolve(decision);
+    entry.resolve(updatedArgs === undefined ? decision : { decision, updatedArgs });
     return true;
   }
 
