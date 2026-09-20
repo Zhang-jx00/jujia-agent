@@ -144,6 +144,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     if (typeof connectionId !== 'string' || connectionId === '') throw new Error('请先选择一个连接');
     if (typeof text !== 'string' || text.trim() === '') throw new Error('消息不能为空');
 
+    // 工作区决定了工具是否可用；未选择时仍可对话，但工具会被路径校验拒绝
+    const ws = await getWorkspaceInfo();
     const result = sendMessage(
       {
         connectionId,
@@ -151,7 +153,12 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         ...(typeof sessionId === 'string' && sessionId !== '' ? { sessionId } : {}),
       },
       deps.emitStream,
-      { fetcher: fetchImpl },
+      {
+        fetcher: fetchImpl,
+        permission: deps.permission.resolve,
+        workspaceRoot: ws.valid ? ws.root : null,
+        ...(deps.registry ? { registry: deps.registry } : {}),
+      },
     );
     return chatSendResultSchema.parse({ ...result, accepted: true });
   });

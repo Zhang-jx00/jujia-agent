@@ -1,20 +1,32 @@
 import { randomUUID } from 'node:crypto';
-import { streamChat, withTimeout, type ChatMessage } from '@jujia/agent-core';
+import {
+  createDefaultRegistry,
+  runAgentTurn,
+  withTimeout,
+  type ChatMessage,
+  type LoopEvent,
+  type PermissionResolver,
+  type ToolRegistry,
+} from '@jujia/agent-core';
 import type { StreamEvent } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
 
-/** W2 的极简系统提示；W3 起由 memory 模块装配（含 blocks 与压缩） */
+/** W2 的极简系统提示；W8 起由记忆模块装配（含 blocks 与压缩） */
 const SYSTEM_PROMPT = '你是俱佳Agent，一个运行在用户 Windows 桌面上的助手。回答简洁、准确，使用中文。';
 
 /**
- * 单轮对话的整体超时（含流式接收）。
+ * 单轮对话的整体超时（含流式接收与工具执行）。
  *
- * 复核 002 发现：初版对话链路**没有任何超时**——上游卡住（接受连接但不响应）时会永久挂起，
- * 用户只能靠「停止」按钮自救。此处补上有界保护；超时会被 agent-core 识别为 `timeout` 错误，
- * 以「上游在超时时间内没有响应」如实提示用户，而不是伪装成网络错误。
- * 待 W6 设置页落地后改为用户可调。
+ * 复核 002 发现：初版对话链路**没有任何超时**——上游卡住时会永久挂起。
+ * 此处保留有界保护；超时被 agent-core 识别为 `timeout` 错误，如实提示而非伪装成网络错误。
  */
 const CHAT_TIMEOUT_MS = 300_000;
+
+/**
+ * 单轮内最多允许的模型往返次数（Agent Loop 的熔断上界）。
+ * 取 8：足够「读文件 → 改 → 跑测试 → 汇报」这类多步任务，又不至于把余额烧光。
+ */
+const MAX_TURNS = 8;
 
 export type StreamEmitter = (event: StreamEvent) => void;
 
@@ -24,6 +36,8 @@ interface Session {
   messages: ChatMessage[];
   controller: AbortController | null;
   running: boolean;
+  /** 会话级「总是允许」白名单（工具名） */
+  alwaysAllow: Set<string>;
 }
 
 const sessions = new Map<string, Session>();
@@ -40,6 +54,7 @@ function buildSession(connectionId: string): Session {
     messages: [{ role: 'system', content: SYSTEM_PROMPT }],
     controller: null,
     running: false,
+    alwaysAllow: new Set<string>(),
   };
   sessions.set(session.id, session);
   return session;
@@ -53,18 +68,31 @@ export function isRunning(sessionId: string): boolean {
   return sessions.get(sessionId)?.running ?? false;
 }
 
+export interface ChatDeps {
+  fetcher?: typeof fetch;
+  /** 权限门（由 main 注入权限桥）——**对话链路不再绕过权限** */
+  permission: PermissionResolver;
+  /** 工作区根目录（未选择时对话仍可用，但工具不可用） */
+  workspaceRoot: string | null;
+  registry?: ToolRegistry;
+}
+
 /**
  * 发起一轮对话。
- * 立即返回 sessionId/messageId，随后通过 emit 持续推送 StreamEvent——
- * 这样渲染层不必等整段回复，也便于「可停止」。
+ *
+ * W5b 起**改走 Agent Loop**（三分支 + maxTurns + 工具串行）：
+ * 模型可以真的调工具，写类工具经权限门弹窗确认后才执行。
+ * 立即返回 sessionId/messageId，随后通过 emit 持续推送 StreamEvent。
  */
 export function sendMessage(
   params: { connectionId: string; text: string; sessionId?: string },
   emit: StreamEmitter,
-  deps: { fetcher?: typeof fetch } = {},
+  deps: ChatDeps,
 ): { sessionId: string; messageId: string } {
   const { connectionId, text } = params;
-  const session = params.sessionId ? sessions.get(params.sessionId) ?? buildSession(connectionId) : buildSession(connectionId);
+  const session = params.sessionId
+    ? (sessions.get(params.sessionId) ?? buildSession(connectionId))
+    : buildSession(connectionId);
 
   if (session.running) {
     throw new Error('该会话正在生成中，请先停止或等待完成');
@@ -78,51 +106,95 @@ export function sendMessage(
 
   // 后台跑，不阻塞 IPC 返回
   void (async () => {
-    let assistantText = '';
     let seq = 0;
-    let failureReason: 'stop' | 'length' | 'aborted' | 'error' | 'tool_calls' = 'stop';
-    let errored = false;
+    let resolved: 'stop' | 'length' | 'aborted' | 'error' | 'tool_calls' = 'stop';
 
     try {
       const { record, apiKey } = await resolveConnection(connectionId);
-      const gen = streamChat(
+
+      if (deps.workspaceRoot === null) {
+        // 没有工作区：仍可对话，但工具一律会因路径校验失败而拒绝。
+        // 这里如实把情况写进上下文，避免模型反复尝试注定失败的工具调用。
+        session.messages.push({
+          role: 'system',
+          content: '当前尚未选择工作区，所有文件类工具都不可用。若用户要求读写文件，请提示其先在「概览」页选择工作区。',
+        });
+      }
+
+      const result = await runAgentTurn(
         {
-          baseUrl: record.baseUrl,
-          apiKey,
-          model: record.model,
+          connection: { baseUrl: record.baseUrl, apiKey, model: record.model },
           messages: session.messages,
-          // 用户中止（controller）与整体超时合并：两者语义不同，交由 provider 层分别识别
+          maxTurns: MAX_TURNS,
           signal: withTimeout(controller.signal, CHAT_TIMEOUT_MS),
+          emit: (ev: LoopEvent) => {
+            if (ev.type === 'text_delta') {
+              emit({
+                type: 'text_delta',
+                sessionId: session.id,
+                messageId,
+                seq: seq++,
+                delta: ev.delta,
+              });
+            } else if (ev.type === 'tool_start') {
+              emit({
+                type: 'tool_start',
+                sessionId: session.id,
+                callId: ev.callId,
+                name: ev.name,
+                argumentsText: ev.argumentsText,
+              });
+            } else if (ev.type === 'tool_end') {
+              emit({
+                type: 'tool_end',
+                sessionId: session.id,
+                callId: ev.callId,
+                name: ev.name,
+                ok: ev.ok,
+                summary: ev.summary,
+                durationMs: ev.durationMs,
+              });
+            }
+            // turn_end 仅供调试，不推给渲染层
+          },
         },
-        deps,
+        {
+          registry: deps.registry ?? createDefaultRegistry(),
+          // 未选工作区时给一个不可能的根目录：工具会在 guard 阶段被拒（fail closed）
+          workspaceRoot: deps.workspaceRoot ?? '__no_workspace__',
+          permission: deps.permission,
+          alwaysAllow: session.alwaysAllow,
+          ...(deps.fetcher ? { fetcher: deps.fetcher } : {}),
+        },
       );
 
-      for await (const ev of gen) {
-        if (ev.type === 'text_delta') {
-          assistantText += ev.delta;
-          emit({
-            type: 'text_delta',
-            sessionId: session.id,
-            messageId,
-            seq: seq++,
-            delta: ev.delta,
-          });
-        } else if (ev.type === 'usage') {
-          emit({
-            type: 'usage',
-            sessionId: session.id,
-            inputTokens: ev.inputTokens,
-            outputTokens: ev.outputTokens,
-          });
-        } else if (ev.type === 'done') {
-          // 对话页当前未启用工具执行（W5 起改为走 Agent Loop）；
-          // 若模型仍请求了工具，如实把 tool_calls 传给渲染层提示用户，而不是假装成正常结束
-          failureReason = ev.reason;
-        }
+      // 用 loop 返回的完整消息序列替换会话历史（含 assistant 的 tool_calls 与 tool 结果）
+      session.messages = result.messages;
+
+      if (result.reason === 'error' && result.error) {
+        resolved = 'error';
+        emit({
+          type: 'error',
+          sessionId: session.id,
+          code: 'loop_error',
+          message: result.error,
+        });
+      } else if (result.reason === 'max_turns') {
+        // 熔断不是静默结束：如实告知用户为何停下
+        resolved = 'error';
+        emit({
+          type: 'error',
+          sessionId: session.id,
+          code: 'max_turns',
+          message: result.error ?? `已达到最大迭代次数（${MAX_TURNS}）`,
+        });
+      } else if (result.reason === 'aborted') {
+        resolved = 'aborted';
+      } else {
+        resolved = result.branch === 'handoff' ? 'stop' : 'stop';
       }
     } catch (err) {
-      errored = true;
-      failureReason = 'error';
+      resolved = 'error';
       emit({
         type: 'error',
         sessionId: session.id,
@@ -132,9 +204,7 @@ export function sendMessage(
     } finally {
       session.running = false;
       session.controller = null;
-      // 只把「模型真正产出过的内容」写回历史；错误轮次不污染上下文
-      if (assistantText) session.messages.push({ role: 'assistant', content: assistantText });
-      emit({ type: 'done', sessionId: session.id, reason: errored ? 'error' : failureReason });
+      emit({ type: 'done', sessionId: session.id, reason: resolved });
     }
   })();
 

@@ -12,6 +12,16 @@ interface Bubble {
   error?: string;
 }
 
+/** 工具调用的一行记录（工具卡 L0 的最简形态；完整卡片属 W6） */
+interface ToolLine {
+  callId: string;
+  name: string;
+  phase: 'running' | 'done';
+  ok?: boolean;
+  summary?: string;
+  durationMs?: number;
+}
+
 interface Props {
   connections: ConnectionView[];
 }
@@ -30,6 +40,7 @@ export function ChatPanel({ connections }: Props): ReactElement {
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
   const [sending, setSending] = useState(false);
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
+  const [toolLines, setToolLines] = useState<ToolLine[]>([]);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -46,6 +57,23 @@ export function ChatPanel({ connections }: Props): ReactElement {
       if (event.type === 'text_delta') {
         setBubbles((prev) =>
           prev.map((b) => (b.id === event.messageId ? { ...b, content: b.content + event.delta } : b)),
+        );
+        return;
+      }
+      if (event.type === 'tool_start') {
+        setToolLines((prev) => [
+          ...prev,
+          { callId: event.callId, name: event.name, phase: 'running' },
+        ]);
+        return;
+      }
+      if (event.type === 'tool_end') {
+        setToolLines((prev) =>
+          prev.map((t) =>
+            t.callId === event.callId
+              ? { ...t, phase: 'done', ok: event.ok, summary: event.summary, durationMs: event.durationMs }
+              : t,
+          ),
         );
         return;
       }
@@ -96,6 +124,7 @@ export function ChatPanel({ connections }: Props): ReactElement {
     setInput('');
     setSending(true);
     setUsage(null);
+    setToolLines([]);
 
     try {
       const res = await window.jujia.chatSend({
@@ -153,7 +182,19 @@ export function ChatPanel({ connections }: Props): ReactElement {
         {bubbles.length === 0 && (
           <p className="p0-subtitle">还没有对话。选好连接，在下面输入第一句。</p>
         )}
-        {bubbles.map((b) => (
+        {toolLines.length > 0 && (
+        <div className="w5-tools">
+          {toolLines.map((t) => (
+            <div key={t.callId} className={t.ok === false ? 'w5-tool w5-tool-bad' : 'w5-tool'}>
+              <span className="w5-tool-icon">{t.phase === 'running' ? '◌' : t.ok ? '✓' : '✗'}</span>
+              <code>{t.name}</code>
+              {t.durationMs !== undefined && <span className="p0-subtitle">{t.durationMs}ms</span>}
+              {t.summary && <span className="p0-subtitle">{t.summary.slice(0, 80)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {bubbles.map((b) => (
           <div key={b.id} className={b.role === 'user' ? 'w2-bubble-user' : 'w2-bubble-agent'}>
             <div className="w2-bubble-role">{b.role === 'user' ? '我' : 'Agent'}</div>
             <div className="w2-bubble-body">

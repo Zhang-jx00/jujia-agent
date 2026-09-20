@@ -102,6 +102,22 @@ export const streamEventSchema = z.discriminatedUnion('type', [
     delta: z.string(),
   }),
   z.object({
+    type: z.literal('tool_start'),
+    sessionId: z.string(),
+    callId: z.string(),
+    name: z.string(),
+    argumentsText: z.string(),
+  }),
+  z.object({
+    type: z.literal('tool_end'),
+    sessionId: z.string(),
+    callId: z.string(),
+    name: z.string(),
+    ok: z.boolean(),
+    summary: z.string(),
+    durationMs: z.number().int().nonnegative(),
+  }),
+  z.object({
     type: z.literal('usage'),
     sessionId: z.string(),
     inputTokens: z.number().int().nonnegative(),
