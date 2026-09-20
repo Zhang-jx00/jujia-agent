@@ -10,3 +10,4 @@ export * from './providers/tool-call-accumulator';
 export * from './loop/agent-loop';
 export * from './permissions/policy';
 export * from './memory/memory';
+export * from './git/git';
