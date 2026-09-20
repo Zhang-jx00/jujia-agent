@@ -1,0 +1,205 @@
+/* ============================================================================
+ * 动效与令牌层（W6）
+ *
+ * 铁律（2026-09-20 联网核实，见 knowledge/cards/014）：
+ *  1. 只动 `transform` 与 `opacity`（合成器线程），**不动** width/height/top/left/
+ *     margin/padding/border/font-size —— 这些触发布局重算，是掉帧主因；
+ *  2. 功能动效**不得超过 1s**；微交互 100–200ms；入场/hover ≤ 300ms（超过会被读成卡顿）；
+ *  3. 入场 ease-out、离场 ease-in、屏内移动 ease-in-out；linear 仅用于持续型；
+ *  4. `will-change` 节制使用（滥用耗显存），只在真正会动的元素上；
+ *  5. 同屏同时动画的元素**不超过 2–3 个**，列表用错峰；
+ *  6. 动画前元素已有最终尺寸，**避免 CLS**；
+ *  7. `prefers-reduced-motion` 必须降级 —— 这是 WCAG 2.1 SC 2.2.2 / 2.3.3 的要求，
+ *     不是可选项（约 10% 用户受过度动效困扰）；
+ *  8. 绝不出现闪烁 >3 次/秒 的效果（可诱发癫痫）。
+ * ========================================================================== */
+
+:root {
+  /* ---------- 颜色 ---------- */
+  --c-bg-layout: #141414;
+  --c-bg-container: #1f1f1f;
+  --c-bg-elevated: #252525;
+  --c-bg-input: #101010;
+  --c-text: #f5f5f5;
+  --c-text-secondary: #a6a6a6;
+  --c-primary: #4c8dff;
+  --c-primary-hover: #6ba0ff;
+  --c-success: #5ec97a;
+  --c-warning: #e0a52e;
+  --c-danger: #ff7875;
+  --c-border: rgba(255, 255, 255, 0.14);
+  --c-border-strong: rgba(255, 255, 255, 0.28);
+  --c-scrim: rgba(0, 0, 0, 0.55);
+
+  /* ---------- 间距 ---------- */
+  --space-xxs: 2px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-xxl: 32px;
+
+  /* ---------- 字号 ---------- */
+  --fs-caption: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-base: 14px;
+  --fs-title: 15px;
+  --fs-heading: 18px;
+
+  /* ---------- 圆角 / 阴影 ---------- */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-popover: 0 6px 20px rgba(0, 0, 0, 0.36);
+  --shadow-dialog: 0 12px 40px rgba(0, 0, 0, 0.5);
+
+  /* ---------- 动效 ---------- */
+  --motion-duration-instant: 100ms;
+  --motion-duration-fast: 160ms;
+  --motion-duration-normal: 240ms;
+  --motion-duration-slow: 320ms;
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --motion-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --motion-stagger-step: 40ms;
+}
+
+/* ============================ 动效工具类 ============================ */
+
+/* 入场：淡入 + 轻微上移（只动 opacity/transform） */
+@keyframes jj-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 弹出：缩放 + 淡入（用于弹窗/气泡） */
+@keyframes jj-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 遮罩淡入 */
+@keyframes jj-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 加载指示：保持线性（持续型动效是 linear 的唯一正当用途） */
+@keyframes jj-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 骨架屏微光：**只动 opacity**，避免 background-position 触发布局/重绘 */
+@keyframes jj-shimmer {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.jj-enter {
+  animation: jj-enter var(--motion-duration-fast) var(--motion-ease-out) both;
+}
+
+.jj-pop {
+  animation: jj-pop var(--motion-duration-normal) var(--motion-ease-out) both;
+}
+
+.jj-fade {
+  animation: jj-fade var(--motion-duration-fast) var(--motion-ease-out) both;
+}
+
+/* 错峰：同屏同时动画元素不超过 2–3 个（只提供 3 级） */
+.jj-stagger-1 {
+  animation-delay: calc(var(--motion-stagger-step) * 1);
+}
+.jj-stagger-2 {
+  animation-delay: calc(var(--motion-stagger-step) * 2);
+}
+.jj-stagger-3 {
+  animation-delay: calc(var(--motion-stagger-step) * 3);
+}
+
+/* 交互反馈：按压缩小（微交互 100ms） */
+.jj-pressable {
+  transition: transform var(--motion-duration-instant) var(--motion-ease-in);
+}
+.jj-pressable:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* 通用过渡：只声明合成属性 */
+.jj-transition {
+  transition:
+    opacity var(--motion-duration-fast) var(--motion-ease-out),
+    transform var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+/* ==================== 无障碍：动效降级（强制） ==================== */
+
+@media (prefers-reduced-motion: reduce) {
+  /* 方案：把时长压到近乎瞬时，而不是简单粗暴地"全删"——
+     有些动效承载状态变化信息（如展开），瞬时切换仍要保留可见结果。 */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* 位移类动效改为纯淡入（避免前庭不适） */
+  .jj-enter,
+  .jj-pop {
+    animation-name: jj-fade;
+  }
+
+  /* 加载指示仍需可见，但不能旋转 → 改为透明度呼吸 */
+  .jj-spin-when-allowed {
+    animation-name: jj-shimmer;
+  }
+}
+
+/* 尊重"减少透明度"偏好：毛玻璃降级为不透明背景 */
+@media (prefers-reduced-transparency: reduce) {
+  .jj-glass {
+    backdrop-filter: none !important;
+    background: var(--c-bg-container) !important;
+  }
+}
+
+/* 强制高对比度模式下加强边框 */
+@media (prefers-contrast: more) {
+  :root {
+    --c-border: rgba(255, 255, 255, 0.4);
+    --c-text-secondary: #c8c8c8;
+  }
+}

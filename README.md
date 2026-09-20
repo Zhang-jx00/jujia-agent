@@ -13,6 +13,7 @@
 | `docs/PRODUCT-GOAL.md` | **产品最终目标**（做完之后长什么样、验收标准、与 2026 主流路线的取舍） |
 | `docs/ARCH-CLOUD-IDE.md` | **架构补充**：轻量 IDE + 本地/云端任务调度 + 高可定制化外观（含三条设计律） |
 | `docs/COVERAGE-MATRIX.md` | **领域覆盖矩阵**：60+ 领域逐项落点 / 验收 / 状态（含 6 项补缺） |
+| `docs/UX-AUDIT.md` | **体验细节排查表**（62 项：动效衔接/加载/响应/反馈/可达性/稳定性） |
 | `docs/PLAN.md` | **开发计划（唯一执行依据，v3）**：目标与范围、选型、架构、模块、阶段任务与验收、风险、设计稿 |
 | `docs/LEARNING-MAP.md` | 108 个知识领域的地图与学习顺序 |
 | `review/EVALUATION.md` | **需求达成度评估**：此前运行各项要求的达成/未达成明细 |
@@ -23,6 +24,7 @@
 | `knowledge/cards/` | 知识卡片：对俱佳Agent 的落地决定 |
 | `apps/desktop/` | Electron 桌面端（`src/main` · `src/preload` · `src/renderer`） |
 | `packages/shared/` | 通用基础设施：原子 JSON 存储 `json-store`（tmp+fsync+rename+`.bak`+version 信封+损坏自愈） |
+| `packages/ui-tokens/` | 设计令牌：颜色/间距/字号/圆角/阴影/**动效**（渲染层不得硬编码） |
 | `packages/agent-core/` | Agent 运行时核心：模型 provider、SSE 流式协议解析、**工具层（路径沙箱 + 权限门）**（无 Electron 依赖，可单测） |
 | `packages/shared-ipc/` | IPC 通道常量与载荷契约（zod，全进程共用） |
 | `scripts/` | `cleanup.py` 等工具：清理、覆盖度统计、矩阵生成、链接校验 |

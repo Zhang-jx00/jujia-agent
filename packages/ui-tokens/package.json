@@ -1,0 +1,15 @@
+{
+  "name": "@jujia/ui-tokens",
+  "version": "0.0.1",
+  "private": true,
+  "description": "设计令牌：颜色 / 间距 / 字号 / 圆角 / 阴影 / 动效（渲染层不得硬编码）",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

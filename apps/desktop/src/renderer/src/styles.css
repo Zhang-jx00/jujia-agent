@@ -1,15 +1,16 @@
+/* 令牌别名：统一指向 packages/ui-tokens（颜色/时长不得在组件里硬编码） */
 :root {
-  color-scheme: dark light;
-  --bg-layout: #141414;
-  --bg-container: #1f1f1f;
-  --text: #f5f5f5;
-  --text-secondary: #a6a6a6;
-  --primary: #2f6feb;
-  --success: #4ec26a;
-  --warning: #d89614;
-  --danger: #cf222e;
-  --border: rgba(255, 255, 255, 0.14);
-  --radius: 8px;
+  color-scheme: dark;
+  --bg-layout: var(--c-bg-layout);
+  --bg-container: var(--c-bg-container);
+  --text: var(--c-text);
+  --text-secondary: var(--c-text-secondary);
+  --primary: var(--c-primary);
+  --success: var(--c-success);
+  --warning: var(--c-warning);
+  --danger: var(--c-danger);
+  --border: var(--c-border);
+  --radius: var(--radius-lg);
 }
 
 * {
@@ -419,31 +420,258 @@ button:disabled {
   margin-top: 8px;
 }
 
-/* ------------------------- 工具调用行（W5b） ------------------------- */
-
 .w5-tools {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 0 2px;
+  gap: var(--space-xs);
+  padding: 0 var(--space-xxs);
 }
 
-.w5-tool {
+/* ============================ 工具卡 L0–L2 ============================ */
+
+.jj-tool {
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--c-bg-elevated) 70%, transparent);
+  border-left: 2px solid var(--c-border-strong);
+  overflow: hidden;
+}
+
+.jj-tool-running {
+  border-left-color: var(--c-warning);
+}
+.jj-tool-ok {
+  border-left-color: var(--c-success);
+}
+.jj-tool-bad {
+  border-left-color: var(--c-danger);
+}
+
+/* L0：永远一行 */
+.jj-tool-l0 {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  border-left: 2px solid var(--border);
-  padding: 2px 0 2px 8px;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  background: transparent;
+  border: none;
+  color: var(--c-text-secondary);
+  font-size: var(--fs-small);
+  text-align: left;
+  cursor: pointer;
 }
 
-.w5-tool-bad {
-  border-left-color: var(--danger);
-  color: #ff9c9c;
+.jj-tool-l0:hover {
+  color: var(--c-text);
 }
 
-.w5-tool-icon {
-  width: 12px;
+.jj-tool-l0:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: -2px;
+}
+
+.jj-tool-icon {
+  width: 14px;
   text-align: center;
+  flex: 0 0 auto;
+}
+
+/* 加载指示：linear 的唯一正当用途 */
+.jj-tool-icon-spinning {
+  display: inline-block;
+  animation: jj-spin 1.2s var(--motion-ease-linear, linear) infinite;
+}
+
+.jj-tool-name {
+  color: var(--c-text);
+  flex: 0 0 auto;
+}
+
+.jj-tool-kind,
+.jj-tool-meta {
+  color: var(--c-text-secondary);
+  font-size: var(--fs-caption);
+  flex: 0 0 auto;
+}
+
+.jj-tool-summary {
+  color: var(--c-text-secondary);
+  font-size: var(--fs-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.jj-tool-caret {
+  flex: 0 0 auto;
+  color: var(--c-text-secondary);
+}
+
+/* L1：卡片（内容做 opacity/translateY 入场，容器高度瞬时变化——不做高度动画） */
+.jj-tool-l1 {
+  padding: var(--space-sm) var(--space-md) var(--space-md);
+  border-top: 1px solid var(--c-border);
+}
+
+.jj-tool-kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-xs) var(--space-md);
+  margin: 0 0 var(--space-sm);
+}
+
+.jj-tool-kv dt {
+  color: var(--c-text-secondary);
+  font-size: var(--fs-caption);
+}
+
+.jj-tool-kv dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.jj-pre {
+  margin: 0;
+  padding: var(--space-sm);
+  background: var(--c-bg-input);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* L2：Drawer（transform 进场，不触发重排） */
+.jj-mask {
+  position: fixed;
+  inset: 0;
+  background: var(--c-scrim);
+  z-index: 90;
+}
+
+.jj-drawer {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-height: 70vh;
+  z-index: 91;
+  background: var(--c-bg-container);
+  border-top: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-dialog);
+  display: flex;
+  flex-direction: column;
+}
+
+.jj-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.jj-drawer-body {
+  padding: var(--space-md) var(--space-lg) var(--space-xl);
+  overflow: auto;
+}
+
+.jj-drawer-body h4 {
+  margin: var(--space-md) 0 var(--space-xs);
+  font-size: var(--fs-small);
+  color: var(--c-text-secondary);
+  font-weight: 500;
+}
+
+.jj-muted {
+  color: var(--c-text-secondary);
+  font-size: var(--fs-small);
+}
+
+.jj-ok {
+  color: var(--c-success);
+}
+.jj-danger {
+  color: var(--c-danger);
+}
+
+/* ==================== 四态：空 / 加载 / 错误 / 成功 ==================== */
+
+.jj-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-xl);
+  text-align: center;
+  color: var(--c-text-secondary);
+}
+
+.jj-state-icon {
+  font-size: 20px;
+  opacity: 0.8;
+}
+
+/* 骨架屏：只动 opacity（不动 background-position） */
+.jj-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+}
+
+.jj-skeleton-line {
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--c-border-strong);
+  animation: jj-shimmer 1.4s var(--motion-ease-in-out) infinite;
+}
+
+.jj-skeleton-line:nth-child(2) {
+  width: 80%;
+}
+.jj-skeleton-line:nth-child(3) {
+  width: 60%;
+}
+
+/* 按钮：统一交互反馈（按压 + 禁用态可见） */
+.jj-btn {
+  border-radius: var(--radius-md);
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  border: 1px solid var(--c-border);
+  background: transparent;
+  color: var(--c-text);
+}
+
+.jj-btn:hover:not(:disabled) {
+  border-color: var(--c-border-strong);
+  background: color-mix(in srgb, var(--c-text) 6%, transparent);
+}
+
+.jj-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.jj-btn-quiet {
+  color: var(--c-text-secondary);
+}
+
+.jj-btn:focus-visible,
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 1px;
 }

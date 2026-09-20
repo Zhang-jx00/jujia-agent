@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ConnectionView, StreamEvent } from '@jujia/shared-ipc';
+import { ToolCard } from './ToolCard';
 
 interface Bubble {
   id: string;
@@ -12,7 +13,7 @@ interface Bubble {
   error?: string;
 }
 
-/** 工具调用的一行记录（工具卡 L0 的最简形态；完整卡片属 W6） */
+/** 工具卡数据（L0–L2 三级信息密度，见 ToolCard.tsx） */
 interface ToolLine {
   callId: string;
   name: string;
@@ -20,6 +21,7 @@ interface ToolLine {
   ok?: boolean;
   summary?: string;
   durationMs?: number;
+  argumentsText?: string;
 }
 
 interface Props {
@@ -41,6 +43,7 @@ export function ChatPanel({ connections }: Props): ReactElement {
   const [sending, setSending] = useState(false);
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
   const [toolLines, setToolLines] = useState<ToolLine[]>([]);
+  const [lastError, setLastError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -63,7 +66,12 @@ export function ChatPanel({ connections }: Props): ReactElement {
       if (event.type === 'tool_start') {
         setToolLines((prev) => [
           ...prev,
-          { callId: event.callId, name: event.name, phase: 'running' },
+          {
+            callId: event.callId,
+            name: event.name,
+            phase: 'running',
+            argumentsText: event.argumentsText,
+          },
         ]);
         return;
       }
@@ -82,6 +90,7 @@ export function ChatPanel({ connections }: Props): ReactElement {
         return;
       }
       if (event.type === 'error') {
+        setLastError(event.message);
         setBubbles((prev) =>
           prev.map((b) => (b.streaming ? { ...b, streaming: false, error: event.message } : b)),
         );
@@ -110,10 +119,45 @@ export function ChatPanel({ connections }: Props): ReactElement {
     return unsubscribe;
   }, []);
 
+  /**
+   * 自动滚动：两处细节优化
+   * 1. 用 requestAnimationFrame 合并——流式期间气泡每帧都可能更新，
+   *    直接同步设置 scrollTop 会在每帧触发布局读取，属于典型的布局抖动；
+   * 2. **用户主动上滚后不再抢滚动条**（这是最容易被忽略的体验问题：
+   *    用户想回看上文，却被流式输出不断拽回底部）。
+   */
+  const stickToBottomRef = useRef(true);
+
   useEffect(() => {
     const el = scrollerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [bubbles]);
+    if (!el) return;
+    const onScroll = (): void => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = distance < 48;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!stickToBottomRef.current) return;
+    const el = scrollerRef.current;
+    if (!el) return;
+    const raf = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [bubbles, toolLines]);
+
+  /** 四态判定：空 / 加载 / 错误 / 成功 */
+  const viewState: 'empty' | 'loading' | 'error' | 'ready' =
+    bubbles.length === 0 && sending
+      ? 'loading'
+      : bubbles.length === 0 && lastError !== null
+        ? 'error'
+        : bubbles.length === 0
+          ? 'empty'
+          : 'ready';
 
   async function send(): Promise<void> {
     const text = input.trim();
@@ -139,15 +183,16 @@ export function ChatPanel({ connections }: Props): ReactElement {
       ]);
     } catch (err) {
       setSending(false);
-      setBubbles((prev) => [
-        ...prev,
-        {
-          id: `e-${Date.now()}`,
-          role: 'assistant',
-          content: '',
-          error: err instanceof Error ? err.message : String(err),
-        },
-      ]);
+      const message = err instanceof Error ? err.message : String(err);
+      // 发送失败：空态时用整页错误态（带重试指引），非空态时贴在气泡上
+      setLastError(message);
+      setBubbles((prev) => {
+        if (prev.length === 0) return prev;
+        return [
+          ...prev,
+          { id: `e-${Date.now()}`, role: 'assistant', content: '', error: message },
+        ];
+      });
     }
   }
 
@@ -179,18 +224,38 @@ export function ChatPanel({ connections }: Props): ReactElement {
       </div>
 
       <div className="w2-chat-scroll" ref={scrollerRef}>
-        {bubbles.length === 0 && (
-          <p className="p0-subtitle">还没有对话。选好连接，在下面输入第一句。</p>
+        {viewState === 'empty' && (
+          <div className="jj-state jj-enter">
+            <span className="jj-state-icon" aria-hidden="true">
+              ✎
+            </span>
+            <p>还没有对话。选好连接，在下面输入第一句。</p>
+            <p className="p0-subtitle">提示：Agent 在改动文件前会弹出确认，你可以拒绝或改参数。</p>
+          </div>
+        )}
+        {viewState === 'loading' && (
+          <div className="jj-skeleton" aria-live="polite" aria-busy="true">
+            <span className="p0-subtitle">正在等待模型响应…</span>
+            <div className="jj-skeleton-line" />
+            <div className="jj-skeleton-line" />
+            <div className="jj-skeleton-line" />
+          </div>
+        )}
+        {viewState === 'error' && (
+          <div className="jj-state jj-enter">
+            <span className="jj-state-icon" aria-hidden="true">
+              ⚠
+            </span>
+            <p className="p0-err">{lastError}</p>
+            <button type="button" className="jj-btn jj-transition jj-pressable" onClick={() => setLastError(null)}>
+              知道了
+            </button>
+          </div>
         )}
         {toolLines.length > 0 && (
         <div className="w5-tools">
           {toolLines.map((t) => (
-            <div key={t.callId} className={t.ok === false ? 'w5-tool w5-tool-bad' : 'w5-tool'}>
-              <span className="w5-tool-icon">{t.phase === 'running' ? '◌' : t.ok ? '✓' : '✗'}</span>
-              <code>{t.name}</code>
-              {t.durationMs !== undefined && <span className="p0-subtitle">{t.durationMs}ms</span>}
-              {t.summary && <span className="p0-subtitle">{t.summary.slice(0, 80)}</span>}
-            </div>
+            <ToolCard key={t.callId} data={t} />
           ))}
         </div>
       )}

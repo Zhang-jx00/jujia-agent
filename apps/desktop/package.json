@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@jujia/ui-tokens": "*",
     "@jujia/agent-core": "*",
     "@jujia/shared": "*",
     "@jujia/shared-ipc": "*",

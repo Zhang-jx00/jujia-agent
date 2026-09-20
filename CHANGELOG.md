@@ -6,6 +6,59 @@
 
 ---
 
+## [v0.6.1-w6] — 2026-09-20 13:30
+
+**阶段**：P1 · W6「设计令牌 + 动效系统 + 工具卡 L0–L2 + 四态」
+**重点**（按用户要求）：动效设计与页面流畅性，并**系统性排查数十项体验细节**。
+
+**本轮联网核实（2026-09-20，沉淀为 `knowledge/cards/014`）**
+- **只动 `transform`/`opacity`**（合成器线程）；动 width/height/top/left 触发布局重算——
+  实测复杂过渡可把单帧绘制从 5ms 推到 30ms，直接冲破 16.7ms 预算
+- 时长：微交互 100–200ms、状态过渡 200–500ms、**功能动效硬上限 1s**；
+  入场 ease-out / 离场 ease-in / linear 仅用于持续型
+- **入场动画不得改变盒模型**（CLS 的隐蔽来源）；`will-change` 要节制
+- **`prefers-reduced-motion` 是强制项**（WCAG 2.1 SC 2.2.2 / 2.3.3；约 10% 用户受影响、18% 开启辅助偏好），
+  且降级策略应是"降低/替换"而非"全删"
+- 闪烁 >3 次/秒是红线；`animation-timeline` 仍未达 Baseline，必须渐进增强
+
+**改动内容**
+1. **新增 `packages/ui-tokens`**：颜色 / 间距 / 字号 / 圆角 / 阴影 / **动效**令牌
+   （`durationInstant/Fast/Normal/Slow` + 四条缓动 + 错峰步长）。
+   **渲染层不再硬编码颜色与时长**——旧 CSS 变量改为指向令牌别名。
+2. **新增 `styles/motion.css`**：
+   - 完整令牌定义 + 动效工具类（`jj-enter` / `jj-pop` / `jj-fade` / `jj-pressable` / `jj-stagger-*`）
+   - **全局 reduced-motion 降级**：时长压到 0.01ms（保留状态变化的可见结果），
+     并把位移类动效改为**纯淡入**（避免前庭不适）
+   - `prefers-reduced-transparency`（毛玻璃退回不透明）、`prefers-contrast: more`（加强边框）
+3. **新增工具卡 `ToolCard.tsx`（L0–L2 三级信息密度）**：
+   L0 永远一行（图标+工具名+类型+耗时+摘要）→ L1 卡片（状态/参数/结果）→ L2 Drawer（完整输出）。
+   **展开不做高度动画**（高度动画会触发布局重算）：内容做 opacity+translateY 入场，容器高度瞬时变化；
+   Drawer 用 `transform` 进场 + Esc 关闭 + 打开时焦点移入。
+4. **对话页四态齐全**：空（含使用提示）/ 加载（骨架屏，只动 opacity）/ 错误（含指引）/ 成功。
+5. **滚动流畅性两处关键优化**：
+   - 自动滚动用 `requestAnimationFrame` 合并（原先每帧同步读 `scrollHeight` = 典型布局抖动）；
+   - **用户上滚后停止自动滚动**（距底 >48px）——避免"想回看上文却被流式输出拽回底部"。
+6. **交互反馈与可达性**：按钮统一 hover/active/禁用态；全局 `:focus-visible` 描边；
+   弹窗 `role=dialog`/`aria-modal`；工具卡 `aria-expanded`；骨架区 `aria-live`。
+7. **新增 `docs/UX-AUDIT.md`**：**62 项体验细节排查表**（动效衔接 12 · 加载 6 · 响应 9 · 反馈 8 ·
+   可访问性 10 · 稳定性 10 …），逐项标注 已修/部分/待后续，**不假称完成**。
+
+**验证方式**
+| 项 | 结果 |
+|----|------|
+| `npm run typecheck` | 通过 |
+| `npm run lint` | 0 error / 0 warning |
+| `npm run test` | **149/149** |
+| `npm run build` | 成功（renderer CSS 5.82KB → **18.04KB**，含完整令牌与动效） |
+| `npm run smoke` | `SMOKE OK … 工作区工具链路可用` |
+
+**明确的取舍（不做假承诺）**：工具卡展开优先流畅度、牺牲一点"丝滑感"；
+虚拟列表 / 启动性能预算（M18）/ 读屏人工复核留待 W7 与后续阶段。
+
+**回退点**：tag `v0.6.1-w6`（上一版 `v0.5.4-review`）
+
+---
+
 ## [v0.5.4-review] — 2026-09-20 13:19
 
 **类型**：复核 005（对象 W5a 权限分级 / W5b edit 决策 / 对话页走 Loop）
