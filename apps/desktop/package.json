@@ -1,8 +1,8 @@
 {
   "name": "@jujia/desktop",
-  "version": "0.0.1",
+  "version": "0.9.0",
   "private": true,
-  "description": "俱佳Agent 桌面端（Electron 壳 + 渲染层）",
+  "description": "俱佳Agent：本地优先的 Windows 个人 Agent（副作用动作需确认，数据不出本机）",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -10,13 +10,15 @@
     "preview": "electron-vite preview",
     "perf": "electron-vite build && node scripts/run-electron.mjs --perf",
     "smoke": "electron-vite build && node scripts/run-electron.mjs --smoke",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "dist": "electron-vite build && electron-builder --win --publish never",
+    "dist:dir": "electron-vite build && electron-builder --win --dir"
   },
   "dependencies": {
-    "@jujia/ui-tokens": "*",
     "@jujia/agent-core": "*",
     "@jujia/shared": "*",
     "@jujia/shared-ipc": "*",
+    "@jujia/ui-tokens": "*",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
@@ -25,8 +27,61 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "electron": "^44.4.2",
+    "electron": "44.4.2",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "vite": "^7.3.6"
+  },
+  "build": {
+    "appId": "com.jujia.agent",
+    "productName": "JujiaAgent",
+    "copyright": "Copyright © 2026 俱佳Agent",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "**/node_modules/node-pty/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "俱佳Agent",
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "uninstallDisplayName": "俱佳Agent ${version}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    },
+    "electronVersion": "44.4.2"
+  },
+  "author": {
+    "name": "Zhang-jx00",
+    "email": "zhangjx00@users.noreply.github.com"
   }
 }

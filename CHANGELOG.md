@@ -6,6 +6,45 @@
 
 ---
 
+## [v0.9.1-pack] — 2026-09-20 21:22
+
+**阶段**：W12「打包与分发」（本次只做"能打包 + 产物可验证"；Release 上传受阻，见下）
+
+**改动内容**
+- 新增 electron-builder 配置（写在 `apps/desktop/package.json` 的 `build` 字段）：
+  `appId` / `productName: JujiaAgent`（**产物名用 ASCII**，避免中文文件名在 NSIS 与下载场景出问题；
+  界面内仍是"俱佳Agent"）/ `nsis`（可选安装目录、桌面与开始菜单快捷方式）/ `portable`
+- **`asarUnpack` 预设 `**/*.node` 与 `node-pty`**：为后续接入原生终端模块留好打包口子
+- 新增脚本：`npm run dist`（构建 + 打包）、`npm run dist:dir`（只出解包目录，便于排查）
+- `.gitignore` 排除 `apps/desktop/release/`（216MB 产物不入库，走 Release 分发）
+
+**产物**
+| 文件 | 体积 |
+|------|------|
+| `JujiaAgent-Setup-0.9.0.exe`（NSIS 安装包） | 108MB |
+| `JujiaAgent-0.9.0-portable.exe`（免安装） | 108MB |
+| `JujiaAgent-Setup-0.9.0.exe.blockmap` | 116KB |
+
+**打包版可运行性验证（打包的意义所在）**
+- `electron-builder` 首次打包报错并给出可执行修复：**electron 版本写成范围 `^44.4.2` 不被接受**
+  → 显式声明 `build.electronVersion = 44.4.2`，并把 devDependencies 里的 electron 也钉成精确版本
+  （同时补上 NSIS 需要的 `author`）
+- 用**打包后的 exe** 跑 `--smoke`：**退出码 0** ⇒ 打包版能启动、IPC 全链路就绪、渲染层无 Node 泄漏
+- ⚠️ **过程中的一个坑（已记入项目记忆）**：本机环境变量 `ELECTRON_RUN_AS_NODE=1`
+  **对打包后的 exe 同样生效**，会让它退化成纯 Node（表现为报 `bad option: --smoke`、退出码 9）。
+  测试打包产物必须 `env -u ELECTRON_RUN_AS_NODE`。
+- 已知缺口：**未设置应用图标**（打包日志提示使用默认 Electron 图标），待补
+
+**未完成 / 受阻**
+- **Release 上传受阻**：该 PAT 是 **fine-grained token**，实测权限边界为
+  `GET /repos/{r}` 200 · `GET /tags` 200 · 而 `GET /commits/main` **403** · `GET /releases` **403** · `POST /releases` **403**。
+  即**连读 Release 都不允许**，需要在 token 上补 `Contents: Read and write`（或改用 classic PAT 的 `repo` scope）。
+  产物与 Release 说明已备好，权限补齐后一条命令即可发布。
+
+**回退点**：tag `v0.9.1-pack`（上一版 `v0.9.0-w9a`）
+
+---
+
 ## [v0.9.0-w9a] — 2026-09-20 20:58
 
 **阶段**：P1 · W9a「git 队列与 diff 审阅」（W9 的前一半，**零原生依赖**）
