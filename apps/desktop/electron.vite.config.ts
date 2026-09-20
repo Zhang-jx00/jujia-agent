@@ -25,6 +25,9 @@ export default defineConfig({
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src'),
+        // 渲染层只能引用「无 node 依赖」的纯逻辑模块。
+        // 直接引 @jujia/shared 根会把依赖 node:path 的存储模块带进浏览器包（实测构建失败）。
+        '@jujia/shared/stream-batcher': resolve('../../packages/shared/src/stream-batcher.ts'),
       },
     },
     plugins: [react()],

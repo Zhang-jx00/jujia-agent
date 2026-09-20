@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ConnectionView, StreamEvent } from '@jujia/shared-ipc';
+import { createDeltaBatcher, windowedSlice } from '@jujia/shared/stream-batcher';
 import { ToolCard } from './ToolCard';
 
 interface Bubble {
@@ -44,9 +45,8 @@ export function ChatPanel({ connections }: Props): ReactElement {
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
   const [toolLines, setToolLines] = useState<ToolLine[]>([]);
   const [lastError, setLastError] = useState<string | null>(null);
-  /** delta 合批缓冲（rAF 每帧只刷一次） */
-  const pendingDeltaRef = useRef<Array<{ messageId: string; delta: string }>>([]);
-  const flushHandleRef = useRef<number | null>(null);
+  /** delta 合批（纯逻辑在 @jujia/shared/stream-batcher，可单测与变异测试） */
+  const batcherRef = useRef<ReturnType<typeof createDeltaBatcher<{ messageId: string; delta: string }>> | null>(null);
   /** 长会话窗口化：默认只渲染最近 N 条，避免上万个 DOM 节点拖垮滚动 */
   const [windowSize, setWindowSize] = useState(120);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -61,26 +61,21 @@ export function ChatPanel({ connections }: Props): ReactElement {
   }, [connections, connectionId]);
 
   useEffect(() => {
+    batcherRef.current = createDeltaBatcher<{ messageId: string; delta: string }>((batch) => {
+      setBubbles((prev) =>
+        prev.map((b) => {
+          let extra = '';
+          for (const item of batch) if (item.messageId === b.id) extra += item.delta;
+          return extra === '' ? b : { ...b, content: b.content + extra };
+        }),
+      );
+    });
+
     const unsubscribe = window.jujia.onStream((event: StreamEvent) => {
       if (event.type === 'text_delta') {
-        // delta 合批：流式期间模型每秒可能推几十次增量，
-        // 每次都 setState 会造成高频重渲染。先入缓冲，再用 rAF 每帧只刷一次。
-        pendingDeltaRef.current.push({ messageId: event.messageId, delta: event.delta });
-        if (flushHandleRef.current === null) {
-          flushHandleRef.current = requestAnimationFrame(() => {
-            flushHandleRef.current = null;
-            const batch = pendingDeltaRef.current;
-            pendingDeltaRef.current = [];
-            if (batch.length === 0) return;
-            setBubbles((prev) =>
-              prev.map((b) => {
-                let extra = '';
-                for (const item of batch) if (item.messageId === b.id) extra += item.delta;
-                return extra === '' ? b : { ...b, content: b.content + extra };
-              }),
-            );
-          });
-        }
+        // delta 合批：流式期间每秒可能推几十次增量，每次都 setState 会造成高频重渲染。
+        // 合批逻辑抽到 @jujia/shared（纯函数 + 可注入调度器），因此「合批被去掉」这类退化能被测出。
+        batcherRef.current?.push({ messageId: event.messageId, delta: event.delta });
         return;
       }
       if (event.type === 'tool_start') {
@@ -168,6 +163,9 @@ export function ChatPanel({ connections }: Props): ReactElement {
     });
     return () => cancelAnimationFrame(raf);
   }, [bubbles, toolLines]);
+
+  /** 长列表窗口化（纯逻辑在 @jujia/shared）：只渲染末尾 N 条，避免上万个 DOM 节点拖垮滚动 */
+  const windowed = windowedSlice(bubbles, windowSize);
 
   /** 四态判定：空 / 加载 / 错误 / 成功 */
   const viewState: 'empty' | 'loading' | 'error' | 'ready' =
@@ -279,16 +277,16 @@ export function ChatPanel({ connections }: Props): ReactElement {
           ))}
         </div>
       )}
-      {bubbles.length > windowSize && (
+      {windowed.hiddenCount > 0 && (
         <button
           type="button"
           className="jj-btn jj-btn-quiet jj-transition"
           onClick={() => setWindowSize((n) => n + 200)}
         >
-          显示更早的 {bubbles.length - windowSize} 条
+          显示更早的 {windowed.hiddenCount} 条
         </button>
       )}
-      {bubbles.slice(-windowSize).map((b) => (
+      {windowed.visible.map((b) => (
           <div key={b.id} className={b.role === 'user' ? 'w2-bubble-user' : 'w2-bubble-agent'}>
             <div className="w2-bubble-role">{b.role === 'user' ? '我' : 'Agent'}</div>
             <div className="w2-bubble-body">
