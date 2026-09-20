@@ -8,6 +8,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "perf": "electron-vite build && node scripts/run-electron.mjs --perf",
     "smoke": "electron-vite build && node scripts/run-electron.mjs --smoke",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

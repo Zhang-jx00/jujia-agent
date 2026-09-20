@@ -20,7 +20,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "clean": "node -e \"console.log('使用 python scripts/cleanup.py --apply 执行项目清理')\""
+    "clean": "node -e \"console.log('使用 python scripts/cleanup.py --apply 执行项目清理')\"",
+    "perf": "npm run perf --workspace @jujia/desktop"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

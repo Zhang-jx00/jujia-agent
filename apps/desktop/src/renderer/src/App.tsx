@@ -1,10 +1,16 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { AppInfo, ConfigSnapshot, ConnectionView } from '@jujia/shared-ipc';
-import { ConnectionsPanel } from './features/connections/ConnectionsPanel';
-import { ChatPanel } from './features/chat/ChatPanel';
 import { WorkspaceCard } from './features/workspace/WorkspaceCard';
 import { PermissionDialog } from './features/permission/PermissionDialog';
+
+// 懒加载：连接页与对话页不在首屏，拆出去可显著减小初始 bundle（懒加载策略见 PERF-BUDGET）
+const ConnectionsPanel = lazy(() =>
+  import('./features/connections/ConnectionsPanel').then((m) => ({ default: m.ConnectionsPanel })),
+);
+const ChatPanel = lazy(() =>
+  import('./features/chat/ChatPanel').then((m) => ({ default: m.ChatPanel })),
+);
 
 interface Loaded {
   info: AppInfo;
@@ -56,6 +62,16 @@ export function App(): ReactElement {
     };
   }, []);
 
+  // 首帧回报（在布局与首次绘制之后触发，供 M18 启动性能实测使用）
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      window.jujia.reportFirstPaint().catch(() => {
+        /* perf 埋点失败不影响功能 */
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   useEffect(() => {
     if (state.phase !== 'ready') return;
     window.jujia
@@ -97,10 +113,20 @@ export function App(): ReactElement {
         {state.phase === 'ready' && tab === 'overview' && (
           <Overview info={state.loaded.info} config={state.loaded.config} />
         )}
-        {state.phase === 'ready' && tab === 'connections' && (
-          <ConnectionsPanel onChanged={setConnections} />
-        )}
-        {state.phase === 'ready' && tab === 'chat' && <ChatPanel connections={connections} />}
+        <Suspense
+          fallback={
+            <div className="jj-skeleton" aria-busy="true">
+              <div className="jj-skeleton-line" />
+              <div className="jj-skeleton-line" />
+              <div className="jj-skeleton-line" />
+            </div>
+          }
+        >
+          {state.phase === 'ready' && tab === 'connections' && (
+            <ConnectionsPanel onChanged={setConnections} />
+          )}
+          {state.phase === 'ready' && tab === 'chat' && <ChatPanel connections={connections} />}
+        </Suspense>
       </main>
 
       {/* 权限审批弹窗挂在最外层：任何页面触发的工具调用都能被审批 */}

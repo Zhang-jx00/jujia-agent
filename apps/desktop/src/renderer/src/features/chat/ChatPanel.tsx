@@ -44,6 +44,11 @@ export function ChatPanel({ connections }: Props): ReactElement {
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
   const [toolLines, setToolLines] = useState<ToolLine[]>([]);
   const [lastError, setLastError] = useState<string | null>(null);
+  /** delta 合批缓冲（rAF 每帧只刷一次） */
+  const pendingDeltaRef = useRef<Array<{ messageId: string; delta: string }>>([]);
+  const flushHandleRef = useRef<number | null>(null);
+  /** 长会话窗口化：默认只渲染最近 N 条，避免上万个 DOM 节点拖垮滚动 */
+  const [windowSize, setWindowSize] = useState(120);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -58,9 +63,24 @@ export function ChatPanel({ connections }: Props): ReactElement {
   useEffect(() => {
     const unsubscribe = window.jujia.onStream((event: StreamEvent) => {
       if (event.type === 'text_delta') {
-        setBubbles((prev) =>
-          prev.map((b) => (b.id === event.messageId ? { ...b, content: b.content + event.delta } : b)),
-        );
+        // delta 合批：流式期间模型每秒可能推几十次增量，
+        // 每次都 setState 会造成高频重渲染。先入缓冲，再用 rAF 每帧只刷一次。
+        pendingDeltaRef.current.push({ messageId: event.messageId, delta: event.delta });
+        if (flushHandleRef.current === null) {
+          flushHandleRef.current = requestAnimationFrame(() => {
+            flushHandleRef.current = null;
+            const batch = pendingDeltaRef.current;
+            pendingDeltaRef.current = [];
+            if (batch.length === 0) return;
+            setBubbles((prev) =>
+              prev.map((b) => {
+                let extra = '';
+                for (const item of batch) if (item.messageId === b.id) extra += item.delta;
+                return extra === '' ? b : { ...b, content: b.content + extra };
+              }),
+            );
+          });
+        }
         return;
       }
       if (event.type === 'tool_start') {
@@ -259,7 +279,16 @@ export function ChatPanel({ connections }: Props): ReactElement {
           ))}
         </div>
       )}
-      {bubbles.map((b) => (
+      {bubbles.length > windowSize && (
+        <button
+          type="button"
+          className="jj-btn jj-btn-quiet jj-transition"
+          onClick={() => setWindowSize((n) => n + 200)}
+        >
+          显示更早的 {bubbles.length - windowSize} 条
+        </button>
+      )}
+      {bubbles.slice(-windowSize).map((b) => (
           <div key={b.id} className={b.role === 'user' ? 'w2-bubble-user' : 'w2-bubble-agent'}>
             <div className="w2-bubble-role">{b.role === 'user' ? '我' : 'Agent'}</div>
             <div className="w2-bubble-body">

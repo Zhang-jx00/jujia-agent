@@ -38,6 +38,9 @@ export const IPC = {
 
   /** main → renderer：应用状态变化广播（预留） */
   APP_STATE_CHANGED: 'app:state-changed',
+
+  /** 渲染层首帧回报（M18 启动性能实测） */
+  PERF_FIRST_PAINT: 'perf:first-paint',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

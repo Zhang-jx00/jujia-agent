@@ -140,6 +140,11 @@ const api = {
     );
   },
 
+  /** 首帧回报（M18）：渲染层挂载完成后调用一次 */
+  async reportFirstPaint(): Promise<boolean> {
+    return z.boolean().parse(await ipcRenderer.invoke(IPC.PERF_FIRST_PAINT));
+  },
+
   /** 订阅流式事件；返回取消订阅函数 */
   onStream(listener: (event: StreamEvent) => void): () => void {
     const handler = (_e: unknown, payload: unknown): void => {

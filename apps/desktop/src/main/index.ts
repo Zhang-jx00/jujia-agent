@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { IPC, type StreamEvent } from '@jujia/shared-ipc';
 import { registerIpcHandlers } from './ipc';
 import { ensureConfigFile } from './config-store';
@@ -24,6 +24,20 @@ const permissionBridge = new PermissionBridge({
 app.setName('JujiaAgent');
 
 const isSmoke = process.argv.includes('--smoke');
+/** 启动性能实测模式（M18）：打印启动时间线后退出，用于建立可回归的性能预算 */
+const isPerf = process.argv.includes('--perf');
+
+/**
+ * 启动时间线（M18）。用真实打点而不是估算：
+ * app 进程起点 → whenReady → 窗口创建 → 渲染层加载完成 → 渲染层首帧（由 renderer 回报）。
+ * 预算：冷启动 < 1500ms、可交互（首帧）< 1000ms。见 docs/PERF-BUDGET.md。
+ */
+const perfStart = Date.now();
+const perfMarks: Array<{ name: string; ms: number }> = [];
+function perfMark(name: string): void {
+  perfMarks.push({ name, ms: Date.now() - perfStart });
+}
+perfMark('main:start');
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
 
 /** 当前主窗口引用：流式事件推送与窗口重建都依赖它 */
@@ -54,6 +68,7 @@ function createMainWindow(): BrowserWindow {
 
   applySecurityBaseline(win, { devServerUrl });
   mainWindow = win;
+  perfMark('main:window-created');
 
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = undefined;
@@ -164,6 +179,23 @@ if (!app.requestSingleInstanceLock()) {
   void app
     .whenReady()
     .then(async () => {
+      // 渲染层首帧回报（仅 perf 模式用到，但保持恒注册以免契约漂移）
+      ipcMain.handle(IPC.PERF_FIRST_PAINT, () => {
+        perfMark('renderer:first-paint');
+        if (isPerf) {
+          const budget = { coldStartMs: 1500, interactiveMs: 1000 };
+          const total = Date.now() - perfStart;
+          const lines = perfMarks.map((m) => `  ${String(m.ms).padStart(6)}ms  ${m.name}`);
+          const firstPaint = perfMarks.find((m) => m.name === 'renderer:first-paint');
+          const ok = total <= budget.coldStartMs && (firstPaint?.ms ?? Infinity) <= budget.interactiveMs;
+          console.log(
+            `PERF ${ok ? 'OK' : 'FAIL'}: 启动时间线（预算 冷启动<${budget.coldStartMs}ms / 可交互<${budget.interactiveMs}ms）\n${lines.join('\n')}\n  合计 ${total}ms · 首帧 ${firstPaint?.ms ?? -1}ms`,
+          );
+          setTimeout(() => app.exit(ok ? 0 : 1), 50);
+        }
+        return true;
+      });
+
       registerIpcHandlers({
         emitStream,
         permission: permissionBridge,
@@ -188,6 +220,7 @@ if (!app.requestSingleInstanceLock()) {
       if (!isSmoke) return;
 
       win.webContents.once('did-finish-load', () => {
+    perfMark('main:did-finish-load');
         runSmoke(win)
           .then(async ({ configVersion, configSource }) => {
             const probe = await runSmokeWorkspaceProbe(win);
@@ -202,6 +235,9 @@ if (!app.requestSingleInstanceLock()) {
               }
             }
 
+            if (process.env['JJ_PERF_TRACE'] === '1') {
+              console.log('启动时间线:', perfMarks.map((m) => `${m.name}=${m.ms}ms`).join(' · '));
+            }
             console.log(
               'SMOKE OK: 主进程 + 预加载桥 + 渲染层 + IPC 全链路就绪；' +
                 `渲染层无 Node 泄漏；原子配置读取成功（v${configVersion} / ${configSource}）；` +
