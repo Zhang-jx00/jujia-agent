@@ -6,6 +6,42 @@
 
 ---
 
+## [v0.8.3-w9sel] — 2026-09-20 14:42
+
+**类型**：W9 终端选型调研（全网信息汇总 + 结论）· **修正上一轮的过早结论**
+
+**修正**：上轮我说「方案 A 预编译包实测失败」——**下结论过早**。
+当时试的 `@homebridge/node-pty-prebuilt-multiarch` 是在 npm 的 **`spawn` 阶段**就报错，
+根本没进入"下载预编译/编译"环节。这更像**沙箱拦截了 npm 派生子进程**，
+而不是"本机缺编译工具链"。**该失败不能证明本机装不上 node-pty。**
+
+**核心事实（决定选型）**：**现代 node-pty 自带预编译二进制**
+- `@lydell/node-pty` 官方说明逐字写明："microsoft/node-pty ships with prebuilt binaries for
+  multiple platforms"、"never calls node-gyp"，支持平台含 **Windows x86_64**
+- `microsoft/node-pty` releases 有"预编译发布链路修复"与"移除 winpty 支持"（新版走 ConPTY）
+- 实战文档明写："**C++ build tools are typically not required — node-pty ships a Windows x64 prebuild**"
+- VS Code 的 issue 里可见其自带 node-pty 的 `prebuilds/win32-x64/{pty.node,winpty.dll,winpty-agent.exe}`
+
+**结论（推荐顺序）**
+1. **官方 `node-pty` + `@electron/rebuild`（首选）** —— 预期不需要 Build Tools
+2. `@lydell/node-pty`（永不调用 node-gyp，包体更小）
+3. `@karinjs/node-pty`（免编译分支；声明不含 Electron 28，我们是 44 → 必须实测）
+4. 装 VS Build Tools（**仅当预编译加载失败**，几 GB，不作常规前置）
+5. `child_process.spawn` 管道兜底（**非真 PTY**，交互式程序异常，必须如实标注）
+
+**必做的工程要点**：`electron-rebuild -f -w node-pty` 解决 ABI 不匹配（最常见翻车点）·
+`asarUnpack` 必须含 `.node` 与 pty 二进制 · 设 `name:'xterm-256color'` + `TERM`/`COLORTERM`
+才有真彩色 · Win10 1809+ 走 ConPTY · **终端属 exec 类高副作用能力，必须挂在现有权限门之后**。
+
+**教训（已写入记忆）**：**沙箱里 npm 的 `spawn` 失败 ≠ 依赖装不上**，不能据此下"环境不支持"的结论。
+
+**产出**：`knowledge/cards/016-electron-terminal-selection.md`（含 8 个来源 URL）
+**下一步**：按结论①推进 W9（终端 + git 队列），或先做 W23 第二部分（外观设置页）。
+
+**回退点**：tag `v0.8.3-w9sel`（上一版 `v0.8.2-w23a`）
+
+---
+
 ## [v0.8.2-w23a] — 2026-09-20 14:34
 
 **类型**：进度盘点 + W23（外观定制）第一部分

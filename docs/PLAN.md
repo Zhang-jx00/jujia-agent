@@ -296,7 +296,7 @@ jujia/
 | W6 | Fluent 组件接入、tokens.css、工具卡 L0–L2、四态 | UI 规范落地 | 颜色零硬编码；每表面四态齐全 |
 | W7 | 虚拟列表（react-window）、delta 合批、懒加载、tracing 报告 | 性能笔记 | 长会话滚动 60fps（DevTools 录制佐证） |
 | W8 | 记忆 MVP：blocks + NOTES.md + 压缩 handoff | `agent-core/memory` | M3 全绿；压缩前后关键事实对照清单 |
-| W9 | xterm+node-pty 终端；git 队列与审阅 diff 懒加载 | 终端/审阅面板 | 终端可交互；diff 打开才加载 |
+| W9 | xterm 终端（**官方 node-pty + @electron/rebuild**，见卡片 016；预编译自带，通常无需 Build Tools；失败则退 @lydell/node-pty）；git 队列与审阅 diff 懒加载 | 终端/审阅面板 | 终端可交互；diff 打开才加载 |
 
 ### P3 · W10–W12 扩展生态与发布
 
