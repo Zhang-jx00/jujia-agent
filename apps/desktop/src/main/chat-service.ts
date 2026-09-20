@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import {
+  assembleSystemPrompt,
   createDefaultRegistry,
+  loadNotes,
+  loadProjectContext,
   runAgentTurn,
   withTimeout,
   type ChatMessage,
@@ -11,8 +14,11 @@ import {
 import type { StreamEvent } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
 
-/** W2 的极简系统提示；W8 起由记忆模块装配（含 blocks 与压缩） */
-const SYSTEM_PROMPT = '你是俱佳Agent，一个运行在用户 Windows 桌面上的助手。回答简洁、准确，使用中文。';
+/**
+ * 基础人格。**注意**：项目指令与长期记忆不写死在这里，而是每次发送时按工作区动态装配
+ * （见 memory 模块），这样换工作区就能换上下文，且用户可随时查看/编辑来源文件。
+ */
+const BASE_PROMPT = '你是俱佳Agent，一个运行在用户 Windows 桌面上的助手。回答简洁、准确，使用中文。';
 
 /**
  * 单轮对话的整体超时（含流式接收与工具执行）。
@@ -51,7 +57,7 @@ function buildSession(connectionId: string): Session {
   const session: Session = {
     id: randomUUID(),
     connectionId,
-    messages: [{ role: 'system', content: SYSTEM_PROMPT }],
+    messages: [{ role: 'system', content: BASE_PROMPT }],
     controller: null,
     running: false,
     alwaysAllow: new Set<string>(),
@@ -111,6 +117,27 @@ export function sendMessage(
 
     try {
       const { record, apiKey } = await resolveConnection(connectionId);
+
+      // W8：按工作区动态装配系统提示（项目指令 → 长期记忆）
+      // 每一层都标注来源，便于用户核查「模型为什么这么说」。
+      if (deps.workspaceRoot !== null) {
+        try {
+          const [project, notes] = await Promise.all([
+            loadProjectContext(deps.workspaceRoot),
+            loadNotes(deps.workspaceRoot),
+          ]);
+          const assembled = assembleSystemPrompt({
+            base: BASE_PROMPT,
+            project: project.text,
+            notes: notes.text,
+          });
+          const first = session.messages[0];
+          if (first && first.role === 'system') first.content = assembled;
+        } catch (err) {
+          // 记忆装配失败不能让对话挂掉：退回基础人格，并留下日志
+          console.warn('[memory] 装配失败，退回基础人格:', err instanceof Error ? err.message : err);
+        }
+      }
 
       if (deps.workspaceRoot === null) {
         // 没有工作区：仍可对话，但工具一律会因路径校验失败而拒绝。

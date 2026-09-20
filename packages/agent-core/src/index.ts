@@ -9,3 +9,4 @@ export * from './tools/builtin/file-tools';
 export * from './providers/tool-call-accumulator';
 export * from './loop/agent-loop';
 export * from './permissions/policy';
+export * from './memory/memory';
