@@ -34,7 +34,19 @@
 
 ## 二、未完成 ⏳
 
-### 2.1 被阻塞（需要决策）
+### 2.1 已完成/已解除阻塞
+
+| 项 | 状态 | 证据 |
+|----|------|------|
+| **W12 打包与分发** | ✅ 安装包/免安装版已生成，**Release 已发布** | https://github.com/Zhang-jx00/jujia-agent/releases/tag/v0.9.0-w9a |
+| W9 终端选型 | ✅ 结论已定（卡片 016：官方 node-pty 自带预编译） | W9b 待装依赖 |
+
+### 2.1b 待你执行（一句命令即可）
+
+```bash
+cd D:/MiMo/ProjectOne/俱佳agent && npm i -w @jujia/desktop node-pty @xterm/xterm @xterm/addon-fit
+```
+
 
 | 项 | 阻塞原因 | 待决策 |
 |----|---------|--------|
