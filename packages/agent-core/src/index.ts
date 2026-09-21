@@ -14,3 +14,4 @@ export * from './git/git';
 export * from './terminal/terminal';
 export * from './mcp/mcp';
 export * from './mcp/client';
+export * from './mcp/consent';
