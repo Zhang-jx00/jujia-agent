@@ -211,6 +211,42 @@ describe('配置（save / views / remove）', () => {
     expect(await service.remove(id)).toBe(false);
     expect(await service.views()).toEqual([]);
   });
+
+  it('更新时**省略 env** = 保持原有环境变量（值不回传界面，强制传会静默清空）', async () => {
+    const ctx = setup();
+    const created = await ctx.service.save({
+      ...SERVER,
+      env: { FOO: 'bar', BAZ: 'qux' },
+    });
+    expect(created.envKeys.sort()).toEqual(['BAZ', 'FOO']);
+
+    // 只改名字，**不带 env**（界面就是这么做的：用户没动那一段）
+    const updated = await ctx.service.save({
+      id: created.id,
+      name: '改了名字',
+      command: SERVER.command,
+      args: SERVER.args,
+    });
+    expect(updated.envKeys.sort()).toEqual(['BAZ', 'FOO']);
+
+    // 显式传空对象才是清空
+    const cleared = await ctx.service.save({
+      id: created.id,
+      name: '改了名字',
+      command: SERVER.command,
+      args: SERVER.args,
+      env: {},
+    });
+    expect(cleared.envKeys).toEqual([]);
+  });
+
+  it('env 的值从不回传到视图（只给键名）', async () => {
+    const ctx = setup();
+    const view = await ctx.service.save({ ...SERVER, env: { SECRET_TOKEN: '绝密' } });
+    expect(view.envKeys).toEqual(['SECRET_TOKEN']);
+    expect(JSON.stringify(view)).not.toContain('绝密');
+    expect(JSON.stringify(await ctx.service.views())).not.toContain('绝密');
+  });
 });
 
 describe('连接（connect）', () => {

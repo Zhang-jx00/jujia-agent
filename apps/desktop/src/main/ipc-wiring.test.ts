@@ -1,0 +1,72 @@
+/**
+ * 接线行为锁（复核 009）。
+ *
+ * 为什么用"扫源码"这种形式：D2 是一个**接线缺陷**，不是函数逻辑缺陷 ——
+ * 它表现为「两个调用点各自 `createDefaultRegistry()`，于是 MCP 批准后的工具注册到 A 表、
+ * 执行时去 B 表里查，永远查不到」。这类缺陷用普通单测抓不到（要起 Electron + 真 IPC），
+ * 但它有一个非常明确的**不变量**：全进程只允许存在一个注册表创建点，
+ * 且这个实例必须同时供给「工具执行」与「对话链路」。
+ *
+ * 这正是"行为锁"的用法：把边界固定成清单，边界一动测试就失败。
+ * 修改 ipc.ts 时若不小心又写了一个创建点，这里会立刻红。
+ */
+
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+const ipcRaw = readFileSync(fileURLToPath(new URL('./ipc.ts', import.meta.url)), 'utf8');
+
+/**
+ * 剥掉注释再做源码扫描。
+ *
+ * **必须剥**：本文件第一版没剥，结果计数把注释里出现的 `createDefaultRegistry()` 也算进去，
+ * 断言在干净基线上直接失败（幸好是"失败"而不是"永真"）。
+ * 这与复核 007 里"注释是否计入条目数"的变异是同一类教训 ——
+ * 凡是"数某段代码出现几次"的断言，都要先说清楚注释算不算。
+ *
+ * 只剥块注释与**整行**行注释：不处理字符串里的 `//`（例如 URL），
+ * 那种情况用正则剥会误伤代码。这里要数的标识符不会出现在字符串里。
+ */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
+const ipcSource = stripComments(ipcRaw);
+
+describe('工具注册表接线（防止各处各建一个）', () => {
+  it('全进程只有一个注册表创建点', () => {
+    const hits = ipcSource.split('createDefaultRegistry()').length - 1;
+    // 允许出现 1 次：`const registry = deps.registry ?? createDefaultRegistry()`
+    expect(hits).toBe(1);
+  });
+
+  it('注释里提到旧写法也不会让上面那条断言失效（即注释已被剥掉）', () => {
+    // 反向锁：确保 stripComments 真的生效 —— 否则上面那条会被注释淹没
+    expect(ipcRaw).toContain('createDefaultRegistry()');
+    expect(ipcRaw.split('createDefaultRegistry()').length - 1).toBeGreaterThan(1);
+    expect(ipcSource.split('createDefaultRegistry()').length - 1).toBe(1);
+  });
+
+  it('唯一实例被声明为共享常量（不是在使用处现场创建）', () => {
+    expect(ipcSource).toContain('const registry: ToolRegistry = deps.registry ?? createDefaultRegistry();');
+  });
+
+  it('工具执行链路用的是共享实例', () => {
+    expect(ipcSource).toContain('const tool = registry.get(toolName);');
+    // 不能再出现第二个局部注册表
+    expect(ipcSource).not.toContain('const registryUsed');
+  });
+
+  it('对话链路也用同一个实例（否则模型看不到 MCP 工具）', () => {
+    expect(ipcSource).toContain('registry,\n      },\n    );');
+  });
+
+  it('MCP 服务拿到的是同一个实例', () => {
+    expect(ipcSource).toContain('const mcp = new McpService({\n    registry,');
+  });
+
+  it('MCP 服务在应用退出时被释放（不留孤儿进程）', () => {
+    expect(ipcSource).toContain('mcp.disposeAll();');
+  });
+});

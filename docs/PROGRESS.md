@@ -1,11 +1,14 @@
-# 进度盘点（2026-09-20 14:30）
+# 进度盘点（2026-09-21 18:55）
 
 > 口径：**已完成 = 有代码 + 有测试 + 五件套全绿 + 已推送**。
 > 只写文档不算完成；测试没覆盖不算完成。
+>
+> 复核 009 发现本文件此前严重滞后（仍写「174 个测试」「W10 未开始」「M5 未开始」，
+> 而实际已有 436 个测试、W10 已完成）—— 已在本轮一并更正。
 
 ---
 
-## 一、已完成 ✅（10 个阶段 + 7 轮复核）
+## 一、已完成 ✅（14 个阶段 + 9 轮复核）
 
 | 阶段 | 内容 | 标签 | 关键证据 |
 |------|------|------|---------|
@@ -21,14 +24,23 @@
 | W5b | 审批 **`edit`** 决策 + **对话页走 Agent Loop**（打通 **M2**） | `v0.5.2` / `v0.5.3` | M2 端到端 5 例（真落盘/拒绝不落盘/edit 改后位置/越界被拦） |
 | — | 架构扩展（轻量 IDE / 云端调度 / 外观） | `v0.6.0-arch` | `docs/ARCH-CLOUD-IDE.md` + 三条设计律 |
 | W6 | 设计令牌 + **动效系统** + 工具卡 L0–L2 + 四态 | `v0.6.1-w6` | `docs/UX-AUDIT.md`（62 项排查） |
-| W7 | **启动性能预算与实测** + delta 合批 + 窗口化 + 懒加载 | `v0.7.0-w7` | `npm run perf`：首帧 **464ms**（预算 1000ms） |
+| W7 | **启动性能预算与实测** + delta 合批 + 窗口化 + 懒加载（M18） | `v0.7.0-w7` | `npm run perf`：首帧 **464ms**（预算 1000ms） |
 | W8 | **记忆 MVP**：AGENTS.md 项目指令 + NOTES.md 长期记忆 + 分层装配 | `v0.8.0-w8` | 卡片 015；16 例测试 |
-| 复核 001–007 | 每轮两遍复核（**变异测试合计 21/21 全部被拦住**） | `v0.1.2`…`v0.8.1` | `review/REVIEW-LOG.md` |
+| W9a | git 队列与 diff 审阅（关键行摘录 / 噪音识别 / `-z` / execFile 数组） | `v0.9.0-w9a` | 卡片 016 |
+| W9b | **内置终端**（官方 node-pty + xterm，挂权限门之下） | `v0.10.0-w9b` | `docs/SETUP-TERMINAL.md` |
+| W23a/b | **外观系统**：样式包契约 + 对比度守护 + 设置页（M13/M23） | `v0.8.2-w23a` / `v0.9.3-w23b` | 拒绝任意 CSS/JS；4 个内置包 |
+| W12 | 打包（NSIS + portable）+ Release 发布 | `v0.9.1-pack` / `v0.9.2-release` | Release `v0.9.0-w9a`；`npmRebuild=false` 后打包成功 |
+| — | 开源就绪（LICENSE / SECURITY / CONTRIBUTING / 三方声明 / LOGO） | `v0.11.0-oss` 等 | 作者提供的 LOGO；`assets/icon/README.md` |
+| W10a–d | **MCP 四层**：协议层 + 客户端核心 + 连接同意策略 + 真实子进程传输与工具桥 | `v0.12.0`–`v0.12.3` | MCP 相关 186 例（含真子进程） |
+| **W10e** | **MCP 服务编排 + IPC + 连接同意界面（打通 M5 代码链路）** | `v0.13.0-w10e` | 端到端 3 例真子进程：全链路通 / **拒绝时远端一次都没被调用** / 拒绝后进程真被退掉 |
+| 复核 001–009 | 每轮两遍复核（**变异测试累计 30+ 例全部被拦住**，逐轮明细见台账） | `v0.1.2`…`v0.13.1` | `review/REVIEW-LOG.md`；工具 `node scripts/mutation-check.mjs` |
 
-**里程碑**：**M1 能对话 ✅ · M2 能改代码 ✅**（能创建文件、权限弹窗正确、可拒绝/可改参数）
+**里程碑**：**M1 能对话 ✅ · M2 能改代码 ✅ · M5 MCP 打通 ✅**
+（M5 的**代码链路**完整且有真子进程端到端证据；**尚未人工用真实第三方 MCP 服务端在界面里走一遍**，
+见 §2.3 待办）
 
-**当前规模**：5 个 workspace 包 · 13 个测试文件 · **174 个测试全绿** ·
-五件套门禁（typecheck / lint / test / smoke / **perf**）· 远端与本地一致（`e18ceb9`）
+**当前规模**：5 个 workspace 包 · **24 个测试文件 · 436 个测试全绿** ·
+五件套门禁（typecheck / lint / test / smoke / **perf**）
 
 ---
 
@@ -39,18 +51,7 @@
 | 项 | 状态 | 证据 |
 |----|------|------|
 | **W12 打包与分发** | ✅ 安装包/免安装版已生成，**Release 已发布** | https://github.com/Zhang-jx00/jujia-agent/releases/tag/v0.9.0-w9a |
-| W9 终端选型 | ✅ 结论已定（卡片 016：官方 node-pty 自带预编译） | W9b 待装依赖 |
-
-### 2.1b 待你执行（一句命令即可）
-
-```bash
-cd D:/MiMo/ProjectOne/俱佳agent && npm i -w @jujia/desktop node-pty @xterm/xterm @xterm/addon-fit
-```
-
-
-| 项 | 阻塞原因 | 待决策 |
-|----|---------|--------|
-| ~~W9 终端~~ | **选型已定**（卡片 016）：现代 node-pty 自带预编译，通常无需 Build Tools | **W9a（git 队列与 diff）已完成 ✅**；W9b（PTY 终端）待安装 |
+| W9 终端选型 | ✅ 结论已定（卡片 016：官方 node-pty 自带预编译） | node-pty / xterm **已安装**，W9b 已完成 |
 
 ### 2.2 未开始（按计划顺序）
 
@@ -58,9 +59,7 @@ cd D:/MiMo/ProjectOne/俱佳agent && npm i -w @jujia/desktop node-pty @xterm/xte
 |------|------|-----------|
 | W5c | 自定义权限规则表（allow/deny/ask + 参数 glob） | M15 |
 | W5d | 钩子四类齐备（Pre/PostToolUse、Stop、SessionStart） | M16 |
-| W10 | **MCP Host**（stdio 优先）+ 同意 UI | **M5** |
 | W11 | Skills（SKILL.md 渐进披露）+ 定时任务（RRULE+补跑） | M5 |
-| W12 | electron-builder 打包（nsis+portable）+ 崩溃可见 | 工程底线 |
 | W13–W14 | **无限画布**（xyflow、节点/连线/环检测/拓扑执行） | **M4** |
 | W15 | 图导入导出 + **内置浏览器**（WebContentsView） | **M3** |
 | W16 | 多模态能力门控（capability registry） | M5 |
@@ -68,12 +67,15 @@ cd D:/MiMo/ProjectOne/俱佳agent && npm i -w @jujia/desktop node-pty @xterm/xte
 | W18 | **多子 agent 编排** + 长任务断点续跑 | M14/M17 |
 | W19 | **轻量 IDE**（文件树 + CodeMirror 6 + diff） | M19 |
 | W20–W22 | 远程接入 / 云端 worker / 调度切换 | M20–M22 |
-| W23 | **外观系统**（对话框样式包 + 背景图/毛玻璃 + 对比度守护） | M23 |
 
-**里程碑缺口**：**M3 内置浏览器 · M4 无限画布 · M5 MCP 与门控** —— 三个都未开始。
+**里程碑缺口**：**M3 内置浏览器 · M4 无限画布** —— 两个未开始；**M5 已打通代码链路**。
 
 ### 2.3 明确记录为「待办未做」的技术项
 
+- **人工用真实第三方 MCP 服务端走一遍界面**（例如 `npx @modelcontextprotocol/server-filesystem`）：
+  当前证据到「代码链路完整 + 真子进程端到端」这一层，**未到「人工实测可用」**
+  （与「打包版终端未实际开会话」是同类欠账：自动化验证已过，人工确认未做）。
+- **打包版终端的实际会话**：自动化证据到「具备可用条件」，人工实测未做。
 - renderer bundle 683KB → 目标 <400KB gzip（W12 打包时处理）
 - 完整虚拟列表（react-window）替换当前的 120 条窗口化
 - 长会话滚动 fps 需人工用 DevTools Performance 录制
