@@ -1,0 +1,30 @@
+name: 功能建议
+description: 提出一个新能力或改进
+title: "[建议] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你遇到的实际问题是什么
+      description: 请描述场景，不要只写"希望支持 X"
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你设想的做法
+    validations:
+      required: false
+  - type: textarea
+    id: alt
+    attributes:
+      label: 你考虑过的替代方案 / 其他产品怎么做的
+    validations:
+      required: false
+  - type: markdown
+    attributes:
+      value: |
+        提交前建议先看 [`docs/PRODUCT-GOAL.md`](../../docs/PRODUCT-GOAL.md) 的「明确不做」清单 ——
+        有些能力是被**刻意排除**的（例如不做云端持久化、不采用激进压缩对话历史），
+        如果你的建议涉及这些，请说明为什么应该改变这个取舍。

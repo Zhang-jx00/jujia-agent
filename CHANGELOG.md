@@ -6,6 +6,71 @@
 
 ---
 
+## [v0.11.1-icon] — 2026-09-21 13:54
+
+**阶段**：开源就绪收尾（应用图标 + Issue/PR 模板 + CODE_OF_CONDUCT）+ **打包链路的重要发现**
+
+**① 应用图标（已完成）**
+- 生成方式：AI 辅助生成 + **人工后处理**（`apps/desktop/scripts/make-icon.mjs`）
+  第一张「盾牌+宝石」构图不错但**图形顶满画面**、背景未透明；第二张改为**深色圆角底 + 居中留白**，
+  效果更好，但**右下角带平台水印** → 脚本按 12% 对称内缩裁掉水印并缩放至 1024×1024（已肉眼核对：水印已消失）
+- 设计含义：盾牌 = 「每个有副作用的动作都要你点头」；宝石 = 取自项目名「俱佳」
+- **刻意不放文字**：避免字体商用许可问题 + 避免小尺寸字符错误
+- 配置：`build.win.icon = build/icon.png`（electron-builder 自动转 ico）；新增 `npm run icon` 可复现
+- **来源与许可**写入 `assets/icon/README.md`，包括**如实说明 AI 生成图像的版权现状**
+  （美国版权局：纯机器生成不受保护；人类编排/编辑可受保护 → 对 MIT 开源项目不构成问题；
+  保留 prompt 与处理脚本作为证据链；不做商标主张；不模仿已知品牌）
+
+**② 开源配套（已完成）**
+- `.github/ISSUE_TEMPLATE/`：缺陷报告（**顶部引导安全问题走私密渠道**，不在此提交）、功能建议
+  （引导先看 PRODUCT-GOAL 的「明确不做」）、`config.yml`（关闭空白 issue + 安全报告入口）
+- `.github/PULL_REQUEST_TEMPLATE.md`：要求逐项贴五件套**真实输出**、补测试/变异测试、
+  **「已知未完成 / 不确定的地方」为必填项**
+- `CODE_OF_CONDUCT.md`：结合本项目约定（诚实标注未完成、接受被纠正、**不鼓励关掉权限门使用**）改写
+
+**③ ⚠️ 打包链路发现两个必须记录的问题**
+
+**发现 A：本机「其实装了 VS Build Tools」——纠正我此前的说法**
+此前我说「本机无 VS Build Tools（cl.exe 未找到）」，**这个判断不完整**。
+真因是它**不在 PATH 里**，实际安装在 `D:\DevTools\XiaoMo\VSBuildTools\`。
+所以 npm 能装 node-pty 走的是**预编译**路径，与"有没有编译工具链"无关。
+
+**发现 B：electron-builder 的 `@electron/rebuild` 会尝试从源码编译 node-pty，并且在本机失败**
+```
+preparing  moduleName=node-pty  arch=x64
+error MSB8040: 此项目需要缓解了 Spectre 漏洞的库
+  [node_modules\node-pty\build\conpty.vcxproj]
+  [node_modules\node-pty\build\conpty_console_list.vcxproj]
+  [node_modules\node-pty\build\deps\winpty\src\winpty-agent.vcxproj]
+  [node_modules\node-pty\build\deps\winpty\src\winpty.vcxproj]
+```
+即：本机 VS 安装缺 **Spectre 缓解库**组件 → `npm run dist` 会**在 rebuild 阶段失败**。
+
+**处置与现状（如实标注未完成）**
+- 已设 `build.npmRebuild = false`（跳过 rebuild，直接用 node-pty 的预编译二进制）
+  —— 依据卡片 016：官方 node-pty 自带 win32-x64 预编译
+- 但**「跳过 rebuild 后，打包版的终端是否真的可用」尚未验证完**：
+  再次 `dist:dir` 时报 `EBUSY: resource busy or locked, unlink 'release\win-unpacked\resources\app.asar'`
+  （上一次打包的产物被占用）→ **无法确认 node-pty 是否随包、ABI 是否匹配**
+- **因此本轮不宣称打包版终端可用**，登记为**待验证**：
+  1. 清掉 `release/win-unpacked`（或结束占用进程）后重跑 `npm run dist:dir`
+  2. 检查产物内是否含 `node-pty` 的 `prebuilds/win32-x64/pty.node`
+  3. 用 `env -u ELECTRON_RUN_AS_NODE ./JujiaAgent.exe` 起打包版，在「终端」页实际开一次会话
+- 备选方案（若 ABI 不匹配）：在 VS Installer 里勾选
+  **「MSVC v143 - VS 2022 C++ x64/x86 Spectre 缓解库」** 后再让 rebuild 正常执行
+
+**验证方式**
+| 项 | 结果 |
+|----|------|
+| `npm run typecheck` / `lint` / `test` | 通过 / 0 问题 / 250-250（本轮改动仅文档与打包配置） |
+| 图标处理 | 已肉眼核对：水印已裁掉、图形居中、圆角保留 |
+| 落地校验 | 逐项 grep 命中：`win.icon` / `npm run icon` / 图标说明版权段 / 3 个 issue 模板 / PR 模板 / CODE_OF_CONDUCT |
+| **打包版可用性** | ⚠️ **未验证完成**（被 EBUSY 挡住，见发现 B） |
+
+**回退点**：tag `v0.11.1-icon`（上一版 `v0.11.0-oss`）
+
+---
+
 ## [v0.11.0-oss] — 2026-09-21 13:43
 
 **阶段**：工程底线扩展 —— **「开源就绪」验收线**（用户明确：本项目会开源、给别人下载使用）

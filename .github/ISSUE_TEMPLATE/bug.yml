@@ -1,0 +1,66 @@
+name: 缺陷报告
+description: 报告一个可复现的问题
+title: "[缺陷] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **如果涉及安全问题（能绕过权限门、越出工作区、读取密钥、触发非预期命令执行），
+        请不要在这里提交 —— 请按 [SECURITY.md](../../SECURITY.md) 用私密渠道报告。**
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 应用内「概览」页可看到；或填 git tag / commit
+      placeholder: 例如 v0.10.0-w9b 或 commit 159fc4a
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: 安装方式
+      options:
+        - 从 Releases 下载的安装包（Setup）
+        - 从 Releases 下载的免安装版（portable）
+        - 从源码运行（npm run dev）
+        - 从源码打包运行（npm run dist）
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 系统版本
+      placeholder: 例如 Windows 11 23H2 (22631)
+    validations:
+      required: true
+  - type: textarea
+    id: expect
+    attributes:
+      label: 期望看到什么
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际看到什么
+      description: 报错请把**完整**文字贴上（不要只贴一行）
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开…
+        2. 点击…
+        3. 出现…
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志 / 截图
+      description: 有就贴；没有可留空
+    validations:
+      required: false

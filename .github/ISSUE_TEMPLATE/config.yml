@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题（请走私密渠道）
+    url: https://github.com/Zhang-jx00/jujia-agent/security/advisories/new
+    about: 能绕过权限门 / 越出工作区 / 读取密钥 的问题，请在此私下报告，不要开公开 issue
+  - name: 使用与安装问题
+    url: https://github.com/Zhang-jx00/jujia-agent#readme
+    about: 先看 README 的「快速开始」与 docs/SETUP-TERMINAL.md

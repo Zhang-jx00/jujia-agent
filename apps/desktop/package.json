@@ -12,7 +12,8 @@
     "smoke": "electron-vite build && node scripts/run-electron.mjs --smoke",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "dist": "electron-vite build && electron-builder --win --publish never",
-    "dist:dir": "electron-vite build && electron-builder --win --dir"
+    "dist:dir": "electron-vite build && electron-builder --win --dir",
+    "icon": "node scripts/make-icon.mjs"
   },
   "dependencies": {
     "@jujia/agent-core": "*",
@@ -33,6 +34,7 @@
     "electron": "44.4.2",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "sharp": "^0.35.4",
     "vite": "^7.3.6"
   },
   "build": {
@@ -66,7 +68,8 @@
           ]
         }
       ],
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": false,
@@ -81,7 +84,8 @@
     "portable": {
       "artifactName": "${productName}-${version}-portable.${ext}"
     },
-    "electronVersion": "44.4.2"
+    "electronVersion": "44.4.2",
+    "npmRebuild": false
   },
   "author": {
     "name": "Zhang-jx00",
