@@ -13,3 +13,4 @@ export * from './memory/memory';
 export * from './git/git';
 export * from './terminal/terminal';
 export * from './mcp/mcp';
+export * from './mcp/client';
