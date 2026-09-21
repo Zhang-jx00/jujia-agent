@@ -1,0 +1,53 @@
+{
+  "note": "复核 008 · 对象：W10a–W10d（MCP 宿主适配层 / 客户端核心 / 连接同意 / 真实子进程传输 + 工具桥）",
+  "mutations": [
+    {
+      "id": "M1",
+      "desc": "去掉「未批准的工具根本不注册」这道门（安全关键：默认不放行）",
+      "file": "packages/agent-core/src/mcp/tool-bridge.ts",
+      "find": "    if (!isToolEnabled(approval, profile.qualifiedName)) {",
+      "replace": "    if (false) {",
+      "test": "packages/agent-core/src/mcp/tool-bridge.test.ts"
+    },
+    {
+      "id": "M2",
+      "desc": "允许「清洗后不含字母数字」的工具名通过（会让纯中文名塌缩成同一个下划线串）",
+      "file": "packages/agent-core/src/mcp/tool-bridge.ts",
+      "find": "  if (!/[A-Za-z0-9]/.test(cleaned)) return null;",
+      "replace": "  if (cleaned === '') return null;",
+      "test": "packages/agent-core/src/mcp/tool-bridge.test.ts"
+    },
+    {
+      "id": "M3",
+      "desc": "关掉工具结果的截断（超长结果会打爆上下文与 IPC）",
+      "file": "packages/agent-core/src/mcp/tool-bridge.ts",
+      "find": "  if (Buffer.byteLength(text, 'utf8') <= limit) return { text, truncated: false };",
+      "replace": "  if (true) return { text, truncated: false };",
+      "test": "packages/agent-core/src/mcp/tool-bridge.test.ts"
+    },
+    {
+      "id": "M4",
+      "desc": "去掉跨 chunk 的行缓冲（半行会被当垃圾丢掉，表现为「请求超时」）",
+      "file": "apps/desktop/src/main/mcp/stdio-transport.ts",
+      "find": "    buffer += text;\n    bufferBytes += Buffer.byteLength(text, 'utf8');",
+      "replace": "    buffer = text;\n    bufferBytes += Buffer.byteLength(text, 'utf8');",
+      "test": "apps/desktop/src/main/mcp/stdio-transport.test.ts"
+    },
+    {
+      "id": "M5",
+      "desc": "Windows 下不用 taskkill /T（只杀宿主进程，把真正的 node 留成孤儿）",
+      "file": "apps/desktop/src/main/mcp/stdio-transport.ts",
+      "find": "    if (platform === 'win32' && typeof pid === 'number' && pid > 0) {",
+      "replace": "    if (false && typeof pid === 'number' && pid > 0) {",
+      "test": "apps/desktop/src/main/mcp/stdio-transport.test.ts"
+    },
+    {
+      "id": "M6",
+      "desc": "MCP 工具默认按只读处理（第三方能力未知却免询问，安全关键）",
+      "file": "packages/agent-core/src/mcp/mcp.ts",
+      "find": "  if (!a) return { kind: 'exec', reason: '服务端未提供注解 → 默认按最严格处理' };",
+      "replace": "  if (!a) return { kind: 'read', reason: '变异：默认只读' };",
+      "test": "packages/agent-core/src/mcp/mcp.test.ts"
+    }
+  ]
+}
