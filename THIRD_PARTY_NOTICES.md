@@ -1,6 +1,29 @@
 # 第三方素材与许可声明
 
-本文件列出本项目**非代码**部分涉及的第三方素材及其许可。
+> **依赖许可证清单**（443 个去重依赖，自动生成）：见 [`docs/DEPENDENCY-LICENSES.md`](docs/DEPENDENCY-LICENSES.md)。
+> 合规检查：`npm run license:check` —— **发现 GPL/AGPL/SSPL 等强 copyleft 即非零退出**（CI 门禁）。
+> 当前结论：**0 个强 copyleft**；440 个宽松许可（MIT/ISC/Apache-2.0/BSD 等）；3 个需声明（见下）。
+
+---
+
+## 0. 依赖里需履行义务的 3 个包（2026-09-21 扫描）
+
+| 包 | 许可 | 义务 | 我们的处置 |
+|----|------|------|-----------|
+| `lightningcss` + `lightningcss-win32-x64-msvc` | **MPL-2.0** | 文件级 copyleft：保留该文件许可声明；**允许与专有代码链接** | 仅为**构建工具链**（CSS 处理器），**不随应用分发** → 保留本声明即满足；其源码可在其仓库获取 |
+| `caniuse-lite` | **CC-BY-4.0** | 需**署名**（注明来源、许可、是否修改） | **署名如下**：`caniuse-lite` 数据由 [browserslist](https://github.com/browserslist/browserslist) 生态维护，数据源自 [caniuse.com](https://caniuse.com)（by @Fyrd），以 CC-BY-4.0 提供；本项目作为构建期数据引用，未修改数据内容 |
+
+> **区分许可证的要点**（按你要求写清楚）：
+> - **MIT / ISC / BSD-2/3 / 0BSD / BlueOak / WTFPL**：可商用、可修改、可再分发，**无需可见署名**（保留许可文本即可）
+> - **Apache-2.0**：同 MIT，另含**专利授权**条款；有 NOTICE 文件需保留
+> - **MPL-2.0**：**文件级** copyleft —— 被授权的文件本身须保持 MPL，但**可与专有代码同作品链接**（对桌面应用分发友好）
+> - **LGPL-3.0**：**库级** copyleft —— 允许动态链接，但须提供库的源码获取方式；以**独立预编译二进制**形式捆绑一般视为聚合
+> - **CC-BY-4.0**：可商用，但须**署名**（来源 + 许可链接 + 是否修改）
+> - **GPL / AGPL / SSPL**：**强 copyleft** —— 要求整个衍生作品以同等许可开放；**与 MIT 定位冲突，本项目一律禁止引入**（`npm run license:check` 会拦截）
+
+---
+
+## 1. 应用图标与 LOGO本文件列出本项目**非代码**部分涉及的第三方素材及其许可。
 代码依赖（npm 包）的许可由各自包内的 `LICENSE` 声明，随 `package-lock.json` 一同可追溯。
 
 ---
