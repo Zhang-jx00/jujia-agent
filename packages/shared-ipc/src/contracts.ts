@@ -36,10 +36,22 @@ export const appearanceSchema = z.object({
   pack: z.unknown().nullable().default(null),
 });
 
+/** 权限模式（W5a 定义，**W10g 起才真正接入执行路径**——此前是死代码） */
+export const permissionModeSchema = z.enum([
+  'default',
+  'acceptEdits',
+  'plan',
+  'dontAsk',
+  'bypassPermissions',
+]);
+export type PermissionMode = z.infer<typeof permissionModeSchema>;
+
 export const appConfigSchema = z.object({
   theme: z.enum(['light', 'dark']),
   workspace: z.string().nullable(),
   appearance: appearanceSchema.default({ packId: 'default-dark', pack: null }),
+  /** 会话级权限模式；规则表是常设配置，二者关系见 agent-core 的 decideGate */
+  permissionMode: permissionModeSchema.default('default'),
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
@@ -49,6 +61,7 @@ export const defaultAppConfig = (): AppConfig => ({
   theme: 'dark',
   workspace: null,
   appearance: { packId: 'default-dark', pack: null },
+  permissionMode: 'default',
 });
 
 /** 配置读取结果：带上「来源」与「是否从损坏中恢复」，供 UI 如实提示用户 */
@@ -376,3 +389,30 @@ export const mcpApproveResultSchema = z.object({
   skipped: z.array(z.object({ name: z.string(), reason: z.string() })),
 });
 export type McpApproveResult = z.infer<typeof mcpApproveResultSchema>;
+
+/* ------------------------------------------------------------------ *
+ * 权限规则表（W5c / M15）
+ * ------------------------------------------------------------------ */
+
+export const permissionRuleActionSchema = z.enum(['allow', 'deny', 'ask']);
+export type PermissionRuleAction = z.infer<typeof permissionRuleActionSchema>;
+
+/** 新增规则的入参（更深的校验在主进程用 agent-core 的 checkRuleInput 做） */
+export const permissionRuleInputSchema = z.object({
+  /** 工具名 glob：`*` 不跨路径分隔符、`**` 全匹配、`?` 单字符 */
+  pattern: z.string().min(1).max(200),
+  action: permissionRuleActionSchema,
+  note: z.string().max(200).optional(),
+});
+export type PermissionRuleInput = z.infer<typeof permissionRuleInputSchema>;
+
+export const permissionRuleViewSchema = z.object({
+  id: z.string(),
+  pattern: z.string(),
+  action: permissionRuleActionSchema,
+  note: z.string().nullable(),
+  enabled: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type PermissionRuleView = z.infer<typeof permissionRuleViewSchema>;

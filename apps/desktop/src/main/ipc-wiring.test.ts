@@ -59,7 +59,20 @@ describe('工具注册表接线（防止各处各建一个）', () => {
   });
 
   it('对话链路也用同一个实例（否则模型看不到 MCP 工具）', () => {
-    expect(ipcSource).toContain('registry,\n      },\n    );');
+    // 在 sendMessage(...) 的调用体内查找，而不是死盯某几行文本 ——
+    // 参数会随功能增加（例如 W5c 加了 mode/rules），但"传的是共享实例"这个不变量不能变
+    const from = ipcSource.indexOf('sendMessage(');
+    expect(from).toBeGreaterThan(-1);
+    const callBody = ipcSource.slice(from, from + 1200).split(');')[0] ?? '';
+    expect(callBody).toContain('registry,');
+    expect(callBody).not.toContain('createDefaultRegistry()');
+  });
+
+  it('对话链路带上权限模式与规则（否则规则表只对 TOOL_RUN 生效）', () => {
+    const from = ipcSource.indexOf('sendMessage(');
+    const callBody = ipcSource.slice(from, from + 1200).split(');')[0] ?? '';
+    expect(callBody).toContain('mode: policy.mode');
+    expect(callBody).toContain('rules: policy.rules');
   });
 
   it('MCP 服务拿到的是同一个实例', () => {

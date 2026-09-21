@@ -278,3 +278,110 @@ describe('注册表', () => {
     expect(new ToolError('path_denied', 'x')).toBeInstanceOf(ToolError);
   });
 });
+
+describe('策略层接入（W10g）：模式与用户规则真正作用于执行', () => {
+  const denyResolver = () => {
+    throw new Error('不应询问用户');
+  };
+
+  it('deny 规则 → 不弹窗、不执行，并说明命中的规则', async () => {
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'a.txt'), content: 'x' },
+      ctx(),
+      denyResolver,
+      { rules: [{ id: 'r1', pattern: 'write_file', action: 'deny', enabled: true, createdAt: '', updatedAt: '' }] },
+    );
+    expect(res.asked).toBe(false);
+    expect(res.decision).toBe('deny');
+    expect(res.outcome.ok).toBe(false);
+    expect(res.outcome.content).toContain('命中你的规则');
+    // 磁盘必须没被动过
+    await expect(stat(join(root, 'a.txt'))).rejects.toThrow();
+  });
+
+  it('allow 规则 → exec 类工具不再弹窗即可执行', async () => {
+    const tool = createDefaultRegistry().get('list_dir');
+    const res = await runTool(tool, {}, ctx(), denyResolver, {
+      rules: [{ id: 'r1', pattern: 'list_dir', action: 'allow', enabled: true, createdAt: '', updatedAt: '' }],
+      // 刻意不传 mode：default 模式下 exec 本来要问
+    });
+    expect(res.asked).toBe(false);
+    expect(res.outcome.ok).toBe(true);
+  });
+
+  it('ask 规则可以让**只读**工具也来问（此前只读从不打扰）', async () => {
+    const asked: PermissionRequest[] = [];
+    const res = await runTool(
+      readFileTool,
+      { path: join(root, 'nope.txt') },
+      ctx(),
+      async (req) => {
+        asked.push(req);
+        return 'deny';
+      },
+      { rules: [{ id: 'r1', pattern: 'read_file', action: 'ask', enabled: true, createdAt: '', updatedAt: '' }] },
+    );
+    expect(res.asked).toBe(true);
+    expect(asked).toHaveLength(1);
+  });
+
+  it('deny 规则优先于会话内 alwaysAllow（"绝不碰"是承诺）', async () => {
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'b.txt'), content: 'x' },
+      ctx(),
+      denyResolver,
+      {
+        alwaysAllow: new Set(['write_file']),
+        rules: [{ id: 'r1', pattern: 'write_file', action: 'deny', enabled: true, createdAt: '', updatedAt: '' }],
+      },
+    );
+    expect(res.decision).toBe('deny');
+    expect(res.outcome.ok).toBe(false);
+    await expect(stat(join(root, 'b.txt'))).rejects.toThrow();
+  });
+
+  it('plan 模式在运行时真的拒绝写入（此前模式是死代码）', async () => {
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'c.txt'), content: 'x' },
+      ctx(),
+      denyResolver,
+      { mode: 'plan' },
+    );
+    expect(res.outcome.ok).toBe(false);
+    expect(res.outcome.content).toContain('计划（只读）');
+    await expect(stat(join(root, 'c.txt'))).rejects.toThrow();
+  });
+
+  it('allow 规则在 plan 模式下**不**生效（会话级只读意图优先于常设规则）', async () => {
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'd.txt'), content: 'x' },
+      ctx(),
+      denyResolver,
+      {
+        mode: 'plan',
+        rules: [{ id: 'r1', pattern: 'write_file', action: 'allow', enabled: true, createdAt: '', updatedAt: '' }],
+      },
+    );
+    expect(res.outcome.ok).toBe(false);
+  });
+
+  it('默认（无规则、default 模式）行为与从前一致：读放行、写要问', async () => {
+    const asked: PermissionRequest[] = [];
+    const read = await runTool(readFileTool, { path: join(root, 'x.txt') }, ctx(), async (req) => {
+      asked.push(req);
+      return 'deny';
+    });
+    expect(read.asked).toBe(false);
+
+    const write = await runTool(writeFileTool, { path: join(root, 'x.txt'), content: 'x' }, ctx(), async (req) => {
+      asked.push(req);
+      return 'deny';
+    });
+    expect(write.asked).toBe(true);
+    expect(asked).toHaveLength(1);
+  });
+});

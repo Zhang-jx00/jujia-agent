@@ -8,7 +8,9 @@ import {
   withTimeout,
   type ChatMessage,
   type LoopEvent,
+  type PermissionMode,
   type PermissionResolver,
+  type PermissionRule,
   type ToolRegistry,
 } from '@jujia/agent-core';
 import type { StreamEvent } from '@jujia/shared-ipc';
@@ -81,6 +83,10 @@ export interface ChatDeps {
   /** 工作区根目录（未选择时对话仍可用，但工具不可用） */
   workspaceRoot: string | null;
   registry?: ToolRegistry;
+  /** 权限模式（W10g 起接入执行路径；不传 = default） */
+  mode?: PermissionMode | undefined;
+  /** 用户自定义权限规则 */
+  rules?: ReadonlyArray<PermissionRule>;
 }
 
 /**
@@ -191,6 +197,8 @@ export function sendMessage(
           workspaceRoot: deps.workspaceRoot ?? '__no_workspace__',
           permission: deps.permission,
           alwaysAllow: session.alwaysAllow,
+          ...(deps.mode ? { mode: deps.mode } : {}),
+          ...(deps.rules ? { rules: deps.rules } : {}),
           ...(deps.fetcher ? { fetcher: deps.fetcher } : {}),
         },
       );

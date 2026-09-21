@@ -6,6 +6,60 @@
 
 ---
 
+## [v0.14.0-w5c] — 2026-09-21 21:35
+
+**阶段**：W5c（M15）—— **自定义权限规则表（allow/deny/ask + 工具名 glob）**，
+并**修复一个重大缺陷：W5a 的策略层此前在运行时是死代码**
+**范围**：`packages/agent-core/src/permissions/rules.ts(+test)` · `permissions/policy.ts` · `tools/executor.ts(+test)` ·
+`loop/agent-loop.ts` · `packages/shared-ipc/src/{channels,contracts}.ts` ·
+`apps/desktop/src/main/{permission-rules-store.ts(+test),ipc.ts,chat-service.ts}` · `ipc-wiring.test.ts` ·
+`apps/desktop/src/preload/index.ts` · `apps/desktop/src/renderer/src/features/permissions/PermissionRulesPanel.tsx` · `App.tsx` · `styles.css`
+
+**先说本轮最重要的发现**
+
+`decideGate`（W5a：5 种模式 / 敏感路径 / 高危清单 / 审批疲劳提示）**从未被任何执行路径调用** ——
+执行器只按 `tool.kind !== 'read'` 决定要不要问。也就是说：**模式、敏感路径、高危清单在运行时全是死代码**，
+它的测试再绿也只是在测一段没接上电的逻辑。`grep -rn "decideGate"` 全仓库只有定义与测试两处命中。
+本轮把它真正接进 `runTool`，并叠加规则表。
+
+**交付内容**
+
+1. **`rules.ts` —— 规则匹配引擎（纯逻辑）**。glob 语义：`*` 任意字符不跨路径分隔符、`**` 全匹配、
+   `?` 单字符，其余字符一律转义（用户输入直接进正则是注入面；转义后无嵌套量词，无 ReDoS）。
+   `matchRules` 跨类取最严格（deny > ask > allow），同类取列表顺序第一个（列表顺序即语义顺序）。
+   **刻意不做「按参数 glob」**（计划里提过）：参数匹配需要每个工具声明自己的参数语义
+   （哪个参数是路径、哪个是命令），现在没有任何工具声明过 —— 在那之前做参数匹配，
+   等于把"看起来能配"的东西卖给用户，实际只会匹配到 JSON 字符串，行为完全不可预测。做了就是撒谎。
+
+2. **`decideGate` 接入规则**，优先级设计（已写进 UI 页面，不藏在文档里）：
+   - **deny / ask 绝对生效** —— "绝不碰 X"与"这个必须问我"是承诺，连 `bypassPermissions` 也要让路；
+     `ask` 甚至能让**只读**工具也来问（此前只读从不打扰，这是规则表带来的新能力）；
+   - **allow 只在会话没有更严格意图（plan / dontAsk）时生效** —— 会话级只读意图优先于常设规则；
+   - deny 规则优先于会话内「总是允许」（"绝不碰"压过"我点过总是允许"）。
+
+3. **`runTool` 接入 `decideGate`**：`opts` 新增 `mode` 与 `rules`。
+   **default 模式、无规则时的行为与从前完全一致**（读放行、写与执行要问）—— 有回归用例锁住。
+   对话链路（`chat-service` → `agent-loop` → `runTool`）与 `TOOL_RUN` 都传入了模式与规则，
+   因此规则对"模型调工具"和"你在工具页手动执行"**同等生效**。
+
+4. **存储 + IPC + 「权限」标签页**：`permission-rules.json`（原子写 + 损坏自愈）；
+   新增 / 删除 / 启用开关（校验与"同模式同动作不重复"在存储层做，两个实现共用同一段代码）；
+   模式选择器持久化到 `appConfig.permissionMode`；
+   **`bypassPermissions` 需要勾选确认后才可选**（不是装饰性确认框）；
+   `deny` 一切的规则允许保存但 UI 醒目警告（不静默接受，也不武断拒绝）。
+
+**验证**
+
+| 项 | 结果 |
+|----|------|
+| typecheck / lint | 通过 / 0 error 0 warning |
+| 全量测试 | **475/475**（原 445） |
+| smoke | **OK**（全链路 + 无 Node 泄漏 + 配置读取） |
+
+**回退点**：`git checkout v0.13.1-review`
+
+---
+
 ## [v0.13.1-review] — 2026-09-21 19:40
 
 **阶段**：复核 009 —— 对象 **W10e**（MCP 服务编排 + IPC + 连接同意界面）

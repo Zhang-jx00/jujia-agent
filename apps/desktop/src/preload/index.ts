@@ -14,6 +14,8 @@ import {
   mcpServerViewSchema,
   permissionDecisionSchema,
   permissionRequestSchema,
+  permissionRuleInputSchema,
+  permissionRuleViewSchema,
   streamEventSchema,
   testResultSchema,
   toolRunResultSchema,
@@ -32,6 +34,8 @@ import {
   type McpServerView,
   type PermissionDecisionPayload,
   type PermissionRequestPayload,
+  type PermissionRuleInput,
+  type PermissionRuleView,
   type StreamEvent,
   type TestResult,
   type ToolRunResult,
@@ -261,6 +265,27 @@ const api = {
     return () => {
       ipcRenderer.removeListener(IPC.MCP_STATE_CHANGED, handler);
     };
+  },
+
+  /* --------------------------- 权限规则表（W5c） --------------------------- */
+
+  async permissionRulesList(): Promise<PermissionRuleView[]> {
+    return z.array(permissionRuleViewSchema).parse(await ipcRenderer.invoke(IPC.PERMISSION_RULES_LIST));
+  },
+
+  async permissionRulesAdd(input: PermissionRuleInput): Promise<PermissionRuleView> {
+    const parsed = permissionRuleInputSchema.parse(input);
+    return permissionRuleViewSchema.parse(await ipcRenderer.invoke(IPC.PERMISSION_RULES_ADD, parsed));
+  },
+
+  async permissionRulesRemove(id: string): Promise<boolean> {
+    return z.boolean().parse(await ipcRenderer.invoke(IPC.PERMISSION_RULES_REMOVE, id));
+  },
+
+  async permissionRulesToggle(id: string, enabled: boolean): Promise<PermissionRuleView> {
+    return permissionRuleViewSchema.parse(
+      await ipcRenderer.invoke(IPC.PERMISSION_RULES_TOGGLE, { id, enabled }),
+    );
   },
 };
 

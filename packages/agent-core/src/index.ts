@@ -9,6 +9,7 @@ export * from './tools/builtin/file-tools';
 export * from './providers/tool-call-accumulator';
 export * from './loop/agent-loop';
 export * from './permissions/policy';
+export * from './permissions/rules';
 export * from './memory/memory';
 export * from './git/git';
 export * from './terminal/terminal';

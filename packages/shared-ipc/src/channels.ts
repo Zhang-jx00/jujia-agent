@@ -73,6 +73,14 @@ export const IPC = {
   MCP_DISCONNECT: 'mcp:disconnect',
   /** main → renderer：MCP 状态变化广播（进程退出、握手失败等） */
   MCP_STATE_CHANGED: 'mcp:state-changed',
+
+  /* ---------------------------- 权限规则表（W5c） ---------------------------- */
+
+  /** 权限规则：读取 / 新增 / 删除 / 启用开关 */
+  PERMISSION_RULES_LIST: 'permission:rules-list',
+  PERMISSION_RULES_ADD: 'permission:rules-add',
+  PERMISSION_RULES_REMOVE: 'permission:rules-remove',
+  PERMISSION_RULES_TOGGLE: 'permission:rules-toggle',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

@@ -10,6 +10,8 @@ import {
   mcpConnectResultSchema,
   mcpServerViewSchema,
   permissionDecisionSchema,
+  permissionRuleInputSchema,
+  permissionRuleViewSchema,
   testResultSchema,
   toolRunResultSchema,
   workspaceInfoSchema,
@@ -19,6 +21,7 @@ import {
   type ConfigSnapshot,
   type ConnectionView,
   type McpConnectResult,
+  type PermissionMode,
   type StreamEvent,
   type TestResult,
   type ToolRunResult,
@@ -30,10 +33,11 @@ import {
 import { z } from 'zod';
 import { validateThemePack } from '@jujia/ui-tokens';
 import { TerminalService } from './terminal-service';
-import { createDefaultRegistry, runTool, type ToolRegistry } from '@jujia/agent-core';
+import { createDefaultRegistry, runTool, type PermissionRule, type ToolRegistry } from '@jujia/agent-core';
 import { listModels } from '@jujia/agent-core';
 import { McpService } from './mcp/mcp-service';
 import { createRealTransport } from './mcp/real-transport';
+import { createFilePermissionRulesStore } from './permission-rules-store';
 import { clearWorkspace, getWorkspaceInfo, pickWorkspace } from './workspace';
 import type { PermissionBridge } from './permission-bridge';
 import { getDataRoot } from './paths';
@@ -93,6 +97,17 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   app.on('before-quit', () => {
     mcp.disposeAll();
   });
+
+  /** 权限规则表（W5c）：TOOL_RUN 与对话链路共用同一份，因此规则语义全进程一致 */
+  const permissionRules = createFilePermissionRulesStore();
+  /** 每次都重新读：规则改动必须立即生效，缓存会让用户以为删掉的规则还在拦截 */
+  const loadPolicy = async (): Promise<{ mode: PermissionMode; rules: PermissionRule[] }> => {
+    const snapshot = await readConfigSnapshot();
+    return {
+      mode: snapshot.config.permissionMode,
+      rules: await permissionRules.list(),
+    };
+  };
 
   ipcMain.handle(IPC.APP_INFO, (): AppInfo => {
     const payload: AppInfo = {
@@ -249,6 +264,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
 
     // 工作区决定了工具是否可用；未选择时仍可对话，但工具会被路径校验拒绝
     const ws = await getWorkspaceInfo();
+    const policy = await loadPolicy();
     const result = sendMessage(
       {
         connectionId,
@@ -262,6 +278,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         workspaceRoot: ws.valid ? ws.root : null,
         // 同一个注册表：内置工具 + 已批准的 MCP 工具都在这里，模型才看得到它们
         registry,
+        mode: policy.mode,
+        rules: policy.rules,
       },
     );
     return chatSendResultSchema.parse({ ...result, accepted: true });
@@ -326,7 +344,11 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     const tool = registry.get(toolName);
     // 未选工作区时给一个不可能的根目录：内置工具会在路径守卫阶段被拒（fail closed）
     const workspaceRoot = info.root && info.valid ? info.root : '__no_workspace__';
-    const res = await runTool(tool, args ?? {}, { workspaceRoot }, deps.permission.resolve);
+    const policy = await loadPolicy();
+    const res = await runTool(tool, args ?? {}, { workspaceRoot }, deps.permission.resolve, {
+      mode: policy.mode,
+      rules: policy.rules,
+    });
 
     return toolRunResultSchema.parse({
       ok: res.outcome.ok,
@@ -368,5 +390,31 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.MCP_DISCONNECT, async (_e, id: unknown): Promise<boolean> => {
     if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
     return mcp.disconnect(id);
+  });
+
+  /* --------------------------- 权限规则表（W5c） --------------------------- */
+
+  ipcMain.handle(IPC.PERMISSION_RULES_LIST, async () => {
+    return z.array(permissionRuleViewSchema).parse(await permissionRules.list());
+  });
+
+  ipcMain.handle(IPC.PERMISSION_RULES_ADD, async (_e, input: unknown) => {
+    const parsed = permissionRuleInputSchema.parse(input);
+    const record = await permissionRules.add(parsed);
+    return permissionRuleViewSchema.parse(record);
+  });
+
+  ipcMain.handle(IPC.PERMISSION_RULES_REMOVE, async (_e, id: unknown): Promise<boolean> => {
+    if (typeof id !== 'string' || id === '') throw new Error('缺少规则 id');
+    return permissionRules.remove(id);
+  });
+
+  ipcMain.handle(IPC.PERMISSION_RULES_TOGGLE, async (_e, payload: unknown) => {
+    const { id, enabled } = (payload ?? {}) as { id?: unknown; enabled?: unknown };
+    if (typeof id !== 'string' || id === '') throw new Error('缺少规则 id');
+    if (typeof enabled !== 'boolean') throw new Error('缺少 enabled');
+    const updated = await permissionRules.setEnabled(id, enabled);
+    if (updated === null) throw new Error(`规则不存在: ${id}`);
+    return permissionRuleViewSchema.parse(updated);
   });
 }

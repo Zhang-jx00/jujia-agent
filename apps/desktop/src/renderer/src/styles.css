@@ -1011,3 +1011,93 @@ html[data-jj-bg-kind='glass'] .app-shell {
 .jj-mcp-kind-read {
   color: var(--success);
 }
+
+/* --------------------------- 权限规则表（W5c） --------------------------- */
+
+.jj-perm-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.jj-perm-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.jj-perm-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.jj-perm-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.jj-perm-form input,
+.jj-perm-form select {
+  background: var(--bg-layout);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.jj-perm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.jj-perm-rule {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+}
+
+.jj-perm-rule-off {
+  opacity: 0.55;
+}
+
+.jj-perm-rule-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.jj-perm-action {
+  margin-left: 6px;
+  font-size: 12px;
+}
+
+.jj-perm-action-deny {
+  color: var(--danger);
+}
+
+.jj-perm-action-ask {
+  color: var(--warning);
+}
+
+.jj-perm-action-allow {
+  color: var(--success);
+}

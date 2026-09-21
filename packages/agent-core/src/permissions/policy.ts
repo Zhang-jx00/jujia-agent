@@ -1,4 +1,5 @@
 import type { ToolKind } from '../tools/types';
+import { matchRules, type PermissionRule } from './rules';
 
 /**
  * 权限策略层（W5）。
@@ -43,6 +44,12 @@ export interface GateContext {
   alwaysAsk?: ReadonlyArray<string>;
   /** 覆盖写入（目标已存在）时为 true；用于把「覆盖」判为更高风险 */
   isOverwrite?: boolean;
+  /**
+   * 用户自定义规则（W5c）。**优先于模式**，但三个动作的效力不同：
+   * - `deny` / `ask` 绝对生效（连 bypassPermissions 也要让路）；
+   * - `allow` 只在本会话没有更严格意图（plan / dontAsk）时生效。
+   */
+  rules?: ReadonlyArray<PermissionRule>;
 }
 
 /** 即使处于 acceptEdits，也不自动放行的敏感路径特征（按参数分级的关键） */
@@ -72,15 +79,33 @@ export function sensitiveReason(target: string): string | null {
  * 分级判定：返回放行 / 询问 / 拒绝。
  *
  * 决策顺序（越靠前的规则越优先，便于用户理解与测试）：
+ * 0. **用户规则**（W5c）：deny / ask 绝对生效；allow 在 plan / dontAsk 下让位于会话意图
  * 1. 只读工具 → 放行（不打扰）
  * 2. 高危清单命中 → 询问（任何模式都问）
  * 3. bypassPermissions → 放行（附风险提示）
  * 4. plan / dontAsk → 拒绝写与执行
- * 5. acceptEdits 且是工作区内、非敏感的写 → 放行
- * 6. 其余写/执行 → 询问
+ * 5. 敏感目标：即使 acceptEdits 也必须问（按参数分级）
+ * 6. acceptEdits 且是工作区内、非敏感的写 → 放行
+ * 7. 其余写/执行 → 询问
+ *
+ * **W10g 起本函数才真正接入执行路径**：此前它只被自己的测试调用，
+ * 执行器只按 `tool.kind` 询问 —— 也就是说模式、敏感路径、高危清单在运行时全是死代码。
+ * 这个缺陷由复核 010 的接线检查发现并修复。
  */
 export function decideGate(ctx: GateContext): GateDecision {
   const target = pathOf(ctx.args);
+
+  // 0) 用户规则：优先于模式（见 GateContext.rules 的说明）
+  const matched = ctx.rules ? matchRules(ctx.rules, ctx.toolName) : null;
+  if (matched?.action === 'deny') {
+    return { action: 'deny', reason: matched.reason, risk: 'high' };
+  }
+  if (matched?.action === 'ask') {
+    return { action: 'ask', reason: matched.reason, risk: 'high' };
+  }
+  if (matched?.action === 'allow' && ctx.mode !== 'plan' && ctx.mode !== 'dontAsk') {
+    return { action: 'allow', reason: matched.reason, risk: 'low' };
+  }
 
   // 1) 只读且可逆：不打扰用户
   if (ctx.kind === 'read') {

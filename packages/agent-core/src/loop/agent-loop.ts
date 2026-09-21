@@ -1,4 +1,6 @@
 import { runTool, type PermissionResolver, type RunToolResult } from '../tools/executor';
+import type { PermissionMode } from '../permissions/policy';
+import type { PermissionRule } from '../permissions/rules';
 import type { StoredTool } from '../tools/types';
 import type { ToolRegistry } from '../tools/registry';
 import { streamChat, type ProviderDeps } from '../providers/openai-compat';
@@ -77,6 +79,10 @@ export interface AgentLoopDeps extends ProviderDeps {
   permission: PermissionResolver;
   /** 会话级「总是允许」白名单 */
   alwaysAllow?: Set<string>;
+  /** 权限模式（W10g 起接入执行路径；不传 = default） */
+  mode?: PermissionMode | undefined;
+  /** 用户自定义权限规则（allow/deny/ask，按工具名 glob） */
+  rules?: ReadonlyArray<PermissionRule>;
   /** 可注入，便于单测（默认用真实 streamChat） */
   chat?: typeof streamChat | undefined;
   /** 可注入，便于单测（默认用真实 runTool） */
@@ -250,7 +256,12 @@ async function executeOne(
     call.arguments,
     { workspaceRoot: deps.workspaceRoot },
     deps.permission,
-    deps.alwaysAllow ? { alwaysAllow: deps.alwaysAllow } : {},
+    {
+      ...(deps.alwaysAllow ? { alwaysAllow: deps.alwaysAllow } : {}),
+      // 模式与规则随调用传入：策略层（decideGate）在 W10g 起才真正作用于执行
+      ...(deps.mode ? { mode: deps.mode } : {}),
+      ...(deps.rules ? { rules: deps.rules } : {}),
+    },
   );
   return {
     ok: result.outcome.ok,

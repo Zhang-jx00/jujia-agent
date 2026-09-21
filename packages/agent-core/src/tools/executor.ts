@@ -1,4 +1,6 @@
 import { ToolError, type StoredTool, type ToolContext, type ToolKind, type ToolOutcome } from './types';
+import { decideGate, type PermissionMode } from '../permissions/policy';
+import type { PermissionRule } from '../permissions/rules';
 
 /**
  * 工具执行器：**所有工具执行的唯一入口**，权限门在这里，不在工具内部。
@@ -54,6 +56,13 @@ export interface RunToolOptions {
   alwaysAllow?: Set<string>;
   /** 生成请求 id 的方式（测试可注入确定性实现） */
   newId?: () => string;
+  /**
+   * 权限模式（默认 `'default'`）。**W10g 起才真正接入**：此前策略层（decideGate）
+   * 只被自己的测试调用，模式与敏感路径在运行时是死代码。
+   */
+  mode?: PermissionMode;
+  /** 用户自定义规则（allow/deny/ask，按工具名 glob）。deny / ask 优先于模式 */
+  rules?: ReadonlyArray<PermissionRule>;
 }
 
 export interface RunToolResult {
@@ -93,13 +102,34 @@ export async function runTool(
     };
   }
 
-  // 2) 权限门
-  const needsApproval = tool.kind !== 'read';
+  // 2) 权限门 —— 先过策略层（模式 + 用户规则），再决定要不要问。
+  //    注意：deny / ask 规则对**只读**工具同样生效（用户可以要求"这个只读工具也要问我"），
+  //    因此不再用 `tool.kind !== 'read'` 作为唯一判据。
+  const gate = decideGate({
+    mode: opts.mode ?? 'default',
+    toolName: tool.name,
+    kind: tool.kind,
+    args: args as Record<string, unknown>,
+    ...(opts.rules ? { rules: opts.rules } : {}),
+  });
+
+  if (gate.action === 'deny') {
+    return {
+      outcome: {
+        ok: false,
+        content: `已按你的权限设置拒绝本次 ${tool.name}：${gate.reason}。请不要重试同一操作，改为向用户说明或换个思路。`,
+      },
+      asked: false,
+      decision: 'deny',
+      durationMs: Date.now() - started,
+    };
+  }
+
   const alwaysAllowed = opts.alwaysAllow?.has(tool.name) ?? false;
   let asked = false;
   let decision: PermissionDecision | undefined;
 
-  if (needsApproval && !alwaysAllowed) {
+  if (gate.action === 'ask' && !alwaysAllowed) {
     asked = true;
     const paths = collectPaths(rawArgs);
     const answer = normalizeAnswer(
