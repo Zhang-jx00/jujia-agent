@@ -1,12 +1,12 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { AppInfo, ConfigSnapshot, ConnectionView } from '@jujia/shared-ipc';
-import {
-  BUILTIN_PACKS,
-  validateThemePack,
-  themePackToCssVars,
-  type ThemePack,
-} from '@jujia/ui-tokens';
+/**
+ * 只做 **类型导入**（编译后会被完全擦除，不进产物）。
+ * 运行时逻辑改为在启动时**动态 import**，避免把 ui-tokens 拉进首屏 chunk
+ * —— 实测它会让首屏 chunk 多出约 40KB 并推迟首帧（见 PERF-BUDGET 的回归记录）。
+ */
+import type { ThemePack } from '@jujia/ui-tokens';
 import { WorkspaceCard } from './features/workspace/WorkspaceCard';
 import { PermissionDialog } from './features/permission/PermissionDialog';
 
@@ -24,8 +24,7 @@ const TerminalPanel = lazy(() =>
   import('./features/terminal/TerminalPanel').then((m) => ({ default: m.TerminalPanel })),
 );
 
-/** 配置里没有可用样式包时的兜底（内置第一个） */
-const DEFAULT_PACK_FALLBACK: ThemePack = BUILTIN_PACKS[0] as ThemePack;
+/** 兜底样式包改为在启动时从动态导入的模块里取，见下方 useEffect（首屏不加载 ui-tokens） */
 
 interface Loaded {
   info: AppInfo;
@@ -62,8 +61,12 @@ export function App(): ReactElement {
   const [state, setState] = useState<LoadState>({ phase: 'loading' });
   const [tab, setTab] = useState<Tab>('overview');
   const [connections, setConnections] = useState<ConnectionView[]>([]);
-  /** 当前样式包：优先用配置里保存的，否则用内置默认包 */
-  const [themePack, setThemePack] = useState<ThemePack>(DEFAULT_PACK_FALLBACK);
+  /**
+   * 当前样式包。
+   * 启动时由**动态导入**的模块解析后填入；解析完成前为 null（外观页显示骨架屏）。
+   * 这样首屏完全不依赖 ui-tokens。
+   */
+  const [themePack, setThemePack] = useState<ThemePack | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -81,16 +84,28 @@ export function App(): ReactElement {
     };
   }, []);
 
-  // 启动即应用已保存的外观（在首帧之前设置，避免「先默认后变色」的闪烁）
+  // 启动即应用已保存的外观。
+  // 关键：**动态导入** ui-tokens —— 它不参与首屏渲染，因此首帧不等待它。
+  // 代价是"极短暂地显示默认样式后再切外观"，比首帧变慢更划算（首屏性能优先）。
   useEffect(() => {
     if (state.phase !== 'ready') return;
     const saved = state.loaded.config.config.appearance;
-    const check = validateThemePack(saved.pack ?? null);
-    const pack = check.ok && check.pack ? check.pack : DEFAULT_PACK_FALLBACK;
-    setThemePack(pack);
-    const root = document.documentElement;
-    for (const [k, v] of Object.entries(themePackToCssVars(pack))) root.style.setProperty(k, v);
-    root.dataset['jjBgKind'] = pack.background.kind;
+    let cancelled = false;
+    void (async () => {
+      const { BUILTIN_PACKS, validateThemePack, themePackToCssVars } = await import(
+        '@jujia/ui-tokens'
+      );
+      if (cancelled) return;
+      const check = validateThemePack(saved.pack ?? null);
+      const pack = (check.ok && check.pack ? check.pack : BUILTIN_PACKS[0]) as ThemePack;
+      const root = document.documentElement;
+      for (const [k, v] of Object.entries(themePackToCssVars(pack))) root.style.setProperty(k, v);
+      root.dataset['jjBgKind'] = pack.background.kind;
+      setThemePack(pack);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [state]);
 
   // 首帧回报（在布局与首次绘制之后触发，供 M18 启动性能实测使用）
@@ -160,7 +175,7 @@ export function App(): ReactElement {
           {state.phase === 'ready' && tab === 'terminal' && (
             <TerminalPanel workspaceRoot={state.loaded.config.config.workspace} />
           )}
-          {state.phase === 'ready' && tab === 'appearance' && (
+          {state.phase === 'ready' && tab === 'appearance' && themePack !== null && (
             <AppearancePanel
               pack={themePack}
               onSave={async (pack) => {
