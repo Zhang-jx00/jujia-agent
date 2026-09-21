@@ -6,6 +6,48 @@
 
 ---
 
+## [v0.14.2-devfix] — 2026-09-21 22:35
+
+**阶段**：修复 **dev 模式黑屏**（用户实测发现）—— 依赖版本错配
+**范围**：`apps/desktop/package.json`（`@vitejs/plugin-react` ^6.1.1 → **^5.2.0**）· `package-lock.json` ·
+新增 `apps/desktop/scripts/verify-dev-transform.mjs`
+
+**现象**：`npm run dev` 窗口黑屏，vite 报 `Missing field 'moduleType'`（Plugin: builtin:vite-react-refresh-wrapper）。
+打包构建与 smoke 一直是好的。
+
+**根因（联网核实后确认，来源 npm registry 元数据，核实时间 2026-09-21 22:10）**
+
+- `@vitejs/plugin-react@6.x` 的 peer 要求 **`vite: ^8.0.0`**（vite 8 = rolldown 线）；
+- `electron-vite@5.0.0` 的 peer 只支持 **`vite: ^5 || ^6 || ^7`**；
+- 项目里是 vite **7.3.6** + plugin-react **6.1.1** —— **非法组合**：插件跨版本调用了 vite 8 的内部
+  react-refresh 包装器，于是 dev 崩。
+- 打包构建不经过 react-refresh，所以 smoke / perf 全绿也发现不了。
+  **这条坏链路自依赖选型起就存在** —— 此前从未运行过 `npm run dev`（验收清单里没有"跑一遍 dev"这一项）。
+
+**修复**：`@vitejs/plugin-react` 降到 **5.2.0**（peer `vite ^4.2 || ^5 || ^6 || ^7 || ^8`，两条线都兼容；
+npm 树核对：plugin-react / electron-vite / desktop 三方现在解析到**同一个 vite 7.3.6**）。
+不选"升 vite 8"：electron-vite 5 不支持，硬上会违反 peer 约束。
+
+**新增回归断言：`verify-dev-transform.mjs`（无头 dev 管线探针）**
+
+读**真实的** `electron.vite.config.ts` → 起 dev server → 真的请求渲染层模块，断言：
+index.html 可用 · **App.tsx 里有 react-refresh 注入的 `$RefreshReg$`** ·
+`/@react-refresh` 返回 JS（而非 SPA 回退 HTML）· 别名可解析。退出码 0/1。
+
+> 探针第一版被两个假象骗过：① esbuild 的 automatic JSX 也会产生 jsx-runtime 引入，
+> 不能用"有没有 jsx-runtime"判断插件在不在；② dev 对未知路径走 SPA 回退返回 **200 的 HTML**，
+> 不能只看状态码。已换成只有 react 插件才注入的特征。
+> 这与复核 007（注释过滤）、010（空转测试）是同一类教训：**断言必须钉住"只有目标实现才有的特征"**。
+
+**探针有效性已用变异验证**：临时移除 `electron.vite.config.ts` 里的 `react()` → 探针红
+（缺 `$RefreshReg$` + refresh 端点变成 HTML 回退）；还原后复跑通过。
+
+**验证**：探针 OK · typecheck 通过 · lint 0 error 0 warning · 全量 **480/480** · smoke **OK**
+
+**回退点**：`git checkout v0.14.1-review`
+
+---
+
 ## [v0.14.1-review] — 2026-09-21 21:50
 
 **阶段**：复核 010 —— 对象 **W5c**（权限规则表）+ 策略层激活
