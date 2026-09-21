@@ -18,8 +18,13 @@ import {
   type StreamEvent,
   type TestResult,
   type ToolRunResult,
+  terminalInputSchema,
+  terminalKillSchema,
+  terminalResizeSchema,
+  terminalStartSchema,
 } from '@jujia/shared-ipc';
 import { validateThemePack } from '@jujia/ui-tokens';
+import { TerminalService } from './terminal-service';
 import { createDefaultRegistry, runTool, type ToolRegistry } from '@jujia/agent-core';
 import { listModels } from '@jujia/agent-core';
 import { clearWorkspace, getWorkspaceInfo, pickWorkspace } from './workspace';
@@ -100,6 +105,55 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       }
     }
     return configSnapshotSchema.parse(await writeConfig(clean));
+  });
+
+  /* ---------------------------- 内置终端（W9b） ---------------------------- */
+
+  // 终端服务：权限门用与工具层同一个 resolver（终端归 exec 类，每次都问）
+  const terminal = new TerminalService(
+    (event) => {
+      deps.getWindow?.()?.webContents.send(IPC.TERMINAL_STREAM, event);
+    },
+    // fail-closed：权限桥不可用时一律拒绝，绝不因为"取不到审批"就放行
+    (req) => {
+      const resolver = deps.permission?.resolve;
+      if (!resolver) return Promise.resolve('deny' as const);
+      return resolver(req);
+    },
+  );
+  // 应用退出时杀掉所有 PTY，避免留下僵尸子进程
+  app.on('before-quit', () => {
+    terminal.disposeAll();
+  });
+
+  ipcMain.handle(IPC.TERMINAL_START, async (_e, payload: unknown): Promise<unknown> => {
+    const parsed = terminalStartSchema.safeParse(payload);
+    if (!parsed.success) return { ok: false, error: '终端参数不合法' };
+    // 只允许在工作区内开终端：工作区不合法时直接拒绝，不静默改成别的目录
+    const ws = await getWorkspaceInfo();
+    if (!ws.valid) return { ok: false, error: '尚未选择工作区，无法启动终端' };
+    if (parsed.data.workspaceRoot !== ws.root) {
+      return { ok: false, error: '终端只能开在当前工作区内' };
+    }
+    return terminal.start({ workspaceRoot: ws.root, ...(parsed.data.cols !== undefined ? { cols: parsed.data.cols } : {}), ...(parsed.data.rows !== undefined ? { rows: parsed.data.rows } : {}) });
+  });
+
+  ipcMain.handle(IPC.TERMINAL_INPUT, async (_e, payload: unknown): Promise<boolean> => {
+    const parsed = terminalInputSchema.safeParse(payload);
+    if (!parsed.success) return false;
+    return terminal.write(parsed.data.sessionId, parsed.data.data);
+  });
+
+  ipcMain.handle(IPC.TERMINAL_RESIZE, async (_e, payload: unknown): Promise<boolean> => {
+    const parsed = terminalResizeSchema.safeParse(payload);
+    if (!parsed.success) return false;
+    return terminal.resize(parsed.data.sessionId, { cols: parsed.data.cols, rows: parsed.data.rows });
+  });
+
+  ipcMain.handle(IPC.TERMINAL_KILL, async (_e, payload: unknown): Promise<boolean> => {
+    const parsed = terminalKillSchema.safeParse(payload);
+    if (!parsed.success) return false;
+    return terminal.kill(parsed.data.sessionId);
   });
 
   /* ---------------------------- 连接管理 ---------------------------- */

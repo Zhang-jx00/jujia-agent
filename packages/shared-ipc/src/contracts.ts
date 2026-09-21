@@ -223,3 +223,50 @@ export const toolRunResultSchema = z.object({
   paths: z.array(z.string()),
 });
 export type ToolRunResult = z.infer<typeof toolRunResultSchema>;
+
+/* ------------------------------------------------------------------ *
+ * W9b：内置终端
+ * ------------------------------------------------------------------ */
+
+/** 新建终端的入参：只允许工作区根目录（终端不能开在工作区之外） */
+export const terminalStartSchema = z.object({
+  workspaceRoot: z.string().min(1).max(1000),
+  cols: z.number().int().positive().max(500).optional(),
+  rows: z.number().int().positive().max(300).optional(),
+});
+export type TerminalStartPayload = z.infer<typeof terminalStartSchema>;
+
+export const terminalStartResultSchema = z.union([
+  z.object({ ok: z.literal(true), sessionId: z.string() }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type TerminalStartResultPayload = z.infer<typeof terminalStartResultSchema>;
+
+export const terminalInputSchema = z.object({
+  sessionId: z.string().min(1),
+  /** 输入长度设上限：粘贴超长文本时避免一次打爆 IPC */
+  data: z.string().max(64 * 1024),
+});
+
+export const terminalResizeSchema = z.object({
+  sessionId: z.string().min(1),
+  cols: z.number(),
+  rows: z.number(),
+});
+
+export const terminalKillSchema = z.object({ sessionId: z.string().min(1) });
+
+/** main → renderer 的终端事件 */
+export const terminalEventSchema = z.union([
+  z.object({
+    type: z.literal('data'),
+    sessionId: z.string(),
+    chunk: z.string(),
+  }),
+  z.object({
+    type: z.literal('exit'),
+    sessionId: z.string(),
+    exitCode: z.number().int(),
+  }),
+]);
+export type TerminalEventPayload = z.infer<typeof terminalEventSchema>;

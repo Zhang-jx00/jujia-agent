@@ -19,6 +19,9 @@
     "@jujia/shared": "*",
     "@jujia/shared-ipc": "*",
     "@jujia/ui-tokens": "*",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

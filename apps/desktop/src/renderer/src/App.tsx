@@ -20,6 +20,9 @@ const ChatPanel = lazy(() =>
 const AppearancePanel = lazy(() =>
   import('./features/appearance/AppearancePanel').then((m) => ({ default: m.AppearancePanel })),
 );
+const TerminalPanel = lazy(() =>
+  import('./features/terminal/TerminalPanel').then((m) => ({ default: m.TerminalPanel })),
+);
 
 /** 配置里没有可用样式包时的兜底（内置第一个） */
 const DEFAULT_PACK_FALLBACK: ThemePack = BUILTIN_PACKS[0] as ThemePack;
@@ -34,7 +37,7 @@ type LoadState =
   | { phase: 'ready'; loaded: Loaded }
   | { phase: 'error'; message: string };
 
-type Tab = 'overview' | 'connections' | 'chat' | 'appearance';
+type Tab = 'overview' | 'connections' | 'chat' | 'terminal' | 'appearance';
 
 const sourceLabel: Record<ConfigSnapshot['source'], string> = {
   primary: '主文件',
@@ -46,6 +49,7 @@ const TAB_LABEL: Record<Tab, string> = {
   overview: '概览',
   connections: '连接',
   chat: '对话',
+  terminal: '终端',
   appearance: '外观',
 };
 
@@ -153,6 +157,9 @@ export function App(): ReactElement {
             <ConnectionsPanel onChanged={setConnections} />
           )}
           {state.phase === 'ready' && tab === 'chat' && <ChatPanel connections={connections} />}
+          {state.phase === 'ready' && tab === 'terminal' && (
+            <TerminalPanel workspaceRoot={state.loaded.config.config.workspace} />
+          )}
           {state.phase === 'ready' && tab === 'appearance' && (
             <AppearancePanel
               pack={themePack}

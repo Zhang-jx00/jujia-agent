@@ -860,3 +860,36 @@ html[data-jj-bg-kind='glass'] .app-shell {
   max-width: var(--jj-bubble-max-width, 88%);
   gap: var(--jj-density-gap, 12px);
 }
+
+/* ============================ 内置终端（W9b） ============================ */
+
+.jj-terminal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-lg) var(--space-xl);
+  min-height: 0;
+  height: 100%;
+}
+
+.jj-terminal-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.jj-terminal-host {
+  flex: 1 1 auto;
+  min-height: 240px;
+  padding: var(--space-xs);
+  background: var(--c-bg-input);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* xterm 自带容器高度策略，这里补一条避免撑破父容器 */
+.jj-terminal-host .xterm {
+  height: 100%;
+}

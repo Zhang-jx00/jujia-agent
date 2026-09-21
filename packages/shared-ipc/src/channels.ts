@@ -39,6 +39,23 @@ export const IPC = {
   /** main → renderer：应用状态变化广播（预留） */
   APP_STATE_CHANGED: 'app:state-changed',
 
+  /* ---------------------------- 内置终端（W9b） ---------------------------- */
+
+  /** 新建终端会话（**会先弹权限审批**） */
+  TERMINAL_START: 'terminal:start',
+
+  /** 向终端写入输入 */
+  TERMINAL_INPUT: 'terminal:input',
+
+  /** 调整终端尺寸 */
+  TERMINAL_RESIZE: 'terminal:resize',
+
+  /** 结束终端会话 */
+  TERMINAL_KILL: 'terminal:kill',
+
+  /** main → renderer：终端数据与退出事件 */
+  TERMINAL_STREAM: 'terminal:stream',
+
   /** 渲染层首帧回报（M18 启动性能实测） */
   PERF_FIRST_PAINT: 'perf:first-paint',
 } as const;

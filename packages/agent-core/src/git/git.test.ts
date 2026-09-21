@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   commit,
   DIFF_HIGHLIGHTS_PER_FILE,
@@ -24,6 +24,12 @@ import {
  * - 写操作（stage/commit）可用，且参数走数组不拼 shell（用含空格/中文的路径验证）；
  * - 非仓库/无 git 时给出可读错误而不是抛异常。
  */
+
+// 本文件每个用例都会真实 spawn 多个 git 子进程（beforeEach 里 6 次）。
+// 实测本机单次 git 进程启动约 0.7–1s（Windows + 安全软件扫描），整文件跑下来近 3 分钟；
+// 用默认 5s 超时会**偶发失败**——那是环境慢，不是断言错。这里给足时间，
+// 让失败只代表真实问题（2026-09-21 实测：单独跑全过，但单例耗时 4–6s）。
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 const run = promisify(execFile);
 let repo: string;

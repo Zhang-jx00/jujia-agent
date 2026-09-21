@@ -26,6 +26,15 @@ import {
   type TestResult,
   type ToolRunResult,
   type WorkspaceInfo,
+  terminalEventSchema,
+  terminalInputSchema,
+  terminalKillSchema,
+  terminalResizeSchema,
+  terminalStartResultSchema,
+  terminalStartSchema,
+  type TerminalEventPayload,
+  type TerminalStartPayload,
+  type TerminalStartResultPayload,
 } from '@jujia/shared-ipc';
 
 /**
@@ -138,6 +147,41 @@ const api = {
         updatedArgs === undefined ? { id, decision: parsed } : { id, decision: parsed, updatedArgs },
       ),
     );
+  },
+
+  /* ---------------------------- 内置终端（W9b） ---------------------------- */
+
+  /** 新建终端会话（主进程会先弹权限审批） */
+  async terminalStart(
+    payload: TerminalStartPayload,
+  ): Promise<TerminalStartResultPayload> {
+    const parsed = terminalStartSchema.parse(payload);
+    return terminalStartResultSchema.parse(await ipcRenderer.invoke(IPC.TERMINAL_START, parsed));
+  },
+
+  async terminalInput(sessionId: string, data: string): Promise<boolean> {
+    const parsed = terminalInputSchema.parse({ sessionId, data });
+    return z.boolean().parse(await ipcRenderer.invoke(IPC.TERMINAL_INPUT, parsed));
+  },
+
+  async terminalResize(sessionId: string, cols: number, rows: number): Promise<boolean> {
+    const parsed = terminalResizeSchema.parse({ sessionId, cols, rows });
+    return z.boolean().parse(await ipcRenderer.invoke(IPC.TERMINAL_RESIZE, parsed));
+  },
+
+  async terminalKill(sessionId: string): Promise<boolean> {
+    const parsed = terminalKillSchema.parse({ sessionId });
+    return z.boolean().parse(await ipcRenderer.invoke(IPC.TERMINAL_KILL, parsed));
+  },
+
+  /** 订阅终端事件；返回取消订阅函数 */
+  onTerminalStream(handler: (event: TerminalEventPayload) => void): () => void {
+    const listener = (_e: unknown, payload: unknown): void => {
+      const parsed = terminalEventSchema.safeParse(payload);
+      if (parsed.success) handler(parsed.data);
+    };
+    ipcRenderer.on(IPC.TERMINAL_STREAM, listener);
+    return () => ipcRenderer.removeListener(IPC.TERMINAL_STREAM, listener);
   },
 
   /** 首帧回报（M18）：渲染层挂载完成后调用一次 */
