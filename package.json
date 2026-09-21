@@ -32,5 +32,14 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.0",
     "vitest": "^5.0.1"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Zhang-jx00/jujia-agent.git"
+  },
+  "homepage": "https://github.com/Zhang-jx00/jujia-agent#readme",
+  "bugs": {
+    "url": "https://github.com/Zhang-jx00/jujia-agent/issues"
+  },
+  "author": "Zhang-jx00 and 俱佳Agent contributors"
 }

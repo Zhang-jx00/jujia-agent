@@ -1,14 +1,63 @@
 # 俱佳Agent
 
-面向 Windows 的个人桌面编码/助手 Agent（学习项目）。
+一个**跑在你自己 Windows 上**的个人 Agent：能读文件、改代码、跑命令，
+但**每个有副作用的动作都要你点头**，数据默认不出本机。
 
-- **形态**：TypeScript + Electron
-- **目标**：系统学习 Agent 全栈知识，并做出属于自己的可运行桌面 Agent
+- **形态**：TypeScript + Electron（本地优先，单机运行，无需服务端）
+- **许可**：MIT（见 [`LICENSE`](LICENSE)）
+- **支持平台**：**Windows 10/11**（打包产物为 Windows 安装包）。源码层面对 macOS / Linux
+  做了兼容处理，但**尚未在这些平台上验证**，欢迎你来补验证。
+
+> **⚠️ 先读安全说明**：这个项目**会执行命令、会改你的文件**，它**不是安全沙箱**。
+> 使用前请务必看 [`SECURITY.md`](SECURITY.md)（能做什么/没做什么、如何报告漏洞、使用建议）。
+
+## 快速开始
+
+### 方式 A：直接下载安装包（推荐给使用者）
+
+到 [Releases](https://github.com/Zhang-jx00/jujia-agent/releases) 下载：
+
+| 文件 | 说明 |
+|------|------|
+| `JujiaAgent-Setup-x.y.z.exe` | NSIS 安装包（可选安装目录、带卸载） |
+| `JujiaAgent-x.y.z-portable.exe` | 免安装版，双击即用 |
+
+> 未做代码签名，首次运行会有 SmartScreen 提示 → 选「更多信息 → 仍要运行」。
+> 请核对下载来源是本仓库的 Releases 页面。
+
+**首次使用三步**：① 「连接」页填你的模型 API Key 并「测试」→
+② 「概览」页**选一个工作区目录**（Agent 只能在这个目录内读写）→
+③ 「对话」页试试：`帮我在工作区创建一个 hello.md，内容写「你好，俱佳」`（会弹审批）。
+
+### 方式 B：从源码跑（推荐给开发者）
+
+```bash
+git clone https://github.com/Zhang-jx00/jujia-agent.git
+cd jujia-agent
+npm install
+
+npm run dev            # 开发模式
+npm run typecheck      # 类型检查
+npm run lint           # 静态检查
+npm run test           # 单元 + 集成测试
+npm run smoke          # 真实启动 Electron，断言 IPC 全链路 + 渲染层无 Node 泄漏
+npm run perf           # 启动性能预算判定（首帧 < 1000ms）
+
+npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/）
+```
+
+需要 **Node.js ≥ 22**。内置终端的依赖若装不上，看 [`docs/SETUP-TERMINAL.md`](docs/SETUP-TERMINAL.md)。
+
+## 参与贡献
+
+提交前请读 [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 里面写了这个项目对质量的具体要求
+（五件套门禁、复核两遍与变异测试、来源宁缺勿滥、绝不假称完成等），它们都来自实际踩过的坑。
 
 ## 目录
 
 | 路径 | 说明 |
 |------|------|
+| `LICENSE` · `SECURITY.md` · `CONTRIBUTING.md` | 开源三件套：许可 / **安全策略与漏洞披露** / 贡献指南 |
 | `CHANGELOG.md` | **变更与回退账本**：每阶段的时间戳、改动范围、验证方式、回退点 |
 | `docs/PRODUCT-GOAL.md` | **产品最终目标**（做完之后长什么样、验收标准、与 2026 主流路线的取舍） |
 | `docs/ARCH-CLOUD-IDE.md` | **架构补充**：轻量 IDE + 本地/云端任务调度 + 高可定制化外观（含三条设计律） |

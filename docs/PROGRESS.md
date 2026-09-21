@@ -82,6 +82,25 @@ cd D:/MiMo/ProjectOne/俱佳agent && npm i -w @jujia/desktop node-pty @xterm/xte
 
 ---
 
+## 二·五、开源就绪（2026-09-21 新增验收线）
+
+用户明确：本项目**会开源、给别人下载使用**。已完成 / 待办如下。
+
+| 项 | 状态 | 说明 |
+|----|------|------|
+| `LICENSE`（MIT） | ✅ | package.json 原本已声明 MIT，但**缺许可正文**，已补 |
+| `SECURITY.md` | ✅ | 能做什么/没做什么、使用建议、**私密漏洞披露渠道（不开公开 issue）**、支持范围 |
+| `CONTRIBUTING.md` | ✅ | 环境、五件套门禁、六条硬规矩（含「绝不假称完成」「来源宁缺勿滥」）、代码约定 |
+| README 面向他人 | ✅ | 新增「快速开始」（安装包 / 源码两条路径）、支持平台、安全提示、贡献入口 |
+| `package.json` 元信息 | ✅ | 补 repository / homepage / bugs / author |
+| 源码无本机绝对路径 | ✅ 已审计 | 全量扫描 apps/packages/scripts，无命中 |
+| 依赖显式声明 | ✅ | node-pty / @xterm/xterm / @xterm/addon-fit 均在 `apps/desktop/package.json` |
+| 可复现构建 | ✅ | `package-lock.json` 已入库 |
+| **应用图标** | ⏳ 待办 | 当前用默认 Electron 图标，别人下载会觉得"没做完" |
+| Issue / PR 模板 | ⏳ 待办 | 开源协作标配 |
+| `CODE_OF_CONDUCT.md` | ⏳ 待办 | 可选，但开源标配 |
+| 跨平台 | ⏳ 已声明不支持 | 仅 Windows；macOS/Linux **未验证**，已在 README 如实写明 |
+
 ## 三、下一个动作
 
 **W9 的方案 A 正在实测**（在临时目录里装预编译 pty 包并跑一次真实 PTY，不污染项目）。
