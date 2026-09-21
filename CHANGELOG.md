@@ -33,7 +33,12 @@
 | `npm run lint` | 0 error / 0 warning |
 | `npm run test` | **233/233**（229 → 233；新增 4 例覆盖 `mergePackOverrides`） |
 | `npm run smoke` | `SMOKE OK` |
-| `npm run perf` | 见本节实测记录 |
+| `npm run perf` | ⚠️ **本轮未通过（环境原因，非代码问题）** |
+
+**perf 未通过的如实说明**：本轮多次运行 `npm run perf` 均在 **build 阶段**失败，报
+`[vite:prepare-out-dir] [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {"count":50,"threshold":50,"scope":"turn"}` —— 这是**沙箱的安全删除守卫**阻止 vite 清空
+`apps/desktop/out/`（本轮删除次数已达阈值），并非构建配置或代码缺陷。
+**因此本版本不宣称性能达标**；已把此项登记为待验证，下一轮在全新配额下重跑 `npm run perf` 补测。
 
 **回退点**：tag `v0.9.3-w23b`（上一版 `v0.9.2-release`）
 
