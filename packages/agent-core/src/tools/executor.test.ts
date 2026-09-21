@@ -385,3 +385,71 @@ describe('策略层接入（W10g）：模式与用户规则真正作用于执行
     expect(asked).toHaveLength(1);
   });
 });
+
+describe('对抗性实验（复核 010）：模式 + 规则叠加时，不该发生的事必须不发生', () => {
+  it('plan 模式下模型尝试写敏感文件（.env）→ 被拒且磁盘未动，且不弹窗', async () => {
+    const target = join(root, '.env.local');
+    const res = await runTool(
+      writeFileTool,
+      { path: target, content: 'TOKEN=leaked' },
+      ctx(),
+      () => {
+        throw new Error('plan 模式下不应询问用户');
+      },
+      { mode: 'plan' },
+    );
+    expect(res.outcome.ok).toBe(false);
+    expect(res.asked).toBe(false);
+    await expect(stat(target)).rejects.toThrow();
+  });
+
+  it('deny 规则 + alwaysAllow + bypassPermissions 三者叠加：deny 仍然赢', async () => {
+    const target = join(root, 'guard.txt');
+    const res = await runTool(
+      writeFileTool,
+      { path: target, content: 'x' },
+      ctx(),
+      () => {
+        throw new Error('deny 规则命中时不应询问用户');
+      },
+      {
+        mode: 'bypassPermissions',
+        alwaysAllow: new Set(['write_file']),
+        rules: [{ id: 'r1', pattern: 'write_*', action: 'deny', note: '绝不写入', enabled: true, createdAt: '', updatedAt: '' }],
+      },
+    );
+    expect(res.decision).toBe('deny');
+    expect(res.outcome.ok).toBe(false);
+    expect(res.outcome.content).toContain('绝不写入');
+    await expect(stat(target)).rejects.toThrow();
+  });
+
+  it('ask 规则命中只读工具：拒绝后磁盘未动、结果如实回传（不伪装成功）', async () => {
+    const res = await runTool(
+      readFileTool,
+      { path: join(root, 'secret.txt') },
+      ctx(),
+      async () => 'deny',
+      { rules: [{ id: 'r1', pattern: 'read_*', action: 'ask', enabled: true, createdAt: '', updatedAt: '' }] },
+    );
+    expect(res.asked).toBe(true);
+    expect(res.outcome.ok).toBe(false);
+    expect(res.outcome.content).toContain('用户拒绝');
+  });
+
+  it('禁用的 deny 规则不再拦截（开关必须真实生效，不是摆设）', async () => {
+    const target = join(root, 'allowed.txt');
+    const res = await runTool(
+      writeFileTool,
+      { path: target, content: 'ok' },
+      ctx(),
+      async () => 'allow_once',
+      {
+        rules: [{ id: 'r1', pattern: 'write_*', action: 'deny', enabled: false, createdAt: '', updatedAt: '' }],
+      },
+    );
+    expect(res.asked).toBe(true);
+    expect(res.outcome.ok).toBe(true);
+    await expect(stat(target)).resolves.toBeTruthy();
+  });
+});

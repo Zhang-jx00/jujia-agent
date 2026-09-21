@@ -75,6 +75,15 @@ describe('工具注册表接线（防止各处各建一个）', () => {
     expect(callBody).toContain('rules: policy.rules');
   });
 
+  it('工具执行链路也带上权限模式与规则（否则规则表只对对话生效）', () => {
+    const from = ipcSource.indexOf('runTool(');
+    expect(from).toBeGreaterThan(-1);
+    const callBody = ipcSource.slice(from, from + 900).split(');')[0] ?? '';
+    expect(callBody).toContain('mode: policy.mode');
+    expect(callBody).toContain('rules: policy.rules');
+    expect(callBody).not.toContain('createDefaultRegistry()');
+  });
+
   it('MCP 服务拿到的是同一个实例', () => {
     expect(ipcSource).toContain('const mcp = new McpService({\n    registry,');
   });
