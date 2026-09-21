@@ -33,7 +33,13 @@
 | `npm run lint` | 0 error / 0 warning |
 | `npm run test` | **233/233**（229 → 233；新增 4 例覆盖 `mergePackOverrides`） |
 | `npm run smoke` | `SMOKE OK` |
-| `npm run perf` | ⚠️ **本轮未通过（环境原因，非代码问题）** |
+| `npm run perf` | ✅ **通过**：首帧 **709ms**（预算 1000ms），退出码 0 |
+
+**perf 补测记录**：上一轮因沙箱安全删除守卫（同轮删除次数达阈值）导致 build 阶段失败而未能验证；
+本轮在新配额下重跑 **`PERF OK`：main:start 0ms → window-created 281ms → 首帧 709ms**。
+**观察项（不做过断言）**：本次 709ms 高于上一轮记录的 589ms。但**未做多次采样**，
+单次样本不足以断言退化（也可能是机器负载波动）。已登记为观察项：
+若后续两轮仍稳定高于 650ms，再按「启动回归」排查（首选怀疑对象：启动时新增的外观应用 effect）。
 
 **perf 未通过的如实说明**：本轮多次运行 `npm run perf` 均在 **build 阶段**失败，报
 `[vite:prepare-out-dir] [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {"count":50,"threshold":50,"scope":"turn"}` —— 这是**沙箱的安全删除守卫**阻止 vite 清空
