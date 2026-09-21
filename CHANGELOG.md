@@ -6,6 +6,43 @@
 
 ---
 
+## [v0.11.3-packverify] — 2026-09-21 15:18
+
+**阶段**：W12 收尾 —— **打包链路验证完成**（上一轮登记的两个待验证项，本轮给出结论）
+**结论文档**：`knowledge/cards/016-electron-terminal-selection.md`「四·补」节
+
+| 实测项 | 结果 |
+|--------|------|
+| `npm run dist`（默认） | ❌ 失败：`@electron/rebuild` 源码编译 node-pty → `MSB8040`（本机 VS 缺 Spectre 缓解库） |
+| `npmRebuild = false` 后 | ✅ 打包成功（`skipped dependencies rebuild`） |
+| **node-pty 是否随包** | ✅ `app.asar.unpacked/node_modules/node-pty/prebuilds/win32-x64/` 含 `pty.node`、`conpty.node`、`conpty_console_list.node` |
+| **ABI 类型（符号扫描）** | ✅ **N-API**（`napi_` × 2 / `node_api_` × 1，**零** `node_module_register`） |
+| 打包入口完整 | ✅ `app.asar` 内含 `out/main/index.js` |
+
+**重要纠正（我自己写错的）**
+卡片 016 初版把 ABI 写成「最常见的翻车点，必须 electron-rebuild」。**实测证明不准确** ——
+node-pty 是 **N-API（ABI 稳定）** 模块，预编译二进制**跨 Node 与 Electron 版本通用**，
+这正是它「自带预编译、不需要编译工具链」的根本原因。社区「必须 rebuild」的说法针对
+**老式 ABI（`node_module_register`）模块**，不适用于它。已就地改正卡片并注明「初版判断不准确」。
+
+**过程中定位到的第二个问题（已解决）**
+第一次重跑打包报 `Application entry file "out\main\index.js" was not found` ——
+根因：**本项目约定 `scripts/cleanup.py` 会把 `out/` 当构建产物清理**，
+而我这次只跑了 `electron-builder` 而没跑 `electron-vite build`。
+**`npm run dist` 本身已含 build 步骤，是正确的入口。**
+
+**沙箱行为记录**：`rm -rf release/win-unpacked` 被 safe-delete **fail-closed 拦下**
+（trash 操作失败即拒绝）。因此改用**全新输出目录** `release-verify` 完成验证，事后已删除该临时目录。
+
+**仍未做的最后一步（不宣称已完成）**
+人工在**打包版的「终端」页实际开一次会话**（自动化 UI 验证成本高）。
+当前证据到「具备可用条件」这一层，**未到「已实测可用」**。
+
+**验证方式**：本轮为打包与产物验证操作，未改动应用代码。
+**回退点**：tag `v0.11.3-packverify`（上一版 `v0.11.2-logo`）
+
+---
+
 ## [v0.11.2-logo] — 2026-09-21 15:08
 
 **阶段**：品牌资产 —— 「俱佳」极简笔画字标（**理论研究完成 + 第一版失败，字标未交付**）

@@ -52,9 +52,23 @@ sources: 见文末（2026-09-20 联网检索）
 
 ## 四、无论选哪个都必须处理的工程要点（踩坑清单）
 
-1. **ABI 不匹配（最常见的翻车点）**：npm 装出来的二进制是针对系统 Node ABI 编译的，
-   Electron 自带另一个 Node → 加载时报 *"compiled against a different Node.js ABI version"*。
-   解法：`electron-rebuild -f -w node-pty`，并挂到 `postinstall`，**只重建这一个模块**（更快）。
+1. **ABI 问题：node-pty 其实是 N-API 模块，通常不需要 rebuild**（2026-09-21 实测纠正）
+
+   > ⚠️ **本文档初版把这条写成「最常见的翻车点、必须 electron-rebuild」，实测证明不准确。**
+   >
+   > **实测方法**：对 `node_modules/node-pty/prebuilds/win32-x64/pty.node` 做符号扫描 →
+   > 含 `napi_` 与 `node_api_` 符号，**完全不含老式 ABI 符号 `node_module_register`**。
+   >
+   > **结论**：**node-pty 走 N-API（ABI 稳定）**，因此它的预编译二进制**跨 Node 版本与
+   > Electron 版本通用** —— 这也正是它敢「自带预编译、不需要编译工具链」的根本原因。
+   >
+   > **实务含义**：
+   > - **无需 `electron-rebuild`**；社区教程里「必须 rebuild」的说法针对的是
+   >   **老式 ABI（`node_module_register`）模块**，不适用于 N-API 模块；
+   > - 若本机编译工具链不全（例如缺 Spectre 缓解库），**跳过 rebuild 是正确的**。
+   >   实测 `npmRebuild = false` 后打包成功，`prebuilds/win32-x64/` 下的
+   >   `pty.node`、`conpty.node`、`conpty_console_list.node` 均随包；
+   > - 但仍必须保证 **`asarUnpack`** 覆盖这些二进制（本项目已配 `**/*.node` 与 `node-pty/**`）。
 2. **打包必须 `asarUnpack`**：`.node` 与 pty 相关二进制不能被塞进 asar，否则运行时找不到。
 3. **要真彩色必须设终端类型**：`name: 'xterm-256color'` + 环境变量 `TERM=xterm-256color`、
    `COLORTERM=truecolor`，否则输出是单色的。
@@ -63,6 +77,24 @@ sources: 见文末（2026-09-20 联网检索）
    这也提示我们**"能装"不等于"在目标机器上能跑"**，最终验收要在干净 Windows 上验。
 6. **预编译下载依赖网络稳定**：本机走代理，下载预编译包可能失败 → 要准备重试/换源方案。
 7. **沙箱**：CI/沙箱里 npm 的 `spawn` 可能被拦截 —— **这类失败不要当成"装不上"的结论**（我这次就差点误判）。
+
+## 四·补 · 2026-09-21 打包实测补充（W12 收尾）
+
+| 实测项 | 结果 |
+|--------|------|
+| `npm run dist`（默认配置） | ❌ 失败：`@electron/rebuild` 试图源码编译 node-pty → `error MSB8040`（本机 VS 缺 Spectre 缓解库） |
+| 设 `build.npmRebuild = false` 后打包 | ✅ 成功（日志：`skipped dependencies rebuild reason=npmRebuild is set to false`） |
+| node-pty 是否随包 | ✅ `resources/app.asar.unpacked/node_modules/node-pty/prebuilds/win32-x64/` 内含 `pty.node` · `conpty.node` · `conpty_console_list.node` · `conpty/` |
+| ABI 类型判定（符号扫描） | ✅ **N-API**：`napi_` × 2、`node_api_` × 1，**无** `node_module_register` |
+| 打包入口完整性 | ✅ `app.asar` 内含 `out/main/index.js` |
+
+> ⚠️ **注意：`scripts/cleanup.py` 会清掉 `apps/desktop/out/`**，所以必须「**先 build 再打包**」。
+> `npm run dist` 本身已含 build 步骤，是正确入口；单独跑 `electron-builder` 会报
+> `Application entry file "out\main\index.js" was not found in this archive`。
+
+**结论**：终端在打包版中**具备可用条件**（N-API 二进制随包、无需 rebuild、入口完整）。
+**仍未做的最后一步**：人工在打包版的「终端」页**实际开一次会话**——
+自动化 UI 验证成本高，因此**不宣称已完成**。
 
 ## 五、结论（直接可执行）
 
