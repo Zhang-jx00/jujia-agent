@@ -32,6 +32,16 @@ export class ToolRegistry {
     return this.tools.has(name);
   }
 
+  /**
+   * 移除工具（MCP 服务端断开时使用）。
+   *
+   * 返回**是否真的移除了**：名字不存在时返回 false，而不是静默"成功"——
+   * 否则上层会以为工具已经不可调用，而实际上它还在表里。
+   */
+  unregister(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
   names(): string[] {
     return [...this.tools.keys()].sort();
   }
