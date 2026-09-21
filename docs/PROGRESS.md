@@ -97,7 +97,8 @@ cd D:/MiMo/ProjectOne/俱佳agent && npm i -w @jujia/desktop node-pty @xterm/xte
 | 依赖显式声明 | ✅ | node-pty / @xterm/xterm / @xterm/addon-fit 均在 `apps/desktop/package.json` |
 | 可复现构建 | ✅ | `package-lock.json` 已入库 |
 | **应用图标** | ✅ 可用（临时） | 深色圆角底 + 盾牌宝石图形；来源与许可见 `assets/icon/README.md`（含 AI 生成图像版权说明） |
-| **「俱佳」字标（极简笔画）** | ⏳ **进行中** | 理论研究完成、参数化生成器已交付，但**第一版未通过可读性检验**（读不出字）→ 已移除不合格产物；修正方法见 `assets/icon/DESIGN-NOTES.md` §5 |
+| **「俱佳」LOGO** | ✅ **已定案** | 采用**项目作者提供的图形**，仅做**黑白单色化**（只换 RGB、**alpha 逐字节保留** → 形状/构图零改动，脚本自检 122100 像素全一致）；文件与来源见 `assets/icon/README.md` |
+| 「俱佳」中文子品牌字标 | ➖ 不再自行构造 | 作者已提供正式 LOGO；此前手工构造失败的方法论保留在 `assets/icon/DESIGN-NOTES.md` 作参考 |
 | Issue / PR 模板 | ✅ 已完成 | `.github/`：缺陷报告（引导走私密渠道报安全问题）、功能建议、PR 模板（要求贴五件套真实输出 + 未完成项必填） |
 | `CODE_OF_CONDUCT.md` | ✅ 已完成 | 结合本项目约定（诚实标注未完成、接受被纠正）改写 |
 | 跨平台 | ⏳ 已声明不支持 | 仅 Windows；macOS/Linux **未验证**，已在 README 如实写明 |
