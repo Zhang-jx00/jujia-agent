@@ -270,3 +270,109 @@ export const terminalEventSchema = z.union([
   }),
 ]);
 export type TerminalEventPayload = z.infer<typeof terminalEventSchema>;
+
+/* ------------------------------------------------------------------ *
+ * MCP（W10e）
+ *
+ * 为什么这里**独立定义**一份形状，而不是从 @jujia/agent-core 导入类型：
+ * 渲染层绝不允许引入 agent-core（它带 node 内置依赖，进了浏览器包会直接让构建失败）。
+ * 代价是形状有两处定义，可能漂移 —— 因此主进程在把 agent-core 的结果发出去之前，
+ * 会用它下面的 schema 做一次 parse：**漂移会立刻抛错，而不是悄悄传一个字段对不上的对象给 UI**。
+ * ------------------------------------------------------------------ */
+
+/** 服务端连接状态。`exited` 与 `error` 要分开：前者是进程死了，后者是握手/启动失败 */
+export const mcpStateSchema = z.enum([
+  'idle',
+  'connecting',
+  'awaiting_approval',
+  'connected',
+  'error',
+  'exited',
+]);
+export type McpState = z.infer<typeof mcpStateSchema>;
+
+export const mcpServerInputSchema = z.object({
+  /** 省略表示新增；带上表示更新已存在的那个 */
+  id: z.string().min(1).max(64).optional(),
+  name: z.string().min(1).max(64),
+  /** 可执行文件（如 npx）。**含 shell 元字符会被主进程拒绝** */
+  command: z.string().min(1).max(300),
+  args: z.array(z.string().max(500)).max(50).default([]),
+  /**
+   * 额外的环境变量。**不要放密钥**（本项目约定密钥不进模型上下文）。
+   *
+   * 省略 → **不改动现有环境变量**。这不是可有可无的容错：
+   * 环境变量的**值从不回传到渲染层**（只回传键名），因此编辑界面拿不到原值，
+   * 若强制要求传 env，用户在界面上改个名字就会把值静默清空。
+   * 传空对象 `{}` 才是"显式清空"。
+   */
+  env: z.record(z.string().max(4000)).optional(),
+});
+export type McpServerInput = z.infer<typeof mcpServerInputSchema>;
+
+export const mcpServerViewSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  command: z.string(),
+  args: z.array(z.string()),
+  /** 只给键名，**绝不带值** —— 避免密钥出现在 UI 与日志里 */
+  envKeys: z.array(z.string()),
+  state: mcpStateSchema,
+  /** 本次连接发现到的工具总数（未连接时为 0） */
+  discoveredTools: z.number().int().nonnegative(),
+  /** 本次已批准因此**真正可调用**的工具（未批准的不在其中） */
+  enabledTools: z.array(z.string()),
+  /** 上次失败原因（成功时为 null） */
+  lastError: z.string().nullable(),
+});
+export type McpServerView = z.infer<typeof mcpServerViewSchema>;
+
+/** 给用户看的待批准计划（形状与 agent-core 的 ConnectionApprovalPlan 对齐） */
+export const mcpApprovalPlanSchema = z.object({
+  serverId: z.string(),
+  serverName: z.string(),
+  /** **将实际执行的命令**，逐字展示 */
+  commandLine: z.string(),
+  envKeys: z.array(z.string()),
+  toolCount: z.number().int().nonnegative(),
+  alwaysAskCount: z.number().int().nonnegative(),
+  readOnlyCount: z.number().int().nonnegative(),
+  tools: z.array(
+    z.object({
+      qualifiedName: z.string(),
+      rawName: z.string(),
+      /** `write` 目前不会出现（MCP 只推断 read/exec），保留以免将来扩展时改契约 */
+      kind: z.enum(['read', 'write', 'exec']),
+      kindReason: z.string(),
+      description: z.string(),
+    }),
+  ),
+  warnings: z.array(z.object({ code: z.string(), message: z.string() })),
+  needsExtraAttention: z.boolean(),
+});
+export type McpApprovalPlan = z.infer<typeof mcpApprovalPlanSchema>;
+
+export const mcpApprovalChoiceSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('deny') }),
+  z.object({ action: z.literal('approve_all') }),
+  z.object({ action: z.literal('approve_partial'), toolNames: z.array(z.string()).max(500) }),
+]);
+export type McpApprovalChoice = z.infer<typeof mcpApprovalChoiceSchema>;
+
+export const mcpConnectResultSchema = z.union([
+  z.object({ ok: z.literal(true), plan: mcpApprovalPlanSchema }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type McpConnectResult = z.infer<typeof mcpConnectResultSchema>;
+
+export const mcpApproveResultSchema = z.object({
+  approved: z.boolean(),
+  /** 批准后**实际可用**的工具；未批准的会被彻底排除（不是隐藏） */
+  enabledTools: z.array(z.string()),
+  note: z.string(),
+  /** 成功进注册表的模型侧工具名 */
+  registered: z.array(z.string()),
+  /** 被跳过的工具与**具体原因**（不静默丢弃） */
+  skipped: z.array(z.object({ name: z.string(), reason: z.string() })),
+});
+export type McpApproveResult = z.infer<typeof mcpApproveResultSchema>;

@@ -7,6 +7,11 @@ import {
   chatSendResultSchema,
   configSnapshotSchema,
   connectionViewSchema,
+  mcpApprovalChoiceSchema,
+  mcpApproveResultSchema,
+  mcpConnectResultSchema,
+  mcpServerInputSchema,
+  mcpServerViewSchema,
   permissionDecisionSchema,
   permissionRequestSchema,
   streamEventSchema,
@@ -20,6 +25,11 @@ import {
   type ConfigSnapshot,
   type ConnectionInput,
   type ConnectionView,
+  type McpApprovalChoice,
+  type McpApproveResult,
+  type McpConnectResult,
+  type McpServerInput,
+  type McpServerView,
   type PermissionDecisionPayload,
   type PermissionRequestPayload,
   type StreamEvent,
@@ -202,6 +212,54 @@ const api = {
     ipcRenderer.on(IPC.CHAT_STREAM, handler);
     return () => {
       ipcRenderer.removeListener(IPC.CHAT_STREAM, handler);
+    };
+  },
+
+  /* ------------------------------ MCP（W10e） ------------------------------ */
+
+  async mcpServerList(): Promise<McpServerView[]> {
+    return z.array(mcpServerViewSchema).parse(await ipcRenderer.invoke(IPC.MCP_SERVER_LIST));
+  },
+
+  async mcpServerSave(input: McpServerInput): Promise<McpServerView> {
+    const parsed = mcpServerInputSchema.parse(input);
+    return mcpServerViewSchema.parse(await ipcRenderer.invoke(IPC.MCP_SERVER_SAVE, parsed));
+  },
+
+  async mcpServerDelete(id: string): Promise<boolean> {
+    return z.boolean().parse(await ipcRenderer.invoke(IPC.MCP_SERVER_DELETE, id));
+  },
+
+  /** 发起连接：主进程会起子进程、握手、列工具，然后返回**待你批准的计划** */
+  async mcpConnect(id: string): Promise<McpConnectResult> {
+    return mcpConnectResultSchema.parse(await ipcRenderer.invoke(IPC.MCP_CONNECT, id));
+  },
+
+  /** 回填批准选择（逐工具） */
+  async mcpApprove(id: string, choice: McpApprovalChoice): Promise<McpApproveResult> {
+    const parsed = mcpApprovalChoiceSchema.parse(choice);
+    return mcpApproveResultSchema.parse(
+      await ipcRenderer.invoke(IPC.MCP_APPROVE, { id, choice: parsed }),
+    );
+  },
+
+  async mcpDisconnect(id: string): Promise<boolean> {
+    return z.boolean().parse(await ipcRenderer.invoke(IPC.MCP_DISCONNECT, id));
+  },
+
+  /** 订阅 MCP 状态变化（进程退出、握手失败等）；返回取消订阅函数 */
+  onMcpStateChanged(listener: (views: McpServerView[]) => void): () => void {
+    const handler = (_e: unknown, payload: unknown): void => {
+      const parsed = z.array(mcpServerViewSchema).safeParse(payload);
+      if (!parsed.success) {
+        console.error('[preload] 丢弃不符合契约的 MCP 状态:', parsed.error.message);
+        return;
+      }
+      listener(parsed.data);
+    };
+    ipcRenderer.on(IPC.MCP_STATE_CHANGED, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC.MCP_STATE_CHANGED, handler);
     };
   },
 };

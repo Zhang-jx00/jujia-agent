@@ -58,6 +58,21 @@ export const IPC = {
 
   /** 渲染层首帧回报（M18 启动性能实测） */
   PERF_FIRST_PAINT: 'perf:first-paint',
+
+  /* ---------------------------- MCP（W10e） ---------------------------- */
+
+  /** MCP 服务端：读取列表 / 新增或更新 / 删除 */
+  MCP_SERVER_LIST: 'mcp:server-list',
+  MCP_SERVER_SAVE: 'mcp:server-save',
+  MCP_SERVER_DELETE: 'mcp:server-delete',
+  /** 发起连接：启动子进程 → 握手 → 列工具 → 返回**待用户批准的计划** */
+  MCP_CONNECT: 'mcp:connect',
+  /** 回填用户的批准选择（逐工具） */
+  MCP_APPROVE: 'mcp:approve',
+  /** 断开：摘掉工具并退掉子进程 */
+  MCP_DISCONNECT: 'mcp:disconnect',
+  /** main → renderer：MCP 状态变化广播（进程退出、握手失败等） */
+  MCP_STATE_CHANGED: 'mcp:state-changed',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

@@ -141,6 +141,17 @@ describe('McpClient：工具发现', () => {
     await expect(c.listTools()).resolves.toEqual([]);
     c.dispose();
   });
+
+  it('前缀用调用方给的服务端 id，而不是服务端自报的名字（避免不同配置撞名）', async () => {
+    // 场景：同一个 MCP server 用不同参数配置了两份，两份都自报 name='fs'。
+    // 若前缀取自报名字，两组工具会撞成同一组 qualifiedName，第二份会被静默跳过。
+    const srv = fakeServer(standardHandler);
+    const c = new McpClient(srv.transport);
+    await c.connect();
+    const tools = await c.listTools('srv-1');
+    expect(tools.map((t) => t.qualifiedName)).toEqual(['srv-1__read_file', 'srv-1__write_file']);
+    c.dispose();
+  });
 });
 
 describe('McpClient：工具调用', () => {

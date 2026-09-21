@@ -23,6 +23,9 @@ const AppearancePanel = lazy(() =>
 const TerminalPanel = lazy(() =>
   import('./features/terminal/TerminalPanel').then((m) => ({ default: m.TerminalPanel })),
 );
+const McpPanel = lazy(() =>
+  import('./features/mcp/McpPanel').then((m) => ({ default: m.McpPanel })),
+);
 
 /** 兜底样式包改为在启动时从动态导入的模块里取，见下方 useEffect（首屏不加载 ui-tokens） */
 
@@ -36,7 +39,7 @@ type LoadState =
   | { phase: 'ready'; loaded: Loaded }
   | { phase: 'error'; message: string };
 
-type Tab = 'overview' | 'connections' | 'chat' | 'terminal' | 'appearance';
+type Tab = 'overview' | 'connections' | 'chat' | 'terminal' | 'mcp' | 'appearance';
 
 const sourceLabel: Record<ConfigSnapshot['source'], string> = {
   primary: '主文件',
@@ -49,6 +52,7 @@ const TAB_LABEL: Record<Tab, string> = {
   connections: '连接',
   chat: '对话',
   terminal: '终端',
+  mcp: 'MCP',
   appearance: '外观',
 };
 
@@ -175,6 +179,7 @@ export function App(): ReactElement {
           {state.phase === 'ready' && tab === 'terminal' && (
             <TerminalPanel workspaceRoot={state.loaded.config.config.workspace} />
           )}
+          {state.phase === 'ready' && tab === 'mcp' && <McpPanel />}
           {state.phase === 'ready' && tab === 'appearance' && themePack !== null && (
             <AppearancePanel
               pack={themePack}

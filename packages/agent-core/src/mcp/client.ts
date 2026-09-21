@@ -156,10 +156,20 @@ export class McpClient {
     return this.serverInfo;
   }
 
-  /** 列出工具并转成内部档案（含权限分级与理由） */
-  async listTools(): Promise<McpToolProfile[]> {
+  /**
+   * 列出工具并转成内部档案（含权限分级与理由）。
+   *
+   * `serverId` 是**工具名的前缀**，必须由调用方传入「用户配置的服务端 id」。
+   * 这是 W10e 修正的一个真实设计缺陷：原先默认用服务端**自报的名字**做前缀，
+   * 而两个不同的配置（例如同一个 MCP server 用不同参数跑两份）可能自报同一个名字，
+   * 于是它们的工具会撞成同一个 `qualifiedName` —— 第二个服务端的工具会被静默跳过，
+   * 表面现象是"连上了但少了一半工具"。
+   *
+   * 保留默认值只是为了不破坏"只想验证解析逻辑"的用法（服务端信息仍作为兜底）。
+   */
+  async listTools(serverId?: string): Promise<McpToolProfile[]> {
     const result = await this.request('tools/list', buildToolsList(1).params);
-    return toToolProfiles(this.serverInfo.name ?? 'mcp', parseToolList(result));
+    return toToolProfiles(serverId ?? this.serverInfo.name ?? 'mcp', parseToolList(result));
   }
 
   /**

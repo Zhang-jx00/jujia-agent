@@ -6,6 +6,9 @@ import {
   chatSendResultSchema,
   configSnapshotSchema,
   connectionInputSchema,
+  mcpApproveResultSchema,
+  mcpConnectResultSchema,
+  mcpServerViewSchema,
   permissionDecisionSchema,
   testResultSchema,
   toolRunResultSchema,
@@ -15,6 +18,7 @@ import {
   type ChatSendResult,
   type ConfigSnapshot,
   type ConnectionView,
+  type McpConnectResult,
   type StreamEvent,
   type TestResult,
   type ToolRunResult,
@@ -23,10 +27,13 @@ import {
   terminalResizeSchema,
   terminalStartSchema,
 } from '@jujia/shared-ipc';
+import { z } from 'zod';
 import { validateThemePack } from '@jujia/ui-tokens';
 import { TerminalService } from './terminal-service';
 import { createDefaultRegistry, runTool, type ToolRegistry } from '@jujia/agent-core';
 import { listModels } from '@jujia/agent-core';
+import { McpService } from './mcp/mcp-service';
+import { createRealTransport } from './mcp/real-transport';
 import { clearWorkspace, getWorkspaceInfo, pickWorkspace } from './workspace';
 import type { PermissionBridge } from './permission-bridge';
 import { getDataRoot } from './paths';
@@ -59,6 +66,33 @@ export interface IpcDeps {
  */
 export function registerIpcHandlers(deps: IpcDeps): void {
   const fetchImpl = deps.fetcher ?? fetch;
+
+  /**
+   * **全进程只用一个工具注册表**。
+   *
+   * 这是 W10e 修掉的一个接线缺陷：原先 `deps.registry ?? createDefaultRegistry()` 在
+   * TOOL_RUN 与对话链路里各写一次，而未注入时会**每次调用都新建一个空注册表** ——
+   * 结果是 MCP 批准后的工具注册到 A 表，工具执行时却去 B 表里查（永远查不到）。
+   * 表面现象是"批准成功了但模型用不了工具"。
+   */
+  const registry: ToolRegistry = deps.registry ?? createDefaultRegistry();
+
+  const mcpDebug = (message: string): void => {
+    // 默认静默：第三方服务端的日志可能很吵；需要排查时设 JJ_MCP_DEBUG=1
+    if (process.env['JJ_MCP_DEBUG'] === '1') console.log(message);
+  };
+  const mcp = new McpService({
+    registry,
+    createTransport: (config, hooks) => createRealTransport(config, hooks, mcpDebug),
+    onDebug: mcpDebug,
+  });
+  mcp.onChanged((views) => {
+    deps.getWindow?.()?.webContents.send(IPC.MCP_STATE_CHANGED, views);
+  });
+  // 应用退出时退掉所有 MCP 子进程，避免留下孤儿进程
+  app.on('before-quit', () => {
+    mcp.disposeAll();
+  });
 
   ipcMain.handle(IPC.APP_INFO, (): AppInfo => {
     const payload: AppInfo = {
@@ -226,7 +260,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         fetcher: fetchImpl,
         permission: deps.permission.resolve,
         workspaceRoot: ws.valid ? ws.root : null,
-        ...(deps.registry ? { registry: deps.registry } : {}),
+        // 同一个注册表：内置工具 + 已批准的 MCP 工具都在这里，模型才看得到它们
+        registry,
       },
     );
     return chatSendResultSchema.parse({ ...result, accepted: true });
@@ -273,7 +308,10 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     }
 
     const info = await getWorkspaceInfo();
-    if (!info.root || !info.valid) {
+    // MCP 工具操作的是外部服务，不需要工作区；内置文件工具才需要。
+    // 若把工作区当成所有工具的前置条件，用户没选工作区时就完全用不了 MCP 工具。
+    const isMcpTool = mcp.owns(toolName);
+    if (!isMcpTool && (!info.root || !info.valid)) {
       return toolRunResultSchema.parse({
         ok: false,
         toolName,
@@ -285,9 +323,10 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       });
     }
 
-    const registry = deps.registry ?? createDefaultRegistry();
     const tool = registry.get(toolName);
-    const res = await runTool(tool, args ?? {}, { workspaceRoot: info.root }, deps.permission.resolve);
+    // 未选工作区时给一个不可能的根目录：内置工具会在路径守卫阶段被拒（fail closed）
+    const workspaceRoot = info.root && info.valid ? info.root : '__no_workspace__';
+    const res = await runTool(tool, args ?? {}, { workspaceRoot }, deps.permission.resolve);
 
     return toolRunResultSchema.parse({
       ok: res.outcome.ok,
@@ -298,5 +337,36 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       decision: res.decision ?? null,
       paths: res.outcome.evidence?.paths ?? [],
     });
+  });
+
+  /* ------------------------------ MCP（W10e） ------------------------------ */
+
+  ipcMain.handle(IPC.MCP_SERVER_LIST, async () => {
+    return z.array(mcpServerViewSchema).parse(await mcp.views());
+  });
+
+  ipcMain.handle(IPC.MCP_SERVER_SAVE, async (_e, input: unknown) => {
+    return mcpServerViewSchema.parse(await mcp.save(input));
+  });
+
+  ipcMain.handle(IPC.MCP_SERVER_DELETE, async (_e, id: unknown): Promise<boolean> => {
+    if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
+    return mcp.remove(id);
+  });
+
+  ipcMain.handle(IPC.MCP_CONNECT, async (_e, id: unknown): Promise<McpConnectResult> => {
+    if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
+    return mcpConnectResultSchema.parse(await mcp.connect(id));
+  });
+
+  ipcMain.handle(IPC.MCP_APPROVE, async (_e, payload: unknown) => {
+    const { id, choice } = (payload ?? {}) as { id?: unknown; choice?: unknown };
+    if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
+    return mcpApproveResultSchema.parse(await mcp.approve(id, choice));
+  });
+
+  ipcMain.handle(IPC.MCP_DISCONNECT, async (_e, id: unknown): Promise<boolean> => {
+    if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
+    return mcp.disconnect(id);
   });
 }
