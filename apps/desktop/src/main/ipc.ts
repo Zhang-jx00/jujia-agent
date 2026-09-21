@@ -19,6 +19,7 @@ import {
   type TestResult,
   type ToolRunResult,
 } from '@jujia/shared-ipc';
+import { validateThemePack } from '@jujia/ui-tokens';
 import { createDefaultRegistry, runTool, type ToolRegistry } from '@jujia/agent-core';
 import { listModels } from '@jujia/agent-core';
 import { clearWorkspace, getWorkspaceInfo, pickWorkspace } from './workspace';
@@ -84,6 +85,20 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     const clean: Partial<AppConfig> = {};
     if (parsed.theme !== undefined) clean.theme = parsed.theme;
     if (parsed.workspace !== undefined) clean.workspace = parsed.workspace;
+    if (parsed.appearance !== undefined) {
+      // 外观必须过一遍受控字段校验才允许落盘：
+      // 样式包将来会喂给 CSS 变量，非法内容等于把注入面写进配置（见卡片 013 的 RCE 事件）。
+      const raw = parsed.appearance.pack;
+      if (raw !== null && raw !== undefined) {
+        const check = validateThemePack(raw);
+        if (!check.ok || !check.pack) {
+          throw new Error(`外观样式包被拒绝：${check.errors.join('；')}`);
+        }
+        clean.appearance = { packId: parsed.appearance.packId, pack: check.pack };
+      } else {
+        clean.appearance = { packId: parsed.appearance.packId, pack: null };
+      }
+    }
     return configSnapshotSchema.parse(await writeConfig(clean));
   });
 

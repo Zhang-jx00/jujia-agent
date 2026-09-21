@@ -400,3 +400,22 @@ export function themePackToCssVars(pack: ThemePack): Record<string, string> {
   if (pack.primary) vars['--jj-primary'] = pack.primary;
   return vars;
 }
+
+/**
+ * 把「部分覆盖」合并进一个基准样式包，并**重新走一遍校验**。
+ *
+ * 为什么需要它：用户改的往往只是一两项（比如只换个背景色），
+ * 不该逼他提供完整样式包；但合并结果**必须重新过校验**——
+ * 否则拼接过程本身就是绕过受控字段的缺口。
+ */
+export function mergePackOverrides(
+  base: ThemePack,
+  overrides: { dialog?: Partial<DialogStyle> | undefined; background?: Partial<BackgroundSpec> | undefined },
+): ValidationResult {
+  const merged = {
+    ...base,
+    dialog: { ...base.dialog, ...(overrides.dialog ?? {}) },
+    background: { ...base.background, ...(overrides.background ?? {}) },
+  };
+  return validateThemePack(merged);
+}

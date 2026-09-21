@@ -1,6 +1,12 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { AppInfo, ConfigSnapshot, ConnectionView } from '@jujia/shared-ipc';
+import {
+  BUILTIN_PACKS,
+  validateThemePack,
+  themePackToCssVars,
+  type ThemePack,
+} from '@jujia/ui-tokens';
 import { WorkspaceCard } from './features/workspace/WorkspaceCard';
 import { PermissionDialog } from './features/permission/PermissionDialog';
 
@@ -11,6 +17,12 @@ const ConnectionsPanel = lazy(() =>
 const ChatPanel = lazy(() =>
   import('./features/chat/ChatPanel').then((m) => ({ default: m.ChatPanel })),
 );
+const AppearancePanel = lazy(() =>
+  import('./features/appearance/AppearancePanel').then((m) => ({ default: m.AppearancePanel })),
+);
+
+/** 配置里没有可用样式包时的兜底（内置第一个） */
+const DEFAULT_PACK_FALLBACK: ThemePack = BUILTIN_PACKS[0] as ThemePack;
 
 interface Loaded {
   info: AppInfo;
@@ -22,7 +34,7 @@ type LoadState =
   | { phase: 'ready'; loaded: Loaded }
   | { phase: 'error'; message: string };
 
-type Tab = 'overview' | 'connections' | 'chat';
+type Tab = 'overview' | 'connections' | 'chat' | 'appearance';
 
 const sourceLabel: Record<ConfigSnapshot['source'], string> = {
   primary: '主文件',
@@ -34,6 +46,7 @@ const TAB_LABEL: Record<Tab, string> = {
   overview: '概览',
   connections: '连接',
   chat: '对话',
+  appearance: '外观',
 };
 
 /**
@@ -45,6 +58,8 @@ export function App(): ReactElement {
   const [state, setState] = useState<LoadState>({ phase: 'loading' });
   const [tab, setTab] = useState<Tab>('overview');
   const [connections, setConnections] = useState<ConnectionView[]>([]);
+  /** 当前样式包：优先用配置里保存的，否则用内置默认包 */
+  const [themePack, setThemePack] = useState<ThemePack>(DEFAULT_PACK_FALLBACK);
 
   useEffect(() => {
     let alive = true;
@@ -61,6 +76,18 @@ export function App(): ReactElement {
       alive = false;
     };
   }, []);
+
+  // 启动即应用已保存的外观（在首帧之前设置，避免「先默认后变色」的闪烁）
+  useEffect(() => {
+    if (state.phase !== 'ready') return;
+    const saved = state.loaded.config.config.appearance;
+    const check = validateThemePack(saved.pack ?? null);
+    const pack = check.ok && check.pack ? check.pack : DEFAULT_PACK_FALLBACK;
+    setThemePack(pack);
+    const root = document.documentElement;
+    for (const [k, v] of Object.entries(themePackToCssVars(pack))) root.style.setProperty(k, v);
+    root.dataset['jjBgKind'] = pack.background.kind;
+  }, [state]);
 
   // 首帧回报（在布局与首次绘制之后触发，供 M18 启动性能实测使用）
   useEffect(() => {
@@ -126,6 +153,17 @@ export function App(): ReactElement {
             <ConnectionsPanel onChanged={setConnections} />
           )}
           {state.phase === 'ready' && tab === 'chat' && <ChatPanel connections={connections} />}
+          {state.phase === 'ready' && tab === 'appearance' && (
+            <AppearancePanel
+              pack={themePack}
+              onSave={async (pack) => {
+                await window.jujia.configSet({
+                  appearance: { packId: pack.id, pack },
+                });
+                setThemePack(pack);
+              }}
+            />
+          )}
         </Suspense>
       </main>
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkContrast,
+  mergePackOverrides,
   contrastRatio,
   BUILTIN_PACKS,
   DEFAULT_BACKGROUND,
@@ -181,5 +182,33 @@ describe('themePackToCssVars：只产出受控变量', () => {
     const pack = validateThemePack(valid()).pack;
     const keys = Object.keys(themePackToCssVars(pack!));
     expect(keys.every((k) => k.startsWith('--jj-'))).toBe(true);
+  });
+});
+
+describe('mergePackOverrides：只覆盖指定项，且**合并结果必须重新过校验**', () => {
+  const base = BUILTIN_PACKS[0]!;
+
+  it('只覆盖背景色时，其余字段保持基准值', () => {
+    const r = mergePackOverrides(base, { background: { color: '#101820' } });
+    expect(r.ok).toBe(true);
+    expect(r.pack?.background.color).toBe('#101820');
+    expect(r.pack?.dialog.bubbleShape).toBe(base.dialog.bubbleShape);
+  });
+
+  it('非法覆盖被拒绝（不允许借合并绕过受控字段）', () => {
+    const r = mergePackOverrides(base, { background: { color: 'red; background:url(x)' } });
+    expect(r.ok).toBe(false);
+    expect(r.errors.join()).toContain('拒绝');
+  });
+
+  it('越界数值被拒绝', () => {
+    const r = mergePackOverrides(base, { dialog: { radiusPx: 999 } });
+    expect(r.ok).toBe(false);
+  });
+
+  it('不修改基准对象（纯函数）', () => {
+    const before = JSON.stringify(base);
+    mergePackOverrides(base, { background: { color: '#000000' } });
+    expect(JSON.stringify(base)).toBe(before);
   });
 });

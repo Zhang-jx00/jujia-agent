@@ -22,14 +22,34 @@ export const appInfoSchema = z.object({
 export type AppInfo = z.infer<typeof appInfoSchema>;
 
 /** 应用配置（Phase 1 先落两个字段，设置页在 W6 扩） */
+/**
+ * 外观（W23）。
+ *
+ * 注意纪律：这里**只描述形状**（packId + 一个对象），
+ * 真正的安全校验在主进程用 `@jujia/ui-tokens` 的 `validateThemePack()` 做
+ * ——受控字段白名单只允许有一处实现，避免两份规则漂移。
+ */
+export const appearanceSchema = z.object({
+  /** 使用的样式包 id（内置或用户导入的） */
+  packId: z.string().min(1).max(64),
+  /** 样式包完整内容（已通过 validateThemePack 校验后才允许落盘） */
+  pack: z.unknown().nullable().default(null),
+});
+
 export const appConfigSchema = z.object({
   theme: z.enum(['light', 'dark']),
   workspace: z.string().nullable(),
+  appearance: appearanceSchema.default({ packId: 'default-dark', pack: null }),
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
+export type Appearance = z.infer<typeof appearanceSchema>;
 
-export const defaultAppConfig = (): AppConfig => ({ theme: 'dark', workspace: null });
+export const defaultAppConfig = (): AppConfig => ({
+  theme: 'dark',
+  workspace: null,
+  appearance: { packId: 'default-dark', pack: null },
+});
 
 /** 配置读取结果：带上「来源」与「是否从损坏中恢复」，供 UI 如实提示用户 */
 export const configSnapshotSchema = z.object({
