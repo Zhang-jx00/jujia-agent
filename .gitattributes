@@ -1,11 +1,44 @@
-# 统一换行符为 LF，避免 Windows 下 CRLF 造成的无意义 diff
+# 统一换行符与文本属性，避免跨平台/跨工具把文件改坏
+#
+# 背景（2026-09-21 学习同类开源项目后补强）：
+# 本项目在 Windows 开发、用 Git Bash 执行脚本，CI 与贡献者可能在 Linux/macOS。
+# 仓库里若混入 CRLF 会导致：shell 脚本 shebang 失效、测试因末尾 \r 失败、diff 噪声。
+
+# ---------- 默认：文本一律 LF 入库 ----------
 * text=auto eol=lf
 
-# 二进制
-*.png binary
-*.jpg binary
-*.ico binary
-*.icns binary
-*.node binary
-*.woff binary
+# ---------- Windows 侧脚本必须是 CRLF（否则 cmd/PowerShell 可能解析异常） ----------
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# ---------- 二进制：禁止任何转换 ----------
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.bmp   binary
+*.ico   binary
+*.icns  binary
+*.pdf   binary
+*.woff  binary
 *.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.node  binary
+*.exe   binary
+*.dll   binary
+*.so    binary
+*.dylib binary
+*.zip   binary
+*.tar   binary
+*.gz    binary
+*.7z    binary
+
+# ---------- 生成物：不在 diff 与语言统计里出现（减少噪声，便于评审） ----------
+out/**                  -diff -merge linguist-generated=true
+dist/**                 -diff -merge linguist-generated=true
+apps/desktop/release/** -diff -merge linguist-generated=true
+package-lock.json       -diff linguist-generated=true
+knowledge/SOURCE-MATRIX.md -diff linguist-generated=true
