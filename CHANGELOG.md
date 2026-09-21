@@ -6,6 +6,52 @@
 
 ---
 
+## [v0.10.0-w9b] — 2026-09-21 13:29
+
+**阶段**：P1 · W9b「内置终端」——**W9 完成**（W9a git 队列 + W9b 终端）
+**前置**：用户在自己的终端跑通依赖安装（`npm run setup:terminal`），
+`npm run check:pty` 输出「伪终端实测：退出码 0，输出含 PTY-OK = true」
+→ **在没有安装 VS Build Tools 的情况下成功**，印证卡片 016 的结论（官方 node-pty 自带 win32 预编译）
+
+**改动内容**
+- **纯逻辑层** `packages/agent-core/src/terminal/terminal.ts`（可单测、不加载 .node）：
+  `pickShell`（跟着用户环境走，不写死路径）/ `buildTerminalEnv`（设 `TERM`+`COLORTERM` 才有真彩色；
+  **剔除 `ELECTRON_RUN_AS_NODE`**，否则终端里的子进程会退化）/ `clampSize`（收敛不报错）
+  / `splitChunks`（输出分块，防止一次巨量输出打爆 IPC）/ `describeTerminalPermission`
+- **PTY 服务** `apps/desktop/src/main/terminal-service.ts`：会话管理 + 流式转发 + 尺寸调整 + disposeAll
+  - **权限门**：终端归 `exec` 类，**每次新建会话都要用户确认**；被拒/超时如实返回原因，不静默降级
+  - **fail-closed**：权限桥不可用时一律 `deny`（绝不因为取不到审批就放行）
+  - 输出分块推送；应用退出时杀掉所有 PTY（避免僵尸子进程）
+- 契约新增 5 条通道 + 5 个 zod schema；preload 暴露 `terminalStart/Input/Resize/Kill/onTerminalStream`
+- 渲染层新增「终端」Tab（`TerminalPanel.tsx`，懒加载）：xterm + fit 自适应（rAF 合并 resize）
+  - **不做乐观 UI**：审批没过就不显示「已连接」
+  - 离开页面销毁 xterm 实例并杀掉 PTY
+- 终端只能开在当前工作区内（主进程校验 `workspaceRoot` 与当前工作区一致，不一致直接拒绝）
+
+**验证方式**
+| 项 | 结果 |
+|----|------|
+| `npm run typecheck` | 通过 |
+| `npm run lint` | 0 error / 0 warning |
+| `npm run test` | **250/250**（233 → 250：终端纯逻辑 17 例） |
+| `npm run smoke` | `SMOKE OK` |
+| `npm run perf` | `PERF OK` **903ms**（预算 1000ms）—— 但见下方回归信号 |
+
+**过程中发现并处理的两件事**
+1. **测试偶发失败的真因（已修）**：git 测试单例耗时 4–6s（`beforeEach` 里 spawn 6 次 git 子进程，
+   本机每次 git 启动约 0.7–1s），逼近 vitest 默认 5s 超时 → 全量跑时偶发 3 例失败。
+   已为该文件设置 60s 超时并**写明原因**（让失败只代表真实问题，不代表机器慢）。
+2. ⚠️ **启动性能回归信号（新登记）**：perf 三次采样为 **589ms → 709ms → 903ms，单调上升**，
+   虽仍在 1000ms 预算内但只剩约 10% 余量。首次采样曾按「不足以断言」处理，
+   现已有三次单调上升，**改按回归信号处理**。
+   首选怀疑对象：`App.tsx` 现在**运行时** import 了 `@jujia/ui-tokens`
+   （`BUILTIN_PACKS`/`validateThemePack`/`themePackToCssVars`），把它们拉进了主 chunk；
+   修复方向：把这些依赖移出首屏路径（懒加载或传值），下一轮验证。
+
+**回退点**：tag `v0.10.0-w9b`（上一版 `v0.9.3.2-perf`）
+
+---
+
 ## [v0.9.3-w23b] — 2026-09-21 12:40
 
 **阶段**：W23 第二部分 —— **外观设置页**（对话框样式 + 背景可切换，落地"高可定制化"）
