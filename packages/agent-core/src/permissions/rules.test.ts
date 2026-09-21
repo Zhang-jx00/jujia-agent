@@ -69,8 +69,13 @@ describe('matchRules（跨类取最严格，同类取列表顺序第一个）', 
     expect(m?.action).toBe('ask');
   });
 
-  it('禁用的规则不参与判定', () => {
-    expect(matchRules([rule({ enabled: false, action: 'deny' })], 'read_file')).toBeNull();
+  it('禁用的规则不参与判定（开关必须真实生效）', () => {
+    // 注意：pattern 必须真的能命中探针工具名 —— 否则这条断言**形同虚设**
+    //（复核 010 的 M4 变异就抓到过：原来的测试用了不匹配的 pattern，开关关掉也照样通过）
+    const rules = [rule({ pattern: 'read_*', action: 'deny', enabled: false })];
+    expect(matchRules(rules, 'read_file')).toBeNull();
+    // 对照组：同一条规则一旦启用就必须命中
+    expect(matchRules(rules.map((r) => ({ ...r, enabled: true })), 'read_file')?.action).toBe('deny');
   });
 
   it('没有命中 → null（交给模式判定）', () => {

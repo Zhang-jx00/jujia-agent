@@ -26,7 +26,7 @@
  * }
  */
 
-import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
@@ -71,7 +71,6 @@ let workspaceDirty = false;
 
 for (const m of mutations) {
   const file = resolve(repoRoot, m.file);
-  const backup = `${file}.mutbak`;
   const row = { id: m.id, desc: m.desc, outcome: '', detail: '' };
 
   if (!existsSync(file)) {
@@ -81,28 +80,31 @@ for (const m of mutations) {
     continue;
   }
 
-  copyFileSync(file, backup);
+  // **内存备份，不落盘**：
+  // 此前用 `<file>.mutbak` 副本 + 还原后 `rmSync`，在沙箱里会撞上
+  // safe-delete 的"同一轮删除次数"阈值（复核 010 实测：跑到一半崩掉）。
+  // 原始内容读进内存、测完写回去 —— 同样满足"绝不 git checkout"（复核 001 R2-9），
+  // 而且连一个临时文件都不产生。
+  const original = readFileSync(file, 'utf8');
+  const hits = original.split(m.find).length - 1;
+  if (hits !== 1) {
+    // 显式失败：命中 0 次说明锚点过时；命中多次说明锚点不唯一（改错地方的风险）
+    row.outcome = '❌ 注入失败';
+    row.detail = `锚点命中 ${hits} 次（要求恰好 1 次）—— 锚点已过时，请更新`;
+    results.push(row);
+    continue;
+  }
+
   try {
-    const src = readFileSync(file, 'utf8');
-    const hits = src.split(m.find).length - 1;
-    if (hits !== 1) {
-      // 显式失败：命中 0 次说明锚点过时；命中多次说明锚点不唯一（改错地方的风险）
-      row.outcome = '❌ 注入失败';
-      row.detail = `锚点命中 ${hits} 次（要求恰好 1 次）—— 锚点已过时，请更新`;
-      continue;
-    }
-    writeFileSync(file, src.replace(m.find, m.replace), 'utf8');
+    writeFileSync(file, original.replace(m.find, m.replace), 'utf8');
 
     const r = runTest(m.test);
     row.outcome = r.failed ? '✅ 被拦住' : '⚠️ 未被拦住（测试没发现问题！）';
     const failedCount = /Tests\s+(\d+) failed/.exec(r.out)?.[1];
     row.detail = failedCount ? `失败 ${failedCount} 例` : `退出码 ${r.status}`;
   } finally {
-    // 一律用副本还原，绝不 git checkout（复核 001 R2-9）
-    if (existsSync(backup)) {
-      copyFileSync(backup, file);
-      rmSync(backup);
-    }
+    // 无论测试怎么崩都要把原文写回去（包括 vitest 自身抛错的情况）
+    writeFileSync(file, original, 'utf8');
   }
   results.push(row);
 }
@@ -125,14 +127,19 @@ for (const r of results) {
   console.log(`  ${r.outcome}  ${r.id}  ${r.desc}  ${r.detail ? `（${r.detail}）` : ''}`);
 }
 
-const blocked = results.filter((r) => r.outcome === '✅ 被拦住').length;
-const missed = results.filter((r) => r.outcome === '⚠️ 未被拦住').length;
-const broken = results.filter((r) => r.outcome === '❌ 注入失败').length;
+// 用前缀匹配而不是全等：结果串后面还带着说明文字，全等会把"未被拦住"漏算成 0
+// （复核 010 实测：这个 bug 让一次真实的变异逃逸被汇总成 "未被拦住 0"，并以退出码 0 通过）
+const blocked = results.filter((r) => r.outcome.startsWith('✅')).length;
+const missed = results.filter((r) => r.outcome.startsWith('⚠️')).length;
+const broken = results.filter((r) => r.outcome.startsWith('❌')).length;
 
 console.log(`\n合计：被拦住 ${blocked} / 未被拦住 ${missed} / 注入失败 ${broken}`);
 if (workspaceDirty) {
   console.log('⚠️ 工作区仍有改动 —— 变异还原可能不完整，请人工检查 git status');
 }
 if (!restoreOk) console.log('⚠️ 还原后测试仍失败 —— 基线已被污染，请人工检查');
+if (missed > 0) {
+  console.log('❌ 存在未被拦住的变异 —— 测试有缺口，必须补测试后重跑');
+}
 
 process.exit(missed === 0 && broken === 0 && restoreOk ? 0 : 1);

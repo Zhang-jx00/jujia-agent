@@ -1,69 +1,69 @@
 {
-  "note": "复核 009 · 对象：W10e（MCP 服务编排 + IPC + 连接同意界面）。基线 v0.13.0-w10e",
+  "note": "复核 010 · 对象：W5c（权限规则表）+ 策略层激活。基线 13b0089",
   "mutations": [
     {
       "id": "M1",
-      "desc": "去掉 generation 守卫（旧连接的晚到退出回调会摘掉新连接的工具）",
-      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
-      "find": "    if (!session || session.generation !== generation) return;",
-      "replace": "    if (!session) return;",
-      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+      "desc": "decideGate 不再看用户规则（规则表变成摆设）",
+      "file": "packages/agent-core/src/permissions/policy.ts",
+      "find": "  const matched = ctx.rules ? matchRules(ctx.rules, ctx.toolName) : null;",
+      "replace": "  const matched = null;",
+      "test": "packages/agent-core/src/tools/executor.test.ts"
     },
     {
       "id": "M2",
-      "desc": "去掉调用时的「必须已在批准集合里」第二道校验",
-      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
-      "find": "      if (!session.enabledQualified.includes(qualifiedName)) {",
-      "replace": "      if (false) {",
-      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+      "desc": "allow 规则在 plan 模式下也生效（会话级只读意图被常设规则覆盖）",
+      "file": "packages/agent-core/src/permissions/policy.ts",
+      "find": "  if (matched?.action === 'allow' && ctx.mode !== 'plan' && ctx.mode !== 'dontAsk') {",
+      "replace": "  if (matched?.action === 'allow') {",
+      "test": "packages/agent-core/src/tools/executor.test.ts"
     },
     {
       "id": "M3",
-      "desc": "拒绝接入时不再退掉进程（被拒绝的第三方进程继续在后台跑）",
-      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
-      "find": "      // 拒绝 → 真的退掉进程（见文件头第 1 条）\n      this.teardown(id, session);",
-      "replace": "      // 拒绝 → 变异：不退进程",
-      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+      "desc": "执行器忽略 deny 判定（deny 规则被静默跳过，文件真的会被写）",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "  if (gate.action === 'deny') {",
+      "replace": "  if (false) {",
+      "test": "packages/agent-core/src/tools/executor.test.ts"
     },
     {
       "id": "M4",
-      "desc": "进程退出后不再摘掉它的工具（表里留下「一调用就超时」的工具）",
-      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
-      "find": "    if (session.registeredNames.length > 0) {\n      unregisterMcpTools(this.deps.registry, session.registeredNames);\n      session.registeredNames = [];\n      session.enabledQualified = [];\n    }\n    this.notify();",
-      "replace": "    this.notify();",
-      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+      "desc": "matchRules 忽略 enabled 开关（禁用的规则仍在拦截）",
+      "file": "packages/agent-core/src/permissions/rules.ts",
+      "find": "    if (!rule.enabled) continue;",
+      "replace": "    // 变异：不再检查 enabled",
+      "test": "packages/agent-core/src/permissions/rules.test.ts"
     },
     {
       "id": "M5",
-      "desc": "工具名前缀退回用服务端自报的名字（同一 server 配两份会撞名）",
-      "file": "packages/agent-core/src/mcp/client.ts",
-      "find": "    return toToolProfiles(serverId ?? this.serverInfo.name ?? 'mcp', parseToolList(result));",
-      "replace": "    return toToolProfiles(this.serverInfo.name ?? 'mcp', parseToolList(result));",
-      "test": "packages/agent-core/src/mcp/client.test.ts"
+      "desc": "glob 不再转义正则元字符（用户输入进正则 = 注入面）",
+      "file": "packages/agent-core/src/permissions/rules.ts",
+      "find": "    source += ch.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');",
+      "replace": "    source += ch;",
+      "test": "packages/agent-core/src/permissions/rules.test.ts"
     },
     {
       "id": "M6",
-      "desc": "更新时强制用传入的 env（编辑界面改个名字就把环境变量值静默清空）",
-      "file": "apps/desktop/src/main/mcp/mcp-store.ts",
-      "find": "        env: parsed.env === undefined ? { ...current.env } : { ...parsed.env },\n        updatedAt: now,\n      };\n      servers = servers.map((s, i) => (i === index ? next : s));",
-      "replace": "        env: { ...(parsed.env ?? {}) },\n        updatedAt: now,\n      };\n      servers = servers.map((s, i) => (i === index ? next : s));",
-      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+      "desc": "规则存储不再校验入参（空模式/非法动作都能落盘）",
+      "file": "apps/desktop/src/main/permission-rules-store.ts",
+      "find": "      if (!check.ok) throw new Error(`规则被拒绝：${check.errors.join('；')}`);",
+      "replace": "      // 变异：不再校验",
+      "test": "apps/desktop/src/main/permission-rules-store.test.ts"
     },
     {
       "id": "M7",
-      "desc": "在不同链路各建一个工具注册表（MCP 工具注册到 A 表、执行时查 B 表）",
+      "desc": "TOOL_RUN 不再传规则（规则表只对对话生效，手动执行不受限）",
       "file": "apps/desktop/src/main/ipc.ts",
-      "find": "    const tool = registry.get(toolName);",
-      "replace": "    const tool = (deps.registry ?? createDefaultRegistry()).get(toolName);",
+      "find": "      rules: policy.rules,\n    });",
+      "replace": "      // 变异：不传规则\n    });",
       "test": "apps/desktop/src/main/ipc-wiring.test.ts"
     },
     {
       "id": "M8",
-      "desc": "批准后不检查注册结果（全部注册失败也报成「已连接」）",
-      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
-      "find": "    if (report.registered.length === 0) {",
-      "replace": "    if (false) {",
-      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+      "desc": "对话链路不再传模式（plan 模式对模型调工具失效）",
+      "file": "apps/desktop/src/main/ipc.ts",
+      "find": "        mode: policy.mode,\n        rules: policy.rules,",
+      "replace": "        // 变异：不传模式与规则",
+      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
     }
   ]
 }
