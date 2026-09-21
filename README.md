@@ -14,6 +14,7 @@
 | `docs/ARCH-CLOUD-IDE.md` | **架构补充**：轻量 IDE + 本地/云端任务调度 + 高可定制化外观（含三条设计律） |
 | `docs/COVERAGE-MATRIX.md` | **领域覆盖矩阵**：60+ 领域逐项落点 / 验收 / 状态（含 6 项补缺） |
 | `knowledge/cards/016-electron-terminal-selection.md` | Electron 终端选型调研（含 8 个来源与结论） |
+| `docs/SETUP-TERMINAL.md` | **在自己终端里怎么跑命令**（装内置终端的依赖 + 自检 + 常见报错） |
 | `docs/PROGRESS.md` | **进度盘点**：已完成 / 未完成 / 被阻塞项 |
 | `docs/PERF-BUDGET.md` | **性能预算与实测**（冷启动/可交互 预算 + 实测值 + 待办） |
 | `docs/UX-AUDIT.md` | **体验细节排查表**（62 项：动效衔接/加载/响应/反馈/可达性/稳定性） |

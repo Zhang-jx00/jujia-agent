@@ -21,7 +21,9 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "clean": "node -e \"console.log('使用 python scripts/cleanup.py --apply 执行项目清理')\"",
-    "perf": "npm run perf --workspace @jujia/desktop"
+    "perf": "npm run perf --workspace @jujia/desktop",
+    "setup:terminal": "npm i -w @jujia/desktop node-pty @xterm/xterm @xterm/addon-fit",
+    "check:pty": "node apps/desktop/scripts/check-pty.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
