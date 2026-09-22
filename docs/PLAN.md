@@ -1,6 +1,5 @@
 # 俱佳Agent · 开发计划（可执行版 v3）
 
-> 2026-09-18 · 依据：`knowledge/SOURCE-MATRIX.md`（108 领域 × 5 类来源）+ `review/EVALUATION.md` + 本地 Yan-Agent（v1.5.0）源码分析
 > 本文档是**唯一开发执行依据**：范围、选型、架构、模块、阶段、任务、验收、风险、设计稿全部在此，改需求先改这里。
 > 形态：Windows 桌面 · 技术栈：TypeScript + Electron · 定位：**学习与技术练手，可逐步产品化**
 
@@ -85,7 +84,6 @@ Electron 工程、性能与流畅、UI/UX/动效/组件卡片、模型适配（�
 | 控制流 | 三分支 loop + maxTurns | OpenAI/Claude Agent SDK（S1 §2/§10） |
 | 工具路径 | **绝对路径** + 工作区校验 | Anthropic ACI 经验 + Yan 教训（S1 §5） |
 | 写并发 | 写盘/Shell 串行，只读可并行 | Claude Agent SDK（S1 §4） |
-| 画布底层 | 不自研，用 xyflow | S9 对标：需求与 API 一一对应，自研周期不可控 |
 | 内嵌网页 | WebContentsView（不用 `<webview>`） | 官方推荐演进（S10 §95） |
 | 能力门控 | 声明 → UI 禁用/降级 → 探测兜底 | S11 §101；禁止「点了才报错」 |
 | 定时任务 | 磁盘 Schedule + 抖动 + 漏跑补一次 | Claude Desktop 模式（S2 §9–10） |
@@ -522,7 +520,6 @@ jujia/
 
 | 模块 | findings | sources |
 |------|----------|---------|
-| M1/M8/M12 | F5、F6、FYAN | S4 §1–12、S5 §1–10、S8 §81–85 |
 | M2/M3 | F8 | S7 §1–10 |
 | M4/M5 | F1、F2 | S1 §1–18 |
 | M6 | F4 | S3 §1–10 |

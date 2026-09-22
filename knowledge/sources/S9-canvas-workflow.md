@@ -38,7 +38,6 @@
 | T1 | React Flow — Drag and Drop 示例 | https://reactflow.dev/examples/drag-and-drop | 官方示例：从侧边栏拖拽并在画布落点创建节点（onDrop + screenToFlowPosition）。 | verified |
 | T2 | xyflow 仓库 — `packages/react`（Node/Handle 实现） | https://github.com/xyflow/xyflow/tree/main/packages/react | React Flow 的节点组件、Handle 端口与 store 中节点模型的真实实现。 | verified |
 | T2 | tldraw 仓库 — `packages/tlschema`（Shape 形状模型） | https://github.com/tldraw/tldraw/tree/main/packages/tlschema | tldraw 的形状（节点）schema 定义，含 props 与类型化属性，可作节点模型参考。 | verified |
-| T2 | LiteGraph.js 仓库（节点+端口模型） | https://github.com/jagenjo/litegraph.js | ComfyUI 底层画布库，LGraphNode 的 inputs/outputs 端口与尺寸自适应实现，轻量可借鉴。 | verified |
 | T3 | Evan Wallace — Figma（作者自述架构） | https://madebyevan.com/figma/ | Figma 联合创始人亲述：文档表示与画布区用 C++、UI 用 TS+React 的混合架构，为「节点/形状模型如何支撑编辑器」提供第一手工程论述。 | verified |
 | T4 | React Flow — Drag and Drop 教程（同上 T1 示例即教程） | https://reactflow.dev/examples/drag-and-drop | 同时作为可运行的系统教程，覆盖拖拽建节点的完整代码路径。 | verified |
 | T5 | xyflow/discussions — 自定义节点/动态端口 | https://github.com/xyflow/xyflow/discussions | 社区讨论动态端口、节点尺寸自适应、从 palette 拖入等真实场景。 | verified |
@@ -85,7 +84,6 @@
 |------|------|-----|-----------|----------|
 | T1 | React Flow — Context Menu 示例 | https://reactflow.dev/examples/interaction/context-menu | 官方示例：右键节点/画布弹出上下文菜单（onContextMenu + 自定义菜单）。 | verified |
 | T1 | React Flow — 多选/快捷键/键盘交互 | https://reactflow.dev/learn | 官方指南覆盖多选、框选、键盘删除/复制等替代交互。 | canonical |
-| T2 | xyflow 仓库 — Interaction 处理器 | https://github.com/xyflow/xyflow/tree/main/packages/react | 拖线即连、点击空白建节点等交互钩子的真实实现，可借鉴替代交互。 | verified |
 | T3 | （留空） | — | 替代交互属 UX 设计实践，无专门权威论文；以官方示例与 UX 指南替代。 | — |
 | T4 | React Flow — Context Menu 教程（同上示例） | https://reactflow.dev/examples/interaction/context-menu | 该示例页含完整可运行代码，可直接作为快捷菜单教程。 | verified |
 | T5 | xyflow/discussions #3227 — 节点右键菜单 | https://github.com/xyflow/xyflow/discussions/3227 | 社区具体讨论"右键节点弹出菜单"的多种实现方案。 | verified |
@@ -177,4 +175,3 @@
 
 **汇总**：9 个领域 × 5 类 = 45 格，已填 **44 格**，留空 **1 格**（领域 91/92 等 5 个领域的 T3 按原口径留空）。订正记录：初稿把 T3 误收窄为「学术论文」，与知识库既定口径（论文/报告/官方工程博客）不符；2026-09-18 复核后为 86/87/93 补入三条经检索核实的官方工程博客（Figma×2、Figma CTO 自述），并同步本表。
 
-**对标覆盖**：React Flow/xyflow（86/87/88/90/93/94）、tldraw（86/89/92/94）、ComfyUI（91）、n8n（91/92）、Node-RED（91）、Excalidraw（93）、LiteGraph.js（87/93）、Figma（94）均已纳入。

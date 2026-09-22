@@ -12,7 +12,6 @@
 - 系统架构、Electron 工程、性能与流畅性
 - UI/UX、交互、视觉、动效、组件与卡片
 - 模型适配、多供应商、流式输出
-- Yan Agent、OpenCode、OpenHands、Claude Code 等开源参考
 - 面向「学习练手 + 可逐步产品化」的分阶段开发计划
 
 **Out**
@@ -25,7 +24,6 @@
 - 产品形态：**Windows 桌面 Agent**（Electron）
 - 技术栈：**TypeScript + Electron**
 - 近期目标：**学习与技术练手**，功能可迭代
-- 可参考本地已分析的 `D:\MiMo\ProjectOne\Yan-Agent`（开源树约 v1.5.0）
 - 研究深度：**deep**（8 个并行角度）
 - 今日日期：2026-09-18（以运行时为准）
 - 交付物语言：中文报告 + 知识库 markdown + 开发计划
@@ -41,7 +39,6 @@
 | F5 | 系统架构与 Electron 工程 | 主进程/渲染进程、IPC、preload、sandbox、sidecar、模块化、asar、自动更新、打包、原生模块、崩溃恢复 |
 | F6 | 性能 / 缓存 / 预加载 / 流畅性 | 预加载、懒加载、虚拟列表、事件批处理、防抖节流、内存泄漏、缓存策略、流式渲染、首帧时间、Electron 性能 |
 | F7 | UI/UX / 视觉 / 动效 / 组件 / 卡片 | 设计系统、Design Tokens、组件库、卡片信息架构、交互反馈、空状态、权限 UI、动效原则、可访问性、响应式 |
-| F8 | 模型适配与开源 Agent 对标 | OpenAI 兼容 API、Anthropic、多供应商、流式 SSE、reasoning_content、视觉/媒体模型、Yan-Agent、OpenCode、OpenHands、Aider、Cline 等架构可复用点 |
 
 每条有效发现需尽量覆盖：**官方文档 / 开源仓库 / 论文或技术报告 / 权威媒体或课程 / 社区实践（Issues/论坛）** 等多类来源。
 

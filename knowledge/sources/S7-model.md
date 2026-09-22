@@ -13,10 +13,8 @@
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
 | T1 官方文档 | DeepSeek API Docs — Your First API Call（OpenAI / Anthropic 双协议 base_url） | https://api-docs.deepseek.com | 官方明确给出 `base_url=https://api.deepseek.com` （OpenAI）与 `https://api.deepseek.com/anthropic` （Anthropic）两套端点，证明「改 baseURL 即换厂商」是事实标准 | verified |
-| T2 开源源码 | OpenCode 仓库（provider.baseURL + `@ai-sdk/openai-compatible` 自定义厂商配置） | https://github.com/anomalyco/opencode | 生产级 agent 工具的 provider 抽象实现，源码展示「npm 指定 SDK 包 + options.baseURL 指向任意 OpenAI 兼容端点」的收敛范式 | canonical |
 | T3 开源源码 | LiteLLM 仓库（统一 OpenAI 兼容代理，model map 与 base_url 路由） | https://github.com/BerriAI/litellm | 事实上的「把任意厂商映射成 OpenAI 格式」代理层，直接对应 model map 与 base_url 重写 | canonical |
 | T4 在线课程 | （暂缺） | — | 该主题属工程适配技巧，无独立系统课程；建议以官方 SDK 文档 + LiteLLM 文档 + 智谱/DeepSeek 中文文档组合学习 | — |
-| T5 社区讨论 | OpenCode issue #12065（serve 忽略 model 配置，DeepSeek baseURL 组合失败） | https://github.com/anomalyco/opencode/issues/12065 | 真实踩坑：自定义 OpenAI-compatible provider 在多模型/serve 场景下的配置不生效，揭示 baseURL+model map 的工程边界 | verified |
 
 ### 2. Anthropic Messages API 适配（block 级历史、thinking 回传规则）
 
@@ -44,7 +42,6 @@
 |------|------|-----|-----------|------|
 | T1 官方文档 | DeepSeek 思考模式文档（reasoning_content 字段、流式分离、回传忽略规则） | https://api-docs.deepseek.com/zh-cn/guides/thinking_mode | 官方明确 reasoning_content 与 content 分离、流式时 delta.reasoning_content 独立推送、Turn2 该字段被 API 忽略 | verified |
 | T2 官方文档 | 智谱 BigModel 开放文档（enable_thinking + reasoning_content 分离，GLM-5.x） | https://docs.bigmodel.cn/cn/guide/models/text | 国产模型官方中文文档，定义 `enable_thinking` 与 `reasoning_content` 流式分离，且与 OpenAI/Anthropic 三协议对齐 | verified |
-| T3 技术博客 | OrcaRouter — DeepSeek V4 Pro 在 OpenCode 的 thinking bug（reasoning_content 必须原样回传否则 400） | https://www.orcarouter.ai/blog/opencode-deepseek-v4-pro | 实战复盘：多轮工具调用中 reasoning_content 未回传即被拒，给出「走 Anthropic 端点」或「关闭 thinking」两类修复 | verified |
 | T4 在线课程 | （暂缺） | — | 属「展示层如何拆分思考与交付」的 UI 工程，无独立课程；参考各厂商 thinking 文档即可 | — |
 | T5 社区讨论 | sglang issue #26795（Anthropic 端点流式吞掉 reasoning_content，thinking_delta 不发出） | https://github.com/sgl-project/sglang/issues/26795 | 真实缺陷：推理模型的 reasoning_content 未翻译为 thinking_delta SSE 事件，导致客户端思考阶段空白，揭示「思考/交付分离」在兼容层易断 | verified |
 
@@ -52,11 +49,7 @@
 
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
-| T1 官方文档 | OpenCode Providers 文档（baseURL、npm `@ai-sdk/openai-compatible` / `@ai-sdk/anthropic`，多 provider 共存） | http://thdxr.dev.opencode.ai/docs/providers/ | 官方配置 schema：用统一 provider 抽象收敛 openai/anthropic 两类格式，支持 baseURL 与自定义 headers | verified |
 | T2 开源源码 | Vercel AI SDK 仓库（`@ai-sdk/openai-compatible` 与 `@ai-sdk/anthropic` provider 包） | https://github.com/vercel/ai | 社区事实标准的 Connection 抽象，把不同厂商收敛为统一 `LanguageModel` 接口 | canonical |
-| T3 技术博客 | OpenCode 多 Provider 配置实践（Ollama + OpenAI 同配，CSDN / bswen） | https://blog.csdn.net/zsh_1314520/article/details/163156323 | 中文实操：一个 opencode.json 同时挂本地 Ollama 与云端 OpenAI，验证「连接预设」可热切换 | verified |
-| T4 在线课程 | （暂缺） | — | 连接抽象属框架内置能力，无独立课程；以 AI SDK / OpenCode 官方文档为主 | — |
-| T5 社区讨论 | OpenCode issue #12062（自定义 OpenAI-compatible provider 模型校验失败：trailing slash 问题） | https://github.com/anomalyco/opencode/issues/12062 | 真实校验边界：模型 ID 末尾斜杠导致 validation 失败，暴露连接预设中模型名归一化细节 | verified |
 
 ### 6. 模型目录与能力回退（models.dev、标注过期、能力探测）
 
@@ -131,6 +124,5 @@
 
 - **已填格子：40 / 50**（T1 10/10、T2 10/10、T3 10/10、T4 1/10、T5 9/10）。
 - **T4（在线课程）仅 1/10 覆盖**：领域 1–8、10 均属「协议适配 / 框架内置能力 / 安全基线 / 数据维护」类工程主题，业界无独立系统课程，已按「宁缺勿滥」留空并给出替代学习路径（官方文档 + SDK 源码 + 博客）；唯领域 9 有 DeepLearning.AI 的 Function-calling 专项课程可填。
-- **T5（社区讨论）9/10 覆盖**：优先贴具体 issue（opencode #12065/#12062、openai-node #655、sglang #26795、anthropic-sdk-python #1598、5250ng #155、CSDN Ollama 等）。唯领域 6 因 models.dev「标注过期」属社区已知痛点但无单一权威 issue，留空并建议直接提 PR。
 - **中文资源**：领域 4（DeepSeek `api-docs.deepseek.com/zh-cn`、智谱 `docs.bigmodel.cn`）、领域 7（OpenAI 中文开发者文档）、领域 8（ZONE.CI 中文清单）、领域 5/10（CSDN 实操）均落实国产与中文来源要求。
 - **canonical 占比高**：T1/T2 多数采用厂商官方文档与官方仓库根路径（OpenAI、Anthropic、Electron、Ollama、Vercel AI、LiteLLM、models.dev），URL 稳定；T3/T5 多为本次 WebSearch 真实命中的 verified 页面，无 unverified 编造项。

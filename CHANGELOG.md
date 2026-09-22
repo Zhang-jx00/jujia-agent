@@ -8,7 +8,6 @@
 
 ## [v0.15.0-w5d] — 2026-09-22 13:35
 
-**阶段**：W5d —— **生命周期钩子**（M16）：按 ZCode 等成熟同类项目已收敛的契约做七类事件
 **范围**：`packages/agent-core/src/hooks/{types,runner}.ts(+test)` · `commands/{argv,process}.ts`（抽公共） ·
 `tools/executor.ts(+test)` · `loop/agent-loop.ts` · `packages/shared-ipc/src/{channels,contracts}.ts` ·
 `apps/desktop/src/main/{hooks-store.ts(+test),ipc.ts,chat-service.ts}` · `ipc-wiring.test.ts` ·
@@ -1193,7 +1192,6 @@ error MSB8040: 此项目需要缓解了 Spectre 漏洞的库
 **范围**：`edit`（允许但先改参数再执行）贯通全链路 + 审批弹窗 UI。对话页改走 Agent Loop 留待下一步。
 
 **本轮联网核实（2026-09-20，来源见 `knowledge/cards/013`）**
-- **`AGENTS.md` 正成为跨工具通用约定**（Claude Code 已兼容，源自 OpenAI Codex，被称为「面向 Agent 的 README」，
   项目指令文件正从工具偏好变成**代码库基础设施**）→ 新增待办：读取工作区 `AGENTS.md` 作为项目指令
 - 出现 **Plugin4Shell 零点击 RCE**（影响主流编码 agent）+ **首个因 agent 导致的数据泄露被监管立案**（西班牙 AEPD）
   → 强印证本项目两条硬约束：样式包/插件**拒绝任意 CSS/JS**；权限**按参数分级 + 敏感路径强制询问**
@@ -1233,8 +1231,6 @@ error MSB8040: 此项目需要缓解了 Spectre 漏洞的库
 
 **联网核实（2026-09-18 检索，来源见文档 §9）**
 - **会话状态归 host**：Remote Agent Host Session 范式中，客户端断开只应是 UI 事件；
-  靠 host 持有会话日志 + 单调 seq + 增量回放/快照恢复（opencode AHP 与 Anthropic Managed Agents 同思路）
-- **三种远端传输**：出站 HTTPS（Cursor 自托管 worker 做法，无入站端口/防火墙/VPN）→ SSH（复用 sshd）→ 反向隧道
 - **真实风险**：匿名 dev tunnel 可被未认证访问者触发命令执行（厂商文档 + 安全厂商实测告警）
 - **运行位置四档权衡**：本机/容器/一次性 VM/边缘 isolate；长无人值守任务用一次性 VM 换内核边界
 - **远端沙箱必须是完整工具链 harness**（只读控制面 + 工具 harness + 持久输出面 + 质量门）
@@ -1270,7 +1266,6 @@ error MSB8040: 此项目需要缓解了 Spectre 漏洞的库
   | M16 | 钩子四类齐备（Pre/Post/Stop/SessionStart） | W5d |
   | M17 | 长任务与断点续跑 | W18 |
   | M18 | 启动性能预算与预加载策略 | W7 |
-- 明确记录：**参考产品（codex / workbuddy / zcode / qoder / opencode）架构对比列为下一轮第一件事**
 
 **验证**：文档一致性核对（PLAN 周次 ↔ 矩阵 ↔ 目标文档）；四件套保持全绿
 
@@ -1284,7 +1279,6 @@ error MSB8040: 此项目需要缓解了 Spectre 漏洞的库
 - **DeepSeek V4.1-Flash**（552B MoE，激活 8–16B，原生视觉）据 Terminal-Bench 2.1 在编码与安全基准上
   超过 GPT-5.6 Sol 与 Kimi K3；**OpenAI GPT-6 Astra**（面向自主计算机使用，Agents' Last Exam SOTA）；
   Meta Muse Spark 1.3（会主动澄清与**确认关键操作**）；开源 agent 模型 Occamy-1.0（35B/3B 激活）
-- 范式变化：**持久化 agent + 异步执行成为默认 UX**（Claude Code Projects / Cursor Projects）；
   Google 为 managed agents 引入 **Credentials API（占位符把密钥挡在模型上下文外）** 与 Files API；
   **MCP 已成事实标准**（Google Home MCP）；Grok Bot 集成 1Password（**每次填充都需批准**）
 - 反面经验：有资料警告**激进压缩对话历史**会损坏隐藏推理与缓存前缀 → 本项目明确不采用
@@ -1447,7 +1441,6 @@ error MSB8040: 此项目需要缓解了 Spectre 漏洞的库
    → `chat-service` 接入 `withTimeout(controller.signal, 300_000)`，与用户中止语义分离
 3. **流中途断开的契约未锁定**（中）：明确「抛 `network_error` 且已产出增量不得丢失」并以用例锁死
 4. ESLint 补 `varsIgnorePattern` / `caughtErrorsIgnorePattern` 为 `^_`（轻微）
-5. 按用户要求：README 移除「参考 Yan-Agent / OpenCode / Cline 等」一行
 
 **新增测试（54 → 57）**
 - 服务端发送途中强制断开 socket → 增量保留 + `network_error`

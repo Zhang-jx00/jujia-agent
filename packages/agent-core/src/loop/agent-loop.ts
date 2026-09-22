@@ -1,7 +1,8 @@
 import { runTool, type PermissionResolver, type RunToolResult } from '../tools/executor';
 import type { PermissionMode } from '../permissions/policy';
 import type { PermissionRule } from '../permissions/rules';
-import type { HookRunner } from '../hooks/types';
+import { noopHookRunner, type HookRunner } from '../hooks/types';
+import { stopTurn, userPromptSubmit } from '../hooks/points';
 import type { StoredTool } from '../tools/types';
 import type { ToolRegistry } from '../tools/registry';
 import { streamChat, type ProviderDeps } from '../providers/openai-compat';
@@ -68,7 +69,7 @@ export interface LoopResult {
   /** 最终答复文本（handoff/熔断时为已产出的文本） */
   text: string;
   turns: number;
-  reason: 'final' | 'handoff' | 'max_turns' | 'aborted' | 'error';
+  reason: 'final' | 'handoff' | 'max_turns' | 'aborted' | 'error' | 'hook_blocked';
   error?: string;
   messages: ChatMessage[];
 }
@@ -96,6 +97,8 @@ export interface AgentLoopDeps extends ProviderDeps {
 
 export interface AgentTurnParams {
   connection: { baseUrl: string; apiKey: string; model: string };
+  /** 本次用户输入的原文（供 UserPromptSubmit 钩子匹配）；不传则取最后一条 user 消息 */
+  promptText?: string | undefined;
   messages: ChatMessage[];
   emit: (event: LoopEvent) => void;
   maxTurns?: number;
@@ -103,6 +106,38 @@ export interface AgentTurnParams {
 }
 
 const DEFAULT_MAX_TURNS = 8;
+
+/**
+ * Stop 钩子要求再走一步的次数上限。
+ * 取 2 而不是 1：一次修正（例如补上测试）通常够用，两次留一点余量；
+ * 再往上就不是提醒而是钩子在替模型写作文了，且拖长会话成本。
+ */
+const MAX_STOP_CONTINUATIONS = 2;
+
+/** 取最后一条 user 消息作为提示词原文（对话服务没显式给 promptText 时的兜底） */
+function lastUserText(messages: ReadonlyArray<ChatMessage>): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m?.role === 'user' && typeof m.content === 'string') return m.content;
+  }
+  return '';
+}
+
+/**
+ * 把钩子给的上下文注入系统提示（而不是塞成一条假的用户消息）。
+ * 理由：钩子说的不是用户说的。塞成用户消息会污染会话历史 ——
+ * 之后每一轮模型都会以为用户当时说过这句话。
+ */
+function injectIntoSystem(messages: ChatMessage[], text: string): void {
+  const first = messages.findIndex((m) => m.role === 'system');
+  if (first >= 0) {
+    const current = messages[first];
+    const base = typeof current?.content === 'string' ? current.content : '';
+    messages[first] = { role: 'system', content: `${base}\n\n${text}` };
+    return;
+  }
+  messages.unshift({ role: 'system', content: text });
+}
 
 export async function runAgentTurn(
   params: AgentTurnParams,
@@ -114,8 +149,29 @@ export async function runAgentTurn(
   const messages: ChatMessage[] = [...params.messages];
   const tools = [...deps.registry.toOpenAiTools(), ...toSpecs([handoffTool])];
 
+  const hooks = deps.hooks ?? noopHookRunner;
+  const hookCtx = { sessionId: deps.sessionId ?? 'unknown', cwd: deps.workspaceRoot };
+
+  // ---- 回合级钩子：UserPromptSubmit（发给模型之前） ----
+  // 拦下时**一次模型调用都不发生**：这是"钩子能省钱"的地方，也是"钩子能拦住危险提示词"的地方。
+  const promptText = params.promptText ?? lastUserText(messages);
+  const submit = await userPromptSubmit(hooks, hookCtx, promptText);
+  if (submit.blocked) {
+    return {
+      branch: 'final',
+      text: '',
+      turns: 0,
+      reason: 'hook_blocked',
+      error: submit.reason ?? '这次提示词被钩子拦下了（钩子未给出理由）',
+      messages,
+    };
+  }
+  if (submit.context !== '') injectIntoSystem(messages, submit.context);
+
   let turn = 0;
   let fullText = '';
+  /** Stop 钩子要求"再走一步"的次数：必须有上限，否则钩子写错就是死循环 */
+  let stopContinues = 0;
 
   while (turn < maxTurns) {
     turn += 1;
@@ -171,6 +227,21 @@ export async function runAgentTurn(
 
     // ---- 分支一：final（模型没要求工具） ----
     if (calls.length === 0) {
+      // ---- 回合级钩子：Stop（一轮准备结束时） ----
+      // 钩子可以用 continue:true 要求"再走一步"（例如"你还没跑测试，别急着收工"）。
+      // 必须有次数上限：钩子写错（永远返回 continue:true）就成了死循环 —— 这是钩子能拖垮会话的地方。
+      const stop = await stopTurn(hooks, hookCtx, turnText);
+      if (stop.continueTurn && stopContinues < MAX_STOP_CONTINUATIONS) {
+        stopContinues += 1;
+        messages.push({ role: 'assistant', content: turnText });
+        messages.push({
+          role: 'user',
+          content: stop.context !== '' ? stop.context : '[钩子要求继续]（钩子未给出说明）',
+        });
+        params.emit({ type: 'turn_end', turn, branch: 'final' });
+        continue;
+      }
+
       messages.push({ role: 'assistant', content: turnText });
       params.emit({ type: 'turn_end', turn, branch: 'final' });
       return { branch: 'final', text: fullText, turns: turn, reason: 'final', messages };

@@ -92,7 +92,6 @@
 |------|------|-----|-----------|------|
 | T1 官方文档 | Agent Skills 开放标准（agentskills.io 总览） | https://agentskills.io | 标准官网，定义 SKILL.md 目录包结构与渐进披露三阶段 | canonical |
 | T1 官方文档 | Agent Skills Specification（完整格式规范） | https://agentskills.io/specification | 开放标准的逐字段规范（frontmatter、引用文件、脚本） | canonical |
-| T2 源码/仓库 | anthropics/claude-code（Skills 实现） | https://github.com/anthropics/claude-code | Claude Code 中 SKILL.md 解析与加载的参考实现 | canonical |
 | T3 技术报告 | Anthropic Engineering："Equipping agents for the real world with Agent Skills" | https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills | Anthropic 官方工程博客，提出渐进披露三层模型与最佳实践（2025-10 发布，2025-12 转开放标准） | verified |
 | T4 教程/Quickstart | Agent Skills Quickstart（创建第一个 Skill） | https://agentskills.io/specification （站点内 Quickstart 入口，见总览页 "Get started"） | 官方交互式上手路径 | canonical |
 | T4 教程 | code.claude.com Skills 文档（渐进披露与作用域） | https://code.claude.com/docs/en/skills | 系统教程，覆盖 SKILL.md 格式、描述与正文分离、支持文件 | canonical |
@@ -110,7 +109,6 @@
 | T2 源码/仓库 | claude-code skills 加载与作用域解析源码 | https://github.com/anthropics/claude-code （仓库内 `skills/` 相关模块） | 参考实现，决定 user/project/plugin 三级作用域如何生效 | canonical |
 | T3 技术报告 | agentskills.io Specification（frontmatter 跨厂商一致字段） | https://agentskills.io/specification | 开放标准层面对 name/description 等必填字段的规范，跨厂商可移植 | canonical |
 | T4 教程 | code.claude.com Skills 文档（含 allowed-tools / model 示例） | https://code.claude.com/docs/en/skills | 系统教程，给出 `allowed-tools: Read Grep`、`model:` 等真实示例 | canonical |
-| T5 社区讨论 | MorphLLM / Medium "Claude Code Skills vs MCP vs Plugins: Complete Guide 2026" | https://simplenews.ai/news/mcp-vs-skills-debate-developers-clarify-theyre-complementary-not-competing-mhw6 （含多篇指南链接汇总） | 社区对 skill 作用域、与 MCP/plugin 边界的实操讨论 | unverified |
 
 > 注：T5 合格"具体 issue/discussion"较少；以社区指南汇总页替代，未编造虚假 issue 链接。
 
@@ -140,8 +138,6 @@
 | T3 技术报告 | RFC 5545 (iCalendar) — RRULE 规范 | https://datatracker.ietf.org/doc/html/rfc5545 | RRULE 的权威标准来源（用于理解重复规则语义） | canonical |
 | T4 教程 | code.claude.com Scheduled tasks 文档（含 cron 语法参考） | https://code.claude.com/docs/en/scheduled-tasks | 系统教程，含 "Cron expression reference" 与对比表 | canonical |
 | T5 社区讨论 | 社区对 `/loop` 与会话级 cron 的讨论（HN 指南 arps18 GitHub Pages） | https://clauday.com/article/07f02150-2ced-40a5-9353-b45d4c95d623 （转述 HN 热帖 arps18.github.io/posts/claude-code-mastery） | 社区将 scheduled tasks/loop 作为"队友"工作流的一部分讨论 | unverified |
-
-> 注：Claude Code 原生定时任务使用 **5-field cron** 而非 RRULE（已核实官方文档未出现 RRULE）。RRULE 作为通用重复规则标准列入 T3 供对照；若产品需 RRULE 持久化调度，属自研层。T5 无专门 issue，以社区工作流帖替代。
 
 ---
 

@@ -22,8 +22,8 @@ const EVENT_LABEL: Record<string, string> = {
   Stop: '一轮即将结束',
 };
 
-/** 本轮**尚未接入**运行路径的事件：界面上明确标出来，避免用户以为配了就一定生效 */
-const NOT_WIRED: ReadonlyArray<string> = ['SessionStart', 'UserPromptSubmit', 'Stop'];
+/** 已全部接入运行路径；保留这个常量是为了将来新增事件时能先上契约、后接路径 */
+const NOT_WIRED: ReadonlyArray<string> = [];
 
 const EXAMPLE = `{
   "enabled": true,
@@ -136,9 +136,7 @@ export function HooksPanel(): ReactElement {
                   <td>{state.counts[ev] ?? 0}</td>
                   <td className="p0-subtitle">
                     {label}
-                    {NOT_WIRED.includes(ev) && (
-                      <strong> · 尚未接入运行路径（本轮只支持 PreToolUse / PermissionRequest / PostToolUse / PostToolUseFailure）</strong>
-                    )}
+                    {NOT_WIRED.includes(ev) && <strong> · 尚未接入运行路径</strong>}
                   </td>
                 </tr>
               ))}

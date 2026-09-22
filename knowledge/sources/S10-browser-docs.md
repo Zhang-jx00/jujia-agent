@@ -87,7 +87,6 @@
 |------|------|-----|-----------|------|
 | T1 | Class: Debugger | Electron | https://www.electronjs.org/docs/latest/api/debugger | 官方 CDP 传输：`debugger.attach` / `sendCommand` 接入 Chrome DevTools Protocol | canonical（已 WebFetch） |
 | T1 | webContents.executeJavaScript(code[, userGesture]) | https://www.electronjs.org/docs/latest/api/web-contents | 官方 API，在页面执行 JS、返回 Promise、userGesture 解除手势限制、加载完成前挂起 | canonical（已 WebFetch） |
-| T2 | amafjarkasi/electron-mcp-server | https://github.com/amafjarkasi/electron-mcp-server | 开源 MCP server，经 CDP 连接 Electron 做截图/DOM 读取/JS 执行/UI 自动化，面向 Cursor 等 | verified |
 | T2 | agent-browser（Electron 自动化指南，经 CDP） | https://www.claudepluginhub.com/skills/pleaseai-agent-browser-plugins-agent-browser/electron | 经 `--remote-debugging-port` + CDP 连接任意 Electron 应用，snapshot/click/screenshot | verified |
 | T3 | When your user is an AI agent: trust boundaries for browser access | https://hablich.dev/articles/trust-boundaries-browser-agents.html | 前 Chrome 工程师分析 CDP 零认证、localhost 任意进程可连带来的信任边界（HN 热门 598 分） | verified |
 | T3 | AI 浏览器 Agent 的安全困局：当自动化工具可以偷走你的登录态 | https://front-talk.com/news/0ykO8fUbyr | 分析 CDP 暴露 Cookie/LocalStorage/JS 执行的权限风险与 10 行取 Cookie 代码 | verified |

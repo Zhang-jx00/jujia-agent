@@ -95,8 +95,6 @@
 | R2-3 | 中 | **流中途断开的契约未被锁定**：初版无对应用例；该场景下「已产出的增量必须保留」是硬要求（否则用户丢半截回答） | 新增异常路径实验 | 契约明确为：中断属网络错误（抛 `network_error`），但**已产出增量不得丢失**；用例同时断言两点 | 用例断言「收到『前半段』且抛 network_error」通过 | ✅ 已修（并锁定） |
 | R2-4 | 轻微 | ESLint 的 `no-unused-vars` 未配置 `varsIgnorePattern`，导致 `for await (const _ev of ...)` 这类「显式忽略」写法报错 | 修复 R2-1/R2-2 后 lint 报错 | 补充 `varsIgnorePattern` / `caughtErrorsIgnorePattern` 为 `^_` | `npm run lint` 0 问题 | ✅ 已修 |
 
-> 另记录（信息类，非缺陷）：**用户要求**从 README 移除「参考 Yan-Agent/OpenCode/Cline 等」一行，并**要求提交说明尽量用中文**（后者已写入项目记忆）。
-
 ### 变异测试结果（4/4 全部被拦住，证明测试非空转）
 
 | 变异 | 改坏内容 | 结果 |

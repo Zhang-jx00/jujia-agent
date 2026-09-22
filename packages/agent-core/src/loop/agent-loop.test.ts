@@ -285,3 +285,162 @@ describe('熔断：maxTurns', () => {
     expect(res.error).toContain('401');
   });
 });
+
+describe('回合级钩子接入（W5d-b）：拦提示词、注入上下文、按上限再走一步', () => {
+  /** 假钩子运行器：按事件返回预设结果，并记录调用 */
+  function fakeHooks(byEvent: Partial<Record<string, Partial<Record<string, unknown>>>> = {}) {
+    const calls: string[] = [];
+    return {
+      calls,
+      runner: {
+        async run(p: { event: string }) {
+          calls.push(p.event);
+          return {
+            blocked: false,
+            reason: null,
+            additionalContext: [],
+            updatedInput: null,
+            permissionDecision: null,
+            permissionReason: null,
+            continueTurn: false,
+            diagnostics: [],
+            ranCount: 0,
+            ...(byEvent[p.event] ?? {}),
+          };
+        },
+      },
+    };
+  }
+
+  it('没显式给 promptText 时取**最后一条**用户消息（不是第一条）', async () => {
+    const { chat } = scriptedChat([{ text: 'ok' }]);
+    const seen: string[] = [];
+    const runner = {
+      async run(p: { matchTarget: string }) {
+        seen.push(p.matchTarget);
+        return {
+          blocked: false,
+          reason: null,
+          additionalContext: [],
+          updatedInput: null,
+          permissionDecision: null,
+          permissionReason: null,
+          continueTurn: false,
+          diagnostics: [],
+          ranCount: 0,
+        };
+      },
+    };
+
+    await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [
+          { role: 'user', content: '第一句' },
+          { role: 'assistant', content: '中间回复' },
+          { role: 'user', content: '最新一句' },
+        ],
+        emit: () => undefined,
+      },
+      { ...makeDeps(chat, allow().resolver), hooks: runner },
+    );
+
+    // 第一次匹配是 UserPromptSubmit
+    expect(seen[0]).toBe('最新一句');
+  });
+
+  it('UserPromptSubmit 拦下提示词 → **一次模型调用都不发生**', async () => {
+    const { chat, turnsUsed } = scriptedChat([{ text: '不该出现' }]);
+    const { runner } = fakeHooks({ UserPromptSubmit: { blocked: true, reason: '禁止该提示词' } });
+
+    const res = await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: '危险请求' }],
+        emit: () => undefined,
+      },
+      { ...makeDeps(chat, allow().resolver), hooks: runner },
+    );
+
+    expect(res.branch).toBe('final');
+    expect(res.reason).toBe('hook_blocked');
+    expect(res.text).toBe('');
+    expect(res.error).toContain('禁止该提示词');
+    expect(turnsUsed()).toBe(0); // 关键：省钱也省风险
+  });
+
+  it('UserPromptSubmit 的附加上下文注入**系统消息**，而不是伪造一条用户消息', async () => {
+    const { chat, seenMessages } = scriptedChat([{ text: '好的' }]);
+    const { runner } = fakeHooks({ UserPromptSubmit: { additionalContext: ['一律用中文回答'] } });
+
+    await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: 'hi' }],
+        emit: () => undefined,
+      },
+      { ...makeDeps(chat, allow().resolver), hooks: runner },
+    );
+
+    const first = seenMessages[0] ?? [];
+    expect(first[0]?.role).toBe('system');
+    expect(String(first[0]?.content)).toContain('一律用中文回答');
+    // 用户消息必须保持原样：钩子说的不是用户说的
+    expect(first.filter((m) => m.role === 'user').map((m) => m.content)).toEqual(['hi']);
+  });
+
+  it('Stop 钩子要求继续 → 再走一步，但**有次数上限**（钩子写错不会死循环）', async () => {
+    const { chat, turnsUsed } = scriptedChat([{ text: '我改完了' }]);
+    const { runner, calls } = fakeHooks({
+      Stop: { continueTurn: true, additionalContext: ['你还没跑测试'] },
+    });
+
+    const res = await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: '改一下' }],
+        emit: () => undefined,
+      },
+      { ...makeDeps(chat, allow().resolver), hooks: runner },
+    );
+
+    expect(res.reason).toBe('final');
+    // 1 次原始 + 上限 2 次继续 = 3 次模型调用后停下
+    expect(turnsUsed()).toBe(3);
+    // Stop 钩子被问到 3 次（每次都在准备结束时问）
+    expect(calls.filter((c) => c === 'Stop')).toHaveLength(3);
+    // 续走的上下文进入了消息（作为要求发给模型）
+    expect(res.messages.some((m) => String(m.content).includes('你还没跑测试'))).toBe(true);
+  });
+
+  it('Stop 钩子不要求继续 → 行为与没有钩子完全一致', async () => {
+    const { chat, turnsUsed } = scriptedChat([{ text: '完成' }]);
+    const { runner } = fakeHooks();
+
+    const res = await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: '做件事' }],
+        emit: () => undefined,
+      },
+      { ...makeDeps(chat, allow().resolver), hooks: runner },
+    );
+
+    expect(res.reason).toBe('final');
+    expect(turnsUsed()).toBe(1);
+    expect(res.messages.filter((m) => m.role === 'assistant')).toHaveLength(1);
+  });
+
+  it('不传 hooks 时完全不碰钩子（默认空运行器）', async () => {
+    const { chat } = scriptedChat([{ text: 'ok' }]);
+    const res = await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: 'hi' }],
+        emit: () => undefined,
+      },
+      makeDeps(chat, allow().resolver),
+    );
+    expect(res.reason).toBe('final');
+  });
+});

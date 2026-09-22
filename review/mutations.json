@@ -1,93 +1,61 @@
 {
-  "note": "复核 012 · 对象：W5d（生命周期钩子引擎 + 执行器接入）。基线：W5d 主提交",
+  "note": "复核 013 · 对象：W5d-b（SessionStart / UserPromptSubmit / Stop 接入运行路径）。基线：W5d-b 主提交",
   "mutations": [
     {
       "id": "M1",
-      "desc": "忽略 enabled 开关（关闭状态下钩子照样跑）",
-      "file": "packages/agent-core/src/hooks/runner.ts",
-      "find": "      if (!config.enabled) return result;",
-      "replace": "      // 变异：不再检查 enabled",
-      "test": "packages/agent-core/src/hooks/runner.test.ts"
+      "desc": "UserPromptSubmit 的 blocked 被忽略（钩子拦不下提示词，照样发模型）",
+      "file": "packages/agent-core/src/loop/agent-loop.ts",
+      "find": "  if (submit.blocked) {",
+      "replace": "  if (false) {",
+      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
     },
     {
       "id": "M2",
-      "desc": "退出码 2 不再视为拒绝（唯一被赋予阻断语义的退出码失效）",
-      "file": "packages/agent-core/src/hooks/runner.ts",
-      "find": "    if (code === 2) {",
-      "replace": "    if (false) {",
-      "test": "packages/agent-core/src/hooks/runner.test.ts"
+      "desc": "钩子上下文塞成用户消息（污染会话历史：模型以为用户说过）",
+      "file": "packages/agent-core/src/loop/agent-loop.ts",
+      "find": "  if (submit.context !== '') injectIntoSystem(messages, submit.context);",
+      "replace": "  if (submit.context !== '') messages.push({ role: 'user', content: submit.context });",
+      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
     },
     {
       "id": "M3",
-      "desc": "continue:false 不再视为阻止",
-      "file": "packages/agent-core/src/hooks/runner.ts",
-      "find": "    if (output?.continue === false) {",
-      "replace": "    if (false) {",
-      "test": "packages/agent-core/src/hooks/runner.test.ts"
+      "desc": "Stop 的 continueTurn 被忽略（钩子要求再走一步但没走）",
+      "file": "packages/agent-core/src/loop/agent-loop.ts",
+      "find": "      if (stop.continueTurn && stopContinues < MAX_STOP_CONTINUATIONS) {",
+      "replace": "      if (false) {",
+      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
     },
     {
       "id": "M4",
-      "desc": "把「非 2 的非零退出」也当成拒绝（写坏的钩子会让应用变成砖）",
-      "file": "packages/agent-core/src/hooks/runner.ts",
-      "find": "    if (code !== 0) {",
-      "replace": "    if (code === 1) {",
-      "test": "packages/agent-core/src/hooks/runner.test.ts"
+      "desc": "Stop 续走次数上限被放开（钩子写错就是死循环）",
+      "file": "packages/agent-core/src/loop/agent-loop.ts",
+      "find": "const MAX_STOP_CONTINUATIONS = 2;",
+      "replace": "const MAX_STOP_CONTINUATIONS = 100;",
+      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
     },
     {
       "id": "M5",
-      "desc": "钩子改写后的参数不再重新校验（改写成为绕过校验的后门）",
-      "file": "packages/agent-core/src/tools/executor.ts",
-      "find": "      args = tool.parse(pre.updatedInput);",
-      "replace": "      args = pre.updatedInput;",
-      "test": "packages/agent-core/src/tools/executor.test.ts"
+      "desc": "取提示词原文时取**第一条**用户消息（拿历史里的旧话去匹配钩子）",
+      "file": "packages/agent-core/src/loop/agent-loop.ts",
+      "find": "  for (let i = messages.length - 1; i >= 0; i -= 1) {",
+      "replace": "  for (let i = 0; i < messages.length; i += 1) {",
+      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
     },
     {
       "id": "M6",
-      "desc": "被拒绝后不再短路（继续跑后面的钩子，产生无意义副作用）",
-      "file": "packages/agent-core/src/hooks/runner.ts",
-      "find": "            // 已被拒绝就不再跑后面的钩子：拒绝之后再产生副作用没有意义\n            return result;",
-      "replace": "            // 变异：不短路",
-      "test": "packages/agent-core/src/hooks/runner.test.ts"
+      "desc": "钩子上下文不再带统一标记（用户/模型分不清这句是谁说的）",
+      "file": "packages/agent-core/src/hooks/points.ts",
+      "find": "export const HOOK_CONTEXT_MARKER = '[钩子补充上下文]';",
+      "replace": "export const HOOK_CONTEXT_MARKER = '';",
+      "test": "packages/agent-core/src/hooks/points.test.ts"
     },
     {
       "id": "M7",
-      "desc": "ranCount 把「没启动的钩子」也算进去（用户以为钩子跑了，其实被安全规则拦下）",
-      "file": "packages/agent-core/src/hooks/runner.ts",
-      "find": "          if (one.spawned) result.ranCount += 1;",
-      "replace": "          result.ranCount += 1;",
-      "test": "packages/agent-core/src/hooks/runner.test.ts"
-    },
-    {
-      "id": "M8",
-      "desc": "输出不再截断（钩子吐一大坨就把内存吃光）",
-      "file": "packages/agent-core/src/hooks/runner.ts",
-      "find": "      if (Buffer.byteLength(stdout) > limit) {\n        truncated = true;\n        stdout = Buffer.from(stdout).subarray(0, limit).toString('utf8');\n      }",
-      "replace": "      // 变异：不截断",
-      "test": "packages/agent-core/src/hooks/runner.test.ts"
-    },
-    {
-      "id": "M9",
-      "desc": "超时的钩子不再被终止、也不记诊断（静默失败）",
-      "file": "packages/agent-core/src/hooks/runner.ts",
-      "find": "    if (timedOut) {",
-      "replace": "    if (false) {",
-      "test": "packages/agent-core/src/hooks/runner.test.ts"
-    },
-    {
-      "id": "M10",
-      "desc": "PermissionRequest 钩子的 deny 被忽略（策略程序说不也照弹窗）",
-      "file": "packages/agent-core/src/tools/executor.ts",
-      "find": "    if (permHook.blocked || permHook.permissionDecision === 'deny') {",
-      "replace": "    if (false) {",
-      "test": "packages/agent-core/src/tools/executor.test.ts"
-    },
-    {
-      "id": "M11",
-      "desc": "多个钩子的权限决定取第一个而非最严格（deny 可能被 allow 盖过）",
-      "file": "packages/agent-core/src/hooks/runner.ts",
-      "find": "            if (result.permissionDecision === null || severity(next) > severity(result.permissionDecision)) {",
-      "replace": "            if (result.permissionDecision === null) {",
-      "test": "packages/agent-core/src/hooks/runner.test.ts"
+      "desc": "Stop 的最终文本不再截断（长答复把钩子的 stdin 灌爆）",
+      "file": "packages/agent-core/src/hooks/points.ts",
+      "find": "    payload: { text: finalText.slice(0, 4_000) },",
+      "replace": "    payload: { text: finalText },",
+      "test": "packages/agent-core/src/hooks/points.test.ts"
     }
   ]
 }

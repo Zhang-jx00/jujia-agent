@@ -95,7 +95,6 @@
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
 | T1 | utilityProcess (Electron API 文档) | https://www.electronjs.org/docs/latest/api/utility-process | 官方 API，是把 Agent runtime 放进独立进程（sidecar）的底层能力依据 | canonical |
-| T2 | Cline 仓库（`sdk/` 与 `apps/` 分离，desktop 用 Bun sidecar） | https://github.com/cline/cline | 真实 Coding Agent，将 agent runtime（SDK）与桌面壳分离；其桌面端以独立 sidecar 进程承载运行时，是“内核隔离”范本（注：桌面壳为 Tauri，模式对 Electron 同样适用） | verified |
 | T3 | 《Electron Shell & Sidecar Server》(learn-workbuddy 架构笔记) | https://deepwiki.com/adongwanai/learn-workbuddy/3.1-electron-shell-and-sidecar-server-(s05-s06) | 详细给出三进程模型：Electron 壳 / 渲染 / Sidecar（Agent runtime），经 Unix socket JSON-RPC 控制面通信 | verified |
 | T4 | freeCodeCamp《Create Desktop Apps with Electron, React, and TypeScript》 | https://freecodecamp.org/news/create-desktop-apps-with-electron-react-and-typescript | 通用 Electron 工程课程，覆盖多进程/安全/打包，可作为 sidecar 架构学习基础 | verified |
 | T5 | r/electronjs（sidecar / 进程隔离架构讨论） | https://www.reddit.com/r/electronjs/ | 社区关于把重逻辑/AI runtime 放进独立进程的架构讨论 | verified（社区入口） |
@@ -143,7 +142,6 @@
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
 | T1 | electron-vite《Distribution》指南（monorepo 打包） | https://electron-vite.org/guide/distribution | 教程给出 `apps/desktop` + `packages/*` 的 electron-vite monorepo 打包范式 | verified |
-| T2 | Cline 仓库（`sdk/` 与 `apps/` 分离） | https://github.com/cline/cline | 真实 Agent 项目把 agent-core（SDK）与桌面/CLI/扩展壳分到不同 workspace，契合“agent-core 与 desktop 壳分离” | verified |
 | T3 | 博客园《为什么 Electron 项目推荐采用 Monorepo 架构》 | https://www.cnblogs.com/clnchanpin/p/19279337 | 技术报告，讲清 pnpm workspace + turbo 的包划分（`electron-core`/`electron-ipc`/`electron-window`）、依赖与构建优化 | verified |
 | T4 | 《Electron.js 从入门到精通》(第5周脚手架+打包，多包重构) | http://www.crazyming.com/posts/3322 | 系统教程，第5周用 Forge/electron-vite 做 monorepo 式重构并产出安装包 | verified |
 | T5 | r/electronjs（monorepo / workspace 组织讨论） | https://www.reddit.com/r/electronjs/ | 社区关于 pnpm workspace + Electron 分包组织的经验交流 | verified（社区入口） |
@@ -161,7 +159,6 @@
 | 5. IPC | ✅ | ✅ | ✅ | ✅ | ✅ | 完整 |
 | 6. 安全 Checklist | ✅ | ✅ | ✅ | ✅ | ✅ | 完整（T1 已 WebFetch 提取 20 条） |
 | 7. UtilityProcess | ✅ | ✅ | ✅ | ✅ | ✅ | 完整 |
-| 8. Sidecar/内核隔离 | ✅ | ✅ | ✅ | ✅ | ✅ | T2 用 Cline（桌面壳为 Tauri，模式适用 Electron）；无纯 Electron 专属 sidecar 课程，T4 以通用 Electron 课程兜底 |
 | 9. 内置终端 | ✅ | ✅ | ✅ | ✅ | ✅ | T1 用 node-pty 仓库（终端集成无 Electron 官方专属教程，node-pty 为事实标准） |
 | 10. electron-builder | ✅ | ✅ | ✅ | ✅ | ✅ | 完整 |
 | 11. 原生模块 | ✅ | ✅ | ✅ | ✅ | ✅ | 完整 |
@@ -171,7 +168,5 @@
 
 **真实性说明（重要）**
 - 全部 URL 均来自本次 WebSearch 检索结果，或对 `process-model`、`security` 两页做了 WebFetch 亲自打开确认（标注 canonical）。
-- T2 优先选用真实 Electron 桌面 AI/Agent 开源项目并尽量指向具体目录/文件：Lobe Chat `apps/desktop`、Chatbox、Cherry Studio `electron-builder.yml`、Cline `sdk/`+`apps/`、Beekeeper Studio（utility+MessagePort）、escrcpy（`electron-ipcx`/`node-pty` asarUnpack）、naok1207/terminal_sample、carlosperate/electron-sandbox、kewde/electron-sandbox-boilerplate。
-- 需提醒的偏差（已如实标注）：Cline 桌面壳实际为 **Tauri + Bun sidecar**（非 Electron），但其“agent-core 与壳分离、独立 sidecar 进程”模式对 Electron 同样成立，故仍作 T2 参考；Jan/LM Studio 因 Jan 已迁 Tauri、LM Studio 闭源，未纳入 T2 主清单。
 - 领域 8（sidecar）与领域 9（终端）无 Electron 官方专属教程，已用最贴近的权威来源（utilityProcess API / node-pty 仓库）替代 T1，并说明原因；T4 在 sidecar 领域以通用 Electron 工程课程兜底，未编造专门课程。
 - 未使用任何凭记忆捏造的 URL；社区类（T5）多数以官方/权威社区入口（GitHub Discussions、Stack Overflow 标签、r/electronjs）标注，确保可检索、不失效。

@@ -54,11 +54,9 @@
 
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
-| T1 官方文档 | Claude Code — Create custom subagents（MEMORY.md 外置持久化） | https://code.claude.com/docs/en/sub-agents | Anthropic 官方文档，memory 字段将知识落地到 Markdown 文件，前 200 行注入 context，超出则迁移到主题文件 | verified |
 | T2 开源源码 | LobeHub session-handoff skill（SESSION_LOG.md 跨 agent 持久化） | https://lobehub.com/zh-TW/skills/davidshaevel-dot-com-davidshaevel-marketplace-session-handoff | 社区 skill，规定时间戳日志+状态区块(目的/当前状态/限制)+下一步+可选复现指令，本质是 NOTES.md 外置 | verified |
 | T3 论文 | Generative Agents: Interactive Simulacra of Human Behavior（arXiv:2304.03442） | https://arxiv.org/abs/2304.03442 | Stanford/Google，memory stream + reflection，将经验以自然语言记录/检索，结构化笔记思想源头 | canonical（已打开） |
 | T4 在线课程 | Agent Memory: Building Memory-Aware Agents（"Constructing The Memory Manager" 课时） | https://learn.deeplearning.ai/courses/agent-memory-building-memory-aware-agents/ | 设计持久化 memory stores 与 manager，把记忆外置为结构化存储 | verified |
-| T5 社区讨论 | CSDN《拆解Claude Code上下文治理底层架构：从五层压缩到子代理隔离》 | https://blog.csdn.net/2301_80381519/article/details/163246776 | 中文社区解析 CLAUDE.md / SKILL / Auto Memory / 任务规划文件(PLAN.md·交接文档) 四类外置存储载体 | verified |
 
 ---
 
@@ -79,10 +77,8 @@
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
 | T1 官方文档 | Letta blog — Agent Memory（"Message Eviction & Summarization" 段） | https://www.letta.com/blog/agent-memory | 官方说明 eviction 只删约 70%、recursive summarization（旧消息权重递减） | verified |
-| T2 开源源码 | cline/cline sdk/packages/core/src/extensions/context/（compaction.ts、basic-compaction.ts、agentic-compaction.ts） | https://github.com/cline/cline | Cline SDK 的 basic（确定性截断）与 agentic（LLM 摘要）两种 compaction 策略实现 | canonical（路径经 deepwiki 核实） |
 | T3 论文 | MemGPT: Towards LLMs as Operating Systems（arXiv:2310.08560） | https://arxiv.org/abs/2310.08560 | 注：压缩机制散见于多篇论文，无专门 compaction 论文；以 MemGPT 的 eviction/recursive summarization 为权威来源 | canonical（已打开） |
 | T4 在线课程 | （空白） | — | 理由：未检索到专门系统讲解“上下文压缩/compaction”的免费权威在线课程；相关概念分散于 Anthropic context engineering 指南与各框架源码，不作为独立课程收录 | 缺 |
-| T5 社区讨论 | CSDN《拆解Claude Code上下文治理底层架构》 | https://blog.csdn.net/2301_80381519/article/details/163246776 | 中文社区对五层压缩、子代理隔离、断路器熔断（连续 3 次压缩失败关闭自动压缩）的解析 | verified |
 
 ---
 

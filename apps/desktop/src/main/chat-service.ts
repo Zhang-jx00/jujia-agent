@@ -5,6 +5,7 @@ import {
   loadNotes,
   loadProjectContext,
   runAgentTurn,
+  sessionStart,
   withTimeout,
   type ChatMessage,
   type LoopEvent,
@@ -43,6 +44,8 @@ interface Session {
   id: string;
   connectionId: string;
   messages: ChatMessage[];
+  /** SessionStart 钩子是否已经跑过（只跑一次，避免每轮都注入） */
+  startedHookFired: boolean;
   controller: AbortController | null;
   running: boolean;
   /** 会话级「总是允许」白名单（工具名） */
@@ -61,6 +64,7 @@ function buildSession(connectionId: string): Session {
     id: randomUUID(),
     connectionId,
     messages: [{ role: 'system', content: BASE_PROMPT }],
+    startedHookFired: false,
     controller: null,
     running: false,
     alwaysAllow: new Set<string>(),
@@ -150,11 +154,34 @@ export function sendMessage(
 
       if (deps.workspaceRoot === null) {
         // 没有工作区：仍可对话，但工具一律会因路径校验失败而拒绝。
-        // 这里如实把情况写进上下文，避免模型反复尝试注定失败的工具调用。
+        // 这里如实把情况写进上下文，避免模型反复尝试反复失败的工具调用。
         session.messages.push({
           role: 'system',
           content: '当前尚未选择工作区，所有文件类工具都不可用。若用户要求读写文件，请提示其先在「概览」页选择工作区。',
         });
+      }
+
+      // W5d-b：SessionStart 钩子 —— 只在会话第一轮触发一次（此时 messages 里还没有任何对话内容）。
+      // 钩子给的上下文**注入系统提示**，而不是伪造一条用户消息：钩子说的不是用户说的。
+      if (deps.hooks && !session.startedHookFired) {
+        session.startedHookFired = true;
+        try {
+          const started = await sessionStart(deps.hooks, {
+            sessionId: session.id,
+            cwd: deps.workspaceRoot ?? '__no_workspace__',
+          });
+          if (started.context !== '') {
+            const first = session.messages[0];
+            if (first && first.role === 'system') {
+              first.content = `${first.content}\n\n${started.context}`;
+            } else {
+              session.messages.unshift({ role: 'system', content: started.context });
+            }
+          }
+        } catch (err) {
+          // 钩子失败不能让对话挂掉（钩子契约里也是 fail-open），但必须留下痕迹
+          console.warn('[hooks] SessionStart 失败:', err instanceof Error ? err.message : err);
+        }
       }
 
       const result = await runAgentTurn(

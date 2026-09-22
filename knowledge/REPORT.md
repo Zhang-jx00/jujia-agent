@@ -1,8 +1,5 @@
 # 俱佳Agent 知识调研综合报告
 
-> Generated 2026-09-18 · depth: deep · 8 angles + local Yan-Agent analysis · workspace: `knowledge/`  
-> 证据文件：`findings/F1.md` … `F8.md`、`FYAN.md`（每条主张含 URL / quote / confidence）
-
 ## Executive summary
 
 1. **Agent 内核不要自创控制流**：生产界共识是三分支循环——模型输出若是「无 tool 的正文」则结束；若是 handoff 则切换 Agent；若是 tool_calls 则执行后重入循环，并用 `max_turns`/预算熔断（F1）。
@@ -11,16 +8,12 @@
 4. **Skills 与 MCP 职责分离**：MCP = 工具/数据连接器（JSON-RPC Host-Client-Server）；Skills = SKILL.md 渐进披露的过程知识。Skills 可以教「如何用 MCP」，不能替代 MCP（F3）。
 5. **Hooks 必须能拒绝**：PreToolUse/PostToolUse 等生命周期钩子应返回 allow/deny/ask；「静默退出码 0」≠ 批准（F3）。
 6. **定时任务应落盘成 Skill + schedule 侧车**，而不是依赖渲染进程会话存活；桌面最低间隔 1 分钟 + 抖动 + 漏跑仅补一次（F3）。
-7. **记忆分层**：core/pinned blocks 常驻系统提示 + 会话窗口 + 可检索归档；压缩先清 tool 输出再结构化摘要；Windows 落盘必须原子写（F4/FYAN）。
 8. **Electron 安全默认值不可妥协**：contextIsolation + sandbox + 禁止暴露 raw ipcRenderer + 校验 IPC sender；Agent 运行时放 utilityProcess/sidecar，渲染层只做 UI（F5）。
 9. **流畅 UI 的根因**：测量优先（DevTools + Chrome Tracing）；流式 delta 小事件 + rAF 批处理；消息/审阅虚拟列表；主进程禁止同步 IPC/重 IO（F6）。
 10. **UI 基线**：Windows 桌面优先 Fluent UI React v9 + 语义 Design Tokens；工具卡 L0/L1/L2 渐进披露；权限按钮「动词+名词」；每个表面四态 empty/loading/error/success；动效 100–300ms 且尊重 reduced-motion（F7）。
 11. **模型层**：连接抽象为「多 Connection」，协议仅 `anthropic | openai` 两档；对话历史必须 block 级（text/thinking/tool_use/tool_result）；SSE 在主进程/utility 解析（F8）。
-12. **可复用 Yan 蓝图、避开其坑**：抄 sidecar 隔离 + MCP stdio + Skill 包格式 + 稳定数据根目录；从第一天模块化、原子写、配置内存缓存、权限请求队列（FYAN + 已有优化报告）。
 
 ## Background & scope
-
-为 Windows 上 **TypeScript + Electron** 的学习型桌面 Agent（俱佳Agent）建立至少 60 个相关知识领域的权威基线，并产出可执行的规划与开发计划。调研覆盖 Agent 机制、多代理、Skills/Hooks/定时/MCP、记忆与上下文、Electron 架构、性能、UI/UX、模型适配与开源对标，以及本地 Yan-Agent 架构提炼。不覆盖生产合规认证与商业化。
 
 ## 一、Agent 核心机制
 
@@ -99,8 +92,6 @@ JuJiaData/
 
 官方要点：main 永不阻塞；IPC 校验 sender；浏览器窗口零 Agent bridge；终端 = xterm.js + node-pty（main）（F5）。
 
-仓库布局建议（对标 Cline/OpenCode 可复用核）：
-
 ```
 jujia-agent/
   packages/
@@ -135,15 +126,8 @@ jujia-agent/
 - 文案：进行中用进行时；成功写明「改了什么」；全应用统一动词。
 - 动效：微交互 100–200ms，卡片展开 200–300ms；`prefers-reduced-motion` 仍保留 loading。
 
-## 八、模型适配与开源对标
-
 | 项目 | 可学 | 可避 |
 |------|------|------|
-| OpenCode | AI SDK + models.dev 多供应商；build/plan Agent | 复杂度对学习项目偏重 |
-| Yan-Agent | Electron 壳 + sidecar + 连接预设 + 稳定性模块 | God file、非原子写、权限竞态、公开树落后发行版 |
-| Cline | Plan/Act、多形态 SDK/CLI/Desktop | VS Code 绑定 |
-| Aider | OpenAI-compatible、reasoning 接受性白名单 | CLI 形态 |
-| Claude Code（论文 v2.1.88） | while 循环核、7 权限模式、五层压缩、MCP/Skills/Hooks | 不可直接商用克隆 |
 
 连接 schema 建议（F8/Yan）：
 
@@ -184,7 +168,6 @@ interface Connection {
 [2] OpenAI Agents SDK Running Agents  
 [3] Anthropic Building Effective Agents  
 [4] Claude Agent SDK Agent Loop  
-[5] Claude Code Sub-agents / Hooks / Skills / Scheduled tasks  
 [6] Anthropic Multi-agent Research System  
 [7] modelcontextprotocol.io Specification + Security  
 [8] agentskills.io Specification  
@@ -192,8 +175,6 @@ interface Connection {
 [10] Electron Process/IPC/Sandbox/Security/Performance/UtilityProcess  
 [11] react-window  
 [12] Fluent 2 / M3 tokens / LobeHub DESIGN.md / NN/g  
-[13] OpenCode / Cline / Aider / Roo Code / Claude Code 源码分析  
-[14] 本地 Yan-Agent 源码树 v1.5.0（`D:\MiMo\ProjectOne\Yan-Agent`）  
 （各条 URL 见 `knowledge/findings/*.md`）
 
 ---

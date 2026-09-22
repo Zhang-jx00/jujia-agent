@@ -2,7 +2,6 @@
 
 > 配合 `knowledge/findings/` 与 `knowledge/sources/` 使用：每条主题优先学习「权威文档 → 开源实现 → 论文/工程博客 → 可运行实验」。
 > #81–104 为两轮增补领域，五类来源统一查 `knowledge/SOURCE-MATRIX.md`。
-> 来源类型缩写：**D**=官方文档 · **O**=开源仓库 · **P**=论文 · **C**=课程/工程博客 · **A**=本地 Yan-Agent 对照。
 
 ---
 
@@ -17,7 +16,6 @@
 | 5 | Tool ACI 设计 | 绝对路径、防呆参数 | C: Anthropic SWE-bench 工具优化 [F1] |
 | 6 | Evaluator-Optimizer | 生成与验收分离 | D: Anthropic workflows [F1] |
 | 7 | 目标验收 / 测试反馈 | 测试为环境真值 | D/C: Anthropic coding agents 段落 [F1] |
-| 8 | 失败恢复 | transient 分类、熔断、可恢复工具错误 | O: OpenAI SDK error behaviors · A: Yan opencode-stability |
 | 9 | Context Engineering | attention budget、JIT 检索 | C: Anthropic effective context engineering [F1/F4] |
 | 10 | 状态机与预算 | max_turns、graph 节点、HITL | D: LangGraph overview [F1] |
 
@@ -25,14 +23,10 @@
 
 | # | 主题 | 关键点 | 资源 |
 |---|------|--------|------|
-| 11 | Subagent 模型 | 独立上下文+工具 ACL+摘要返回 | D: Claude Code sub-agents [F2] |
-| 12 | 内置角色 | Explore/Plan/Build/Test | D: Claude Code [F2] |
 | 13 | agents-as-tools vs handoff | `as_tool` vs `transfer_to_*` | D: OpenAI multi_agent/handoffs [F2] |
 | 14 | Orchestrator-Worker | Lead 规划→并行→综合 | D: Anthropic research system [F2] |
-| 15 | Git worktree 隔离 | 无 diff 自动清理 | D: Claude Code isolation [F2] |
 | 16 | 并发槽与成本 | 3–5 槽；15× token | C: Anthropic metrics [F2] |
 | 17 | Artifact 交接 | 磁盘产物+路径哈希 | C: Anthropic telephone 避免 [F2] |
-| 18 | 路由预算 | description 短、15k 警告 | D: Claude Code subagents [F2] |
 
 ## 3. 技能 / 钩子 / 定时 / 连接（12）
 
@@ -44,11 +38,8 @@
 | 22 | MCP 安全 | 同意 UI、token 不转发、Origin 校验 | D: MCP security best practices [F3] |
 | 23 | MCP Registry / 官方 server | 参考实现非生产 | O: github.com/modelcontextprotocol/servers [F3] |
 | 24 | Agent Skills 标准 | SKILL.md + 渐进披露 | D: agentskills.io [F3] |
-| 25 | Skill 位置与 frontmatter | 作用域、allowed-tools | D: Claude Code skills [F3] |
-| 26 | Hooks 生命周期 | Pre/PostToolUse 可 deny | D: Claude Code hooks [F3] |
 | 27 | 桌面定时任务 | RRULE、抖动、补跑一次 | D: Claude Desktop scheduled tasks [F3] |
 | 28 | 定时=Skill+schedule | 磁盘持久化 | D: scheduled-tasks SKILL.md 模式 [F3] |
-| 29 | 应用连接作用域 | App/Workspace/Session | D: Claude Code MCP scopes [F3] |
 | 30 | Skills over MCP | SEP-2640 / skill:// | D: MCP WG [F3] |
 
 ## 4. 记忆与上下文（10）
@@ -60,7 +51,6 @@
 | 33 | 归档检索 | 淘汰后仍可读盘 | D: Letta [F4] |
 | 34 | 结构化笔记 | NOTES / todo 外置 | C: Anthropic context engineering [F4] |
 | 35 | Handoff packet | ~2k token 摘要交接 | C: Anthropic [F4] |
-| 36 | 上下文压缩 | 先清 tool 再摘要 | C/D: Claude Code compaction 层 [F4/F8] |
 | 37 | RAG vs Agent Memory | 文档检索 vs 写路径抽取 | P: Zep Graphiti [F4] |
 | 38 | Mem0 写管线 | extract/consolidate/retrieve | P: arXiv 2504.19413 [F4] |
 | 39 | 记忆评估 | LOCOMO / LongMemEval | P: F4 |
@@ -77,11 +67,9 @@
 | 45 | IPC invoke/handle vs send | 契约化错误对象 | D: Electron IPC [F5] |
 | 46 | Security Checklist | 20 条；校验 sender | D: Electron security [F5] |
 | 47 | UtilityProcess | 优于 child_process.fork | D: Electron utility-process [F5] |
-| 48 | Sidecar / 内核隔离 | 独立 serve 进程 | O/A: Yan opencode-sidecar [FYAN] |
 | 49 | 内置终端 | xterm.js + node-pty | D/O: Electron + Yan terminal |
 | 50 | electron-builder | nsis/portable、asarUnpack | D: electron-builder · A: Yan package.json |
 | 51 | 原生模块 | 禁止进 sandboxed renderer | D: Electron security |
-| 52 | monorepo 分包 | agent-core 与 desktop 分离 | O: Cline / OpenCode 布局 [F5/F8] |
 
 ## 6. 性能 / 缓存 / 预加载 / 流畅（10）
 
@@ -117,13 +105,11 @@
 
 | # | 主题 | 关键点 | 资源 |
 |---|------|--------|------|
-| 73 | OpenAI-compatible | baseURL + models map | D: OpenCode providers · Aider [F8] |
 | 74 | Anthropic Messages | blocks 历史、thinking 回传 | D/O: F8 |
 | 75 | SSE 流式 | main 侧解析、事件枚举 | A: Yan sidecar stream [F8] |
 | 76 | reasoning_content | 与正文分离，禁当交付 | A: Yan vision-relay 反例 |
 | 77 | 多连接 Connection | apiFormat 两档 | A: Yan connection-presets [F8] |
 | 78 | 模型目录与回退 | API 权威、标注过期 | A/F8 |
-| 79 | 限流与重试 | 单点策略模块 | A: opencode-stability |
 | 80 | 安全边界 | 工作区沙箱、权限门禁 | A: Yan 优化报告 · Electron checklist |
 
 ---
@@ -144,7 +130,6 @@
 ## 10. 无限画布与工作流节点编排（9）——第二轮新增（用户硬需求）
 
 > 来源：`knowledge/sources/S9-canvas-workflow.md`。支撑「用户自行搭建工作流的无限画布」。
-> 对标实现：React Flow/xyflow、tldraw、Excalidraw、LiteGraph.js、ComfyUI、n8n、Node-RED、Figma。
 
 | # | 主题 | 关键点 | 资源 |
 |---|------|--------|------|

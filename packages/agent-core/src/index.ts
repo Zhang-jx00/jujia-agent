@@ -11,6 +11,7 @@ export * from './loop/agent-loop';
 export * from './commands/argv';
 export * from './hooks/types';
 export * from './hooks/runner';
+export * from './hooks/points';
 export * from './commands/process';
 export * from './permissions/policy';
 export * from './permissions/rules';

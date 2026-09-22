@@ -10,7 +10,6 @@
 | `BRIEF.md` | 调研任务书（问题定义、范围、8 个研究角度） | 想了解调研边界时读 |
 | `REPORT.md` | **综合调研报告**（12 条核心结论 + 架构建议 + 来源清单） | **先读这个** |
 | `SOURCE-MATRIX.md` | **89+ 领域 × 5 类来源的逐格矩阵**（脚本自动生成） | 查某个领域有哪些权威来源 |
-| `findings/` | 深调研原始证据 F1–F8 + FYAN（每条含 quote / URL / confidence） | 需要引用原文时查 |
 | `sources/` | 五类来源补齐 S1–S11（每领域 T1–T5 五类权威来源） | 按簇找课程 / 社区讨论 / 源码 |
 | `cards/` | 知识卡片（对俱佳Agent 的落地决定，编号递增） | 开发前按编号速览 |
 
@@ -30,7 +29,6 @@
 | J | 无限画布与工作流节点编排（#86–94） | — | `sources/S9-canvas-workflow.md` |
 | K | 内置浏览器与文档查看（#95–99） | — | `sources/S10-browser-docs.md` |
 | L | 多模态能力适配与视频生成（#100–104） | — | `sources/S11-multimodal-video.md` |
-| — | 本地 Yan-Agent 源码分析（v1.5.0，位于 `../Yan-Agent`） | `findings/FYAN.md` | `../Yan-Agent-优化分析报告.md` |
 
 ## 五类权威信息来源（T1–T5）
 

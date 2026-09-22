@@ -79,7 +79,6 @@
 
 | 不做 | 原因 |
 |------|------|
-| 云端持久化多线程工作流平台 | 2026 年主流路线是「一个对话 → 多个云线程、离开后继续跑」（Claude Code Projects / Cursor Projects）；本项目**刻意选本地单机路线**，换取隐私与零订阅 |
 | 团队协作 / 权限角色 / 审计合规套件 | 个人学习项目，不承担企业合规 |
 | 自建模型 / 训练 | 只做编排与工具层 |
 | 移动端 / 网页版 | 只做 Windows 桌面 |
@@ -93,7 +92,6 @@
 
 | 新范式（2026） | 本项目做法 | 理由 |
 |---------------|-----------|------|
-| 云侧持久化 + 异步默认（Claude Code Projects / Cursor Projects） | **本地单机 + 会话可续** | 隐私优先；不引入云成本与账号依赖 |
 | Google Credentials API：**用占位符把密钥挡在模型上下文外** | 已做「密钥不进渲染层」，**待补：密钥不进模型上下文**（发给模型的消息里不含密钥） | 同一安全目标，分步落地 |
 | **MCP 已成事实标准**（Google Home MCP 等） | P3/P4 阶段接入 **MCP 客户端**（而非自造插件协议） | 不自创协议，直接复用生态 |
 | Grok Bot + 1Password：**凭据托管、每次填充都要批准** | 现方案：API Key 用系统加密存储；**待补**：与系统凭据管理器集成 | 暂不引入第三方密码管理器依赖 |
@@ -148,12 +146,10 @@
 | 测试目前不覆盖真实厂商 API 调用 | 真机联调需用户自己的 Key | 用本地 mock SSE 服务覆盖了协议路径 |
 | MCP / 内置浏览器 / 画布尚未开始 | 三大块工作量集中在后半程 | 按 PLAN 推进 |
 | **多子 agent 编排与主题背景自定义曾不在计划内** | 若不补，你点名的领域会缺两块 | 已补 M13/M14（W17/W18） |
-| 参考产品（codex / workbuddy / zcode / qoder / opencode）架构尚未系统对比 | 可能错过成熟做法 | 列为下一轮第一件事 |
 
 ## 8. 本轮核实的来源（2026-09-18 检索，含 09-16/17 动态）
 
 - 行业动态汇总（agent runtime / 垂直化 / 安全）：https://news.bpdata.com/article/agent-runtimes-vertical-products-and-security-ai-b93edf8d
 - 9 月模型与基础设施动态（DeepSeek V4.1-Flash 552B、agentic 默认化）：https://aistartupedge.com/latest-ai-news-september-2026
-- 本月发布汇总（GPT-6 Astra、GPT-Live-1、Cursor Projects、Meta Muse Spark 1.3、Cognition SWE-2）：https://headsupai.io/ai-news-and-updates/this-month
 - 当日快讯（Google Home MCP、Grok Bot + 1Password、Monid 工具市场、对「激进压缩历史」的批评）：https://www.theneuron.ai/digest/everything-that-happened-in-ai-today-wednesday-september-16-2026
 - 开源 agent 模型 Occamy-1.0（35B/3B 激活，Claw-Eval 82.20）：https://civl.com/news/story/accio-team-releases-its-occamy-1-0-open-weights-agent-model-4b9921e2

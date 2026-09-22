@@ -115,21 +115,17 @@
 
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
-| T1 官方文档 | Claude Code — Create custom subagents（隔离上下文、tools ACL、maxTurns、摘要回传） | https://docs.anthropic.com/en/docs/claude-code/sub-agents | Anthropic 官方定义 subagent 的 frontmatter 字段（tools、disallowedTools、model、memory） | canonical |
 | T2 开源源码 | openai/openai-agents-python（`Agent.as_tool()` 上下文隔离 + 摘要返回，Issue #806） | https://github.com/openai/openai-agents-python | SDK 实现 subagent 作为工具时的上下文隔离与「不共享父对话历史」设计 | canonical |
 | T3 论文/博客 | Building effective agents — subagents / orchestration | https://www.anthropic.com/news/building-effective-agents | Anthropic 对 subagent「独立上下文 + 工具 ACL + 摘要返回」的权威叙述 | canonical |
 | T4 在线课程 | Multi AI Agent Systems with crewAI（DeepLearning.AI） | https://learn.deeplearning.ai/courses/multi-ai-agent-systems-with-crewai | 角色化多 agent 协作的入门课程，覆盖 subagent 分工与汇总 | verified |
-| T5 社区讨论 | Reddit r/ClaudeCode subagents 实战共识（经社区综述整理） | https://learn-prompting.fr/blog/claude-code-sub-agents | 社区 6 个月生产经验：subagent 用于探索而非执行、上下文丢失是隐性失败 | verified |
 
 ### 12. 内置角色型代理（Explore / Plan / Build / Test）
 
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
-| T1 官方文档 | Claude Code — Built-in agents（Explore / Plan 等内置角色，只读/规划不改动） | https://docs.anthropic.com/en/docs/claude-code/sub-agents | 官方列出并定义 Explore、Plan 等内置 agent 的行为边界 | canonical |
 | T2 开源源码 | anthropics/claude-code（内置 agent 定义与角色提示） | https://github.com/anthropics/claude-code | 内置角色 agent 的提示词与工具权限实现所在仓库 | canonical |
 | T3 论文/博客 | Building effective agents — Augmented LLM 与角色化编排 | https://www.anthropic.com/news/building-effective-agents | Anthropic 框架中角色化 agent 的理论依据 | canonical |
 | T4 在线课程 | Hugging Face Agents Course（多 agent 系统单元） | https://huggingface.co/learn/agents-course/en/unit0/introduction | 免费官方课程讲解角色分工与协作 | verified |
-| T5 社区讨论 | r/ClaudeCode 关于 Explore/Plan agent 的使用经验（社区综述） | https://learn-prompting.fr/blog/claude-code-sub-agents | 社区实战：Explore 只读降低风险、Plan 只做分析与设计 | verified |
 
 ### 13. agents-as-tools 与 handoff 两种编排范式
 
@@ -155,11 +151,8 @@
 
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
-| T1 官方文档 | Claude Code — Run parallel sessions with worktrees（--worktree、subagent isolation、清理） | https://code.claude.com/docs/en/worktrees | Anthropic 官方文档，定义用 git worktree 隔离并行 session 与 subagent | canonical |
 | T2 开源源码 | git/git（git worktree 内建命令）与 anthropics/claude-code（隔离校验实现） | https://github.com/git/git | worktree 隔离的底层机制来源 | canonical |
-| T3 论文/博客 | 腾讯云开发者社区 — 为什么 AI 写代码正在变成一个分布式系统问题 | https://developer.cloud.tencent.com/article/2657592 | 中文技术深度文，对比 Claude Code(worktree)、CrewAI/AutoGen(消息传递) 的隔离策略 | verified |
 | T4 在线课程 | 未找到专门以 worktree 为主题的独立在线课程 | — | worktree 属于「工具使用技巧」，官方文档 + 社区教程已覆盖，暂无专门系统化课程 | 留空 |
-| T5 社区讨论 | Hacker News / r/ClaudeCode 关于 Orchestrate teams of Claude Code sessions 的讨论 | https://readhacker.news/s/6M68i | HN 汇总社区对多 session/team 协作（含 worktree）的不同看法 | verified |
 
 ### 16. 并发槽位与 token 成本控制
 
@@ -175,11 +168,9 @@
 
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
-| T1 官方文档 | Claude Code — subagents（结果以摘要/产物形式返回主会话） | https://docs.anthropic.com/en/docs/claude-code/sub-agents | 官方说明 subagent 如何把产物与摘要回传给 orchestrator | canonical |
 | T2 开源源码 | openai/openai-agents-python（handoffs 默认传递完整对话历史，as_tool 需显式传 context） | https://github.com/openai/openai-agents-python | 源码揭示「交接时信息如何（不）传递」，正是 artifact 失真的风险点 | canonical |
 | T3 论文/博客 | Building effective agents（subagent 上下文隔离与信息汇总原则） | https://www.anthropic.com/news/building-effective-agents | Anthropic 对 agent 间信息传递与失真的权威提醒 | canonical |
 | T4 在线课程 | Hugging Face Agents Course（多 agent 协作与产物交接单元） | https://huggingface.co/learn/agents-course/en/unit0/introduction | 免费官方课程覆盖 agent 间协作与结果汇总 | verified |
-| T5 社区讨论 | r/ClaudeCode 关于 subagent「上下文丢失是隐性失败」的经验（社区综述） | https://learn-prompting.fr/blog/claude-code-sub-agents | 社区指出：新 spawn 的 subagent 不自动继承 orchestrator 已学信息，需显式传递 | verified |
 
 ### 18. 路由预算与 description 极简化
 
@@ -217,8 +208,6 @@
 | 18 | 路由预算与 description 极简化 | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 **合计**：18 个领域 ×（5 类 − 1 处留空）= **89 条来源**（理论 90，缺 1 格）。
-
-**唯一未填格子**：领域 15（Git worktree 隔离执行）的 T4。原因：worktree 是 git/Claude Code 的工具使用技巧，官方文档（T1）与社区深度教程（T3/T5）已覆盖，检索未找到以 worktree 为主题的独立系统化在线课程/交互式教学；为避免编造，如实留空。
 
 **说明**：
 - T5 中部分条目以「社区综述类文章（如 aitooldiscovery、learn-prompting.fr、readhacker.news）」形式呈现，它们本身是对 Reddit / Hacker News 真实讨论的整理，URL 均经本次检索命中（标 `verified`）；原生社区帖（GitHub Discussions / Issues / Stack Overflow / OpenAI Community）则标 `canonical`（仓库与站点路径稳定）。
