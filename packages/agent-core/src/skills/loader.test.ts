@@ -87,6 +87,27 @@ describe('目录加载（真文件系统）', () => {
     expect(catalog.skipped).toEqual([]);
   });
 
+  it('排序依据是**技能名**而不是目录名（目录名与 name 可以不一致）', async () => {
+    const base = join(root, 'user');
+    // 目录名的字母序与技能名相反：只有"按 name 排序"才能得到 ['aaa','zzz']
+    await writeSkill(base, 'dir-a', '---\nname: zzz\ndescription: 名字最大');
+    await writeSkill(base, 'dir-z', '---\nname: aaa\ndescription: 名字最小');
+    const catalog = await loadSkillCatalog([source(base)]);
+    expect(catalog.skills.map((s) => s.name)).toEqual(['aaa', 'zzz']);
+  });
+
+  it('两个来源混合时仍然全局按名称排序（不是"按来源分组"）', async () => {
+    const user = join(root, 'user');
+    const ws = join(root, 'ws');
+    await writeSkill(user, 'm-user', '---\nname: m\ndescription: 用户级 m');
+    await writeSkill(ws, 'b-ws', '---\nname: b\ndescription: 工作区 b');
+    const catalog = await loadSkillCatalog([
+      { path: user, origin: 'user' },
+      { path: ws, origin: 'workspace' },
+    ]);
+    expect(catalog.skills.map((s) => s.name)).toEqual(['b', 'm']);
+  });
+
   it('目录不存在 → 空目录且不报错（用户可能一个技能都没装）', async () => {
     const catalog = await loadSkillCatalog([{ path: join(root, 'nope'), origin: 'user' }]);
     expect(catalog.skills).toEqual([]);
