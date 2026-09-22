@@ -32,6 +32,7 @@
 | W12 | 打包（NSIS + portable）+ Release 发布 | `v0.9.1-pack` / `v0.9.2-release` | Release `v0.9.0-w9a`；`npmRebuild=false` 后打包成功 |
 | — | 开源就绪（LICENSE / SECURITY / CONTRIBUTING / 三方声明 / LOGO） | `v0.11.0-oss` 等 | 作者提供的 LOGO；`assets/icon/README.md` |
 | W11a | **技能（Skills）**：目录 + SKILL.md + 渐进披露 + 前缀稳定 | `v0.17.0-w11a` | 变异 10/10 被拦；558 项测试 |
+| W11b | **插件清单**：一个 manifest 打包 skills/commands/mcpServers/userConfig + 变量展开 + 诊断 | `v0.18.0-w11b` | 变异 9/9 被拦；584 项测试；真服务端端到端通过 |
 | W10a–d | **MCP 四层**：协议层 + 客户端核心 + 连接同意策略 + 真实子进程传输与工具桥 | `v0.12.0`–`v0.12.3` | MCP 相关 186 例（含真子进程） |
 | W5c | **自定义权限规则表**（allow/deny/ask + 工具名 glob）+ **激活策略层**（修复运行时死代码） | `v0.14.0-w5c` | 变异 8/8 被拦；480 项测试 |
 | W5d | **生命周期钩子（七类事件）** + 执行器接入 + 配置/界面/文档 | `v0.15.0-w5d` | 真子进程 21 例；变异 11/11 被拦；520 项测试 |
@@ -43,7 +44,7 @@
 （M5 的**代码链路**完整且有真子进程端到端证据；**尚未人工用真实第三方 MCP 服务端在界面里走一遍**，
 见 §2.3 待办）
 
-**当前规模**：5 个 workspace 包 · **31 个测试文件 · 558 个测试全绿** ·
+**当前规模**：5 个 workspace 包 · **33 个测试文件 · 584 个测试全绿（+1 网络用例默认跳过）** ·
 五件套门禁（typecheck / lint / test / smoke / **perf**）
 
 ---

@@ -228,6 +228,14 @@ describe('插件加载（真文件系统）', () => {
     expect(result.plugins.map((p) => p.name)).toEqual(['aaa', 'zzz']);
   });
 
+  it('排序依据是**插件名**而不是目录名（目录扫描顺序恰好同序时最容易被忽略）', async () => {
+    // 目录名字母序与插件名相反：只有"按 name 排序"才能得到 ['aaa','zzz']
+    await writePlugin('dir-a', { name: 'zzz' });
+    await writePlugin('dir-z', { name: 'aaa' });
+    const result = await loadPlugins(sources());
+    expect(result.plugins.map((p) => p.name)).toEqual(['aaa', 'zzz']);
+  });
+
   it('摘要一句话说清加载了什么', async () => {
     await writePlugin('demo', {
       name: 'demo',

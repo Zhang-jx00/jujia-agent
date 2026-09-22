@@ -52,6 +52,7 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 | 怎么用、怎么装 | 本文件「快速开始」 |
 | 技能怎么写（按需查阅的说明书） | [docs/SKILLS.md](docs/SKILLS.md) |
 | 钩子怎么写（可拒绝的自动化） | [docs/HOOKS.md](docs/HOOKS.md) |
+| 插件怎么打包（整包分发） | [docs/PLUGINS.md](docs/PLUGINS.md) |
 | 安全边界与风险声明 | [SECURITY.md](SECURITY.md) |
 | 做了什么、还差什么 | [docs/PROGRESS.md](docs/PROGRESS.md) · [CHANGELOG.md](CHANGELOG.md) |
 | 每轮复核记录（含未通过项） | [review/REVIEW-LOG.md](review/REVIEW-LOG.md) |
