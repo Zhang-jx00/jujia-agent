@@ -92,6 +92,7 @@ npm run typecheck      # 类型检查
 npm run lint           # 静态检查
 npm run test           # 单元 + 集成测试
 npm run smoke          # 真实启动 Electron，断言 IPC 全链路 + 渲染层无 Node 泄漏
+npm run e2e            # 界面级端到端：真应用 + 真点击，12 步全自动（数据隔离到临时目录）
 npm run perf           # 启动性能预算判定（首帧 < 1000ms）
 
 npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/）
