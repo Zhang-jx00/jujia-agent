@@ -7,15 +7,14 @@
  * 这份脚本用 Playwright 驱动**真实的 Electron 与真实的渲染层**，把那些操作全部自动化：
  * 启动 → 切标签 → 填表单 → 点按钮 → 断言界面结果，并且**走真实的 IPC 与主进程**。
  *
- * 隔离：数据目录指向临时目录（`JUJIA_DATA_BASE_DIR`），
- * **绝不碰你日常那套数据**，跑完即丢。
+ * 隔离：数据目录与 Electron 配置目录都指向**项目内**的 `.tmp/e2e/`，
+ * **绝不碰你日常那套数据，也绝不往系统盘（C 盘）写东西**，跑完即清。
  *
  * 用法：npm run e2e        （根目录；会先构建再跑）
  * 退出码：0 = 通过；1 = 失败（打印失败在哪一步、以及界面当时的文本）
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electronPath from 'electron';
@@ -24,6 +23,14 @@ import { _electron as electron } from 'playwright-core';
 // 入口用**脚本自身位置**解析，而不是 cwd —— 否则从仓库根跑时路径就错了（本轮实测踩过）
 const here = dirname(fileURLToPath(import.meta.url));
 const MAIN_ENTRY = join(here, '..', 'out', 'main', 'index.js');
+
+/**
+ * 测试数据落在**项目内** `.tmp/e2e/`，不写系统盘（用户明确要求"测试不要占 C 盘"）。
+ * 两处都要挪才叫真隔离：
+ * - `JUJIA_DATA_BASE_DIR` 管应用自己的数据根；
+ * - `--user-data-dir` 管 Electron 的配置与缓存（Windows 上默认在 %APPDATA%，也就是 C 盘）。
+ */
+const TMP_ROOT = join(here, '..', '..', '..', '.tmp', 'e2e');
 
 const STEPS = [];
 const log = (text) => console.log(text);
@@ -40,8 +47,14 @@ const step = (text) => {
 };
 
 // ---------- 准备隔离环境 ----------
-const dataDir = mkdtempSync(join(tmpdir(), 'jujia-e2e-data-'));
-const wsDir = mkdtempSync(join(tmpdir(), 'jujia-e2e-ws-'));
+// 每次从干净目录开始（固定路径，便于排查；跑完会整体清掉）
+rmSync(TMP_ROOT, { recursive: true, force: true });
+const dataDir = join(TMP_ROOT, 'data');
+const wsDir = join(TMP_ROOT, 'ws');
+const profileDir = join(TMP_ROOT, 'profile');
+mkdirSync(dataDir, { recursive: true });
+mkdirSync(wsDir, { recursive: true });
+mkdirSync(profileDir, { recursive: true });
 
 // 预置一个插件（等价于"用户自己装了一个插件"），供界面断言
 const pluginDir = join(dataDir, 'plugins', 'my-team');
@@ -73,7 +86,8 @@ try {
   step('启动应用（真实 Electron + 真实渲染层）');
   app = await electron.launch({
     executablePath: electronPath,
-    args: [MAIN_ENTRY],
+    // --user-data-dir 把 Electron 的配置/缓存也挪出 C 盘（默认它在 %APPDATA%）
+    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`],
     env,
   });
   const win = await app.firstWindow();
@@ -97,6 +111,18 @@ try {
     return last;
   };
   const bodyText = async () => (await win.locator('body').innerText()).replace(/\s+/g, ' ');
+
+  /** 轮询等待某段文本**消失**（用于"删除后应看不到"这类断言） */
+  const waitForTextGone = async (needle, timeoutMs = 8_000) => {
+    const deadline = Date.now() + timeoutMs;
+    let last = '';
+    while (Date.now() < deadline) {
+      last = await bodyText();
+      if (!last.includes(needle)) return true;
+      await win.waitForTimeout(120);
+    }
+    return last;
+  };
 
   step('概览页：数据目录应是临时目录（证明没碰你的真实数据）');
   const overview = await bodyText();
@@ -168,9 +194,10 @@ try {
 
   step('删除规则（清理，验证删除后列表为空）');
   await win.getByRole('button', { name: '删除' }).first().click();
-  await win.waitForTimeout(600);
-  const afterDelete = await bodyText();
-  if (afterDelete.includes('端到端验证')) fail('规则没有被删除', afterDelete.slice(0, 600));
+  // 等它**真的消失**，而不是睡固定时长：删除要过一轮 IPC 再重渲染，
+  // 固定等待在机器忙时会偶发失败（本轮实测踩过），轮询则既快又稳
+  const gone = await waitForTextGone('端到端验证');
+  if (gone !== true) fail('规则没有被删除', String(gone).slice(0, 600));
   ok('规则已删除');
 
   step('钩子页：七类事件都在，且默认关闭');
@@ -201,7 +228,7 @@ try {
   fail('执行过程中抛异常', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
 } finally {
   if (app !== undefined) await app.close().catch(() => undefined);
-  for (const dir of [dataDir, wsDir]) {
+  for (const dir of [TMP_ROOT]) {
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {

@@ -47,6 +47,7 @@ TEMP_DIRS = [
     "apps/desktop/out",      # electron-vite 构建产物（npm run build 可重建）
     "coverage",
     ".vitest",
+    ".tmp",                  # 测试/临时数据的统一落点（不写 C 盘，见 docs/TEST-POLICY.md）
 ]
 # ③ 明确的旧版记录（改名/重构后遗留）
 LEGACY_HINTS = [

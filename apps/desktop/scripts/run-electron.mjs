@@ -38,10 +38,34 @@ if (!existsSync(entry)) {
   process.exit(1);
 }
 
-const args = [entry, ...process.argv.slice(2)];
-
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
+
+/**
+ * 测试模式（--smoke / --perf）默认把数据目录与 Electron 配置目录都放到**项目内** `.tmp/`。
+ *
+ * 为什么：测试要能在任意机器上反复跑，且**不往系统盘写东西**（用户的明确要求）。
+ * Windows 上 Electron 默认把配置写到 %APPDATA%（C 盘），所以这里显式用 `--user-data-dir` 挪走，
+ * 应用自己的数据根则用 `JUJIA_DATA_BASE_DIR` 挪走 —— 两者都挪，才算真的没碰 C 盘。
+ * 调用方若已显式设置，则尊重调用方的选择。
+ *
+ * 注意：这段必须在 `env` 定义**之后**（首次写成之前，`env` 还在暂时性死区里，实测直接报
+ * `Cannot access 'env' before initialization`）。
+ */
+const extraArgs = [];
+const mode = process.argv.slice(2).find((a) => a === '--smoke' || a === '--perf');
+if (mode !== undefined) {
+  const testRoot = join(here, '..', '..', '..', '.tmp', mode.replace(/^--/, ''));
+  if (env.JUJIA_DATA_BASE_DIR === undefined) {
+    env.JUJIA_DATA_BASE_DIR = join(testRoot, 'data');
+  }
+  if (!process.argv.some((a) => a.startsWith('--user-data-dir'))) {
+    extraArgs.push(`--user-data-dir=${join(testRoot, 'profile')}`);
+  }
+  console.log(`[run-electron] ${mode} 使用隔离目录：${testRoot}`);
+}
+
+const args = [entry, ...process.argv.slice(2), ...extraArgs];
 
 const child = spawn(electronPath, args, { stdio: 'inherit', env });
 child.on('exit', (code, signal) => {

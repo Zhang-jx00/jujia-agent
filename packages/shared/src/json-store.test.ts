@@ -1,8 +1,18 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JsonStore, __resetWriteQueues, atomicWriteJson, readJsonSafe } from './json-store';
+
+/**
+ * 超时放宽（2026-09-22 实测）：
+ * 本文件里的原子写是**真落盘**（tmp + fsync + rename），并发写用例要连做 12 次。
+ * 空闲时约 1.9s，但机器有负载时会到 5.9s —— 撞上 vitest 默认的 5s 上限，
+ * 于是"门禁里有一条会偶发失败的测试"。**这是超时配置问题，不是逻辑问题**：
+ * 断言本身（文件始终是完整 JSON、不留 .tmp）在慢机器上依然是有效的。
+ * 与 git 工具测试同样的处理（那里也因为"每用例都 spawn 真实进程"而放宽）。
+ */
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 interface Config {
   theme: 'light' | 'dark';
