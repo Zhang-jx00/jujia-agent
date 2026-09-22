@@ -6,6 +6,58 @@
 
 ---
 
+## [v0.15.0-w5d] — 2026-09-22 13:35
+
+**阶段**：W5d —— **生命周期钩子**（M16）：按 ZCode 等成熟同类项目已收敛的契约做七类事件
+**范围**：`packages/agent-core/src/hooks/{types,runner}.ts(+test)` · `commands/{argv,process}.ts`（抽公共） ·
+`tools/executor.ts(+test)` · `loop/agent-loop.ts` · `packages/shared-ipc/src/{channels,contracts}.ts` ·
+`apps/desktop/src/main/{hooks-store.ts(+test),ipc.ts,chat-service.ts}` · `ipc-wiring.test.ts` ·
+`apps/desktop/src/preload/index.ts` · `renderer/src/features/hooks/HooksPanel.tsx` · `App.tsx` · `styles.css` ·
+`docs/HOOKS.md` · 顺带修 `stdio-transport.ts`（改用共享的杀进程实现）
+
+**交付内容**
+
+1. **钩子引擎（七类事件）**：`SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PermissionRequest` /
+   `PostToolUse` / `PostToolUseFailure` / `Stop`。契约要点：
+   **默认禁用** · **argv 执行绝不拼 shell 字符串** · **stdin/stdout 各一个 JSON**（空 stdout = 什么都不做）·
+   **退出码 2 = 唯一被赋予"阻断"语义的退出码** · 超时/非 JSON/schema 非法/其它非零退出 = **记诊断但不阻断**（fail-open，
+   因为钩子是附加防线，主权限门仍照常生效）· 输出上限 32KB 截断 · 超时杀整棵进程树 · 多个钩子的权限决定**取最严格一侧**。
+
+2. **执行器接入四个事件**（本轮实际生效的部分）：
+   - `PreToolUse` **在权限门之前**：可拒绝（连问都不用问）、可改写参数 —— **改写后重新过参数校验**
+     （钩子不是绕过校验的后门，改坏会被拒绝并说明）；
+   - `PermissionRequest` **在弹窗之前**：`allow` 跳过弹窗直接执行、`deny` 不弹窗直接拒绝；
+   - `PostToolUse` / `PostToolUseFailure`：`additionalContext` 并入**同一条**工具结果（模型看到的必须自洽）。
+   - 顺带把「钩子负载」做了截断（`args` 里超长字符串 2000、`result` 4000），避免一次读大文件把钩子的 stdin 灌爆。
+
+3. **配置与界面**：独立 `hooks.json`（原子写 + 损坏自愈）· 校验失败**不落盘**并把错误逐条返回 ·
+   新增「钩子」标签页（启用状态 + 七事件钩子数统计 + JSON 编辑器 + 示例 + 未接入事件**明确标注**）。
+   图形化编辑器**没做**：与其做一个只能表达最简单情形的表单，不如先把契约与校验做扎实 —— 这一点写在界面上，不藏在文档里。
+
+4. **公共模块抽取（避免同一规则写两份）**：
+   - `commands/argv.ts`：argv 传参 + shell 元字符拒绝 + Windows 批处理包装器映射 —— **MCP 与钩子共用**，
+     `buildServerCommand` / `validateServerConfig` 改为委托（既有 125 例测试未改动、全绿）；
+   - `commands/process.ts`：杀整棵进程树（`taskkill /T` + SIGTERM→SIGKILL 宽限）—— stdio-transport 改为委托。
+
+5. **`docs/HOOKS.md`**：面向使用者的完整契约（事件表 / 输入输出格式 / 退出码语义 / fail-open 的理由 / 安全约束 / 三个可复制的例子）。
+
+**验证**
+
+| 项 | 结果 |
+|----|------|
+| typecheck / lint | 通过 / 0 error 0 warning |
+| 全量测试 | **520/520**（原 486，+34：钩子引擎 21 · 执行器接入 8 · 配置服务 4 · 接线锁 2） |
+| 变异测试 | **11/11 全部被拦住**（其中 M4 起初逃逸 → 补「其它非零退出码」用例后拦住） |
+| 真子进程证据 | 钩子引擎全部用**真子进程**验证（超时杀进程、截断、退出码语义、matcher、短路） |
+| dev 管线探针 | ⚠️ **本轮未跑成**：沙箱删除配额（同一轮删除次数超阈值）拦截了 vite 清理 `node_modules/.vite`，**与本次改动无关**；下轮补跑 |
+
+**已知边界（如实标注）**：`SessionStart` / `UserPromptSubmit` / `Stop` 三类事件**引擎已支持但运行路径未接入**
+（界面已在对应行标注"尚未接入运行路径"）。W5d-b 做接入。
+
+**回退点**：`git checkout v0.14.5-research`
+
+---
+
 ## [v0.14.4-mcpfix] — 2026-09-22 11:05
 
 **阶段**：修复 **MCP 首次连接必然超时**（用户实测发现）—— 握手独立超时

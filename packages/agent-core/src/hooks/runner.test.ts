@@ -40,6 +40,7 @@ const SCRIPTS: Record<string, string> = {
   'deny-continue-false.mjs': `
     process.stdout.write(JSON.stringify({continue:false,reason:'钩子拦下了提示词'}));`,
   'fail-exit1.mjs': `process.stdout.write('boom');process.exit(1);`,
+  'fail-exit3.mjs': `process.exit(3);`,
   'bad-json.mjs': `process.stdout.write('not a json at all');`,
   'empty.mjs': `process.exit(0);`,
   'sleep.mjs': `setTimeout(()=>{},60000);`,
@@ -125,6 +126,14 @@ describe('钩子引擎（真子进程）', () => {
     expect(res.blocked).toBe(false);
     expect(res.diagnostics.join('|')).toContain('不视为拒绝');
     expect(res.ranCount).toBe(1);
+  });
+
+  it('其它非零退出码（3）同样按失败处理、不阻断 —— 只有 2 才是拒绝', async () => {
+    const runner = runnerFor(configWith('PreToolUse', 'fail-exit3.mjs'));
+    const res = await runner.run(params('PreToolUse'));
+    expect(res.blocked).toBe(false);
+    expect(res.diagnostics.join('|')).toContain('退出码 3');
+    expect(res.diagnostics.join('|')).toContain('不视为拒绝');
   });
 
   it('stdout 不是合法 JSON → 不阻断，记诊断', async () => {
