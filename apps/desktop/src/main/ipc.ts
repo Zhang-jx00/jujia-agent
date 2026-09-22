@@ -42,7 +42,8 @@ import { McpService } from './mcp/mcp-service';
 import { createRealTransport } from './mcp/real-transport';
 import { createFilePermissionRulesStore } from './permission-rules-store';
 import { createFileHooksService } from './hooks-store';
-import { createProcessHookRunner, parseHookConfig, HOOK_EVENTS } from '@jujia/agent-core';
+import { createSkillsService } from './skills';
+import { createProcessHookRunner, parseHookConfig, summarizeCatalog, HOOK_EVENTS } from '@jujia/agent-core';
 import { clearWorkspace, getWorkspaceInfo, pickWorkspace } from './workspace';
 import type { PermissionBridge } from './permission-bridge';
 import { getDataRoot } from './paths';
@@ -131,6 +132,12 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       counts,
     });
   };
+
+  /* ------------------------------ 技能（W11a） ------------------------------ */
+
+  // 技能目录在每次对话前重新扫描（毫秒级），因此**新装的技能立刻生效**，不需要重启；
+  // load_skill 工具在首次刷新时注册进同一个注册表，权限门照常适用（它是只读工具）。
+  const skills = createSkillsService(registry);
 
   /** 权限规则表（W5c）：TOOL_RUN 与对话链路共用同一份，因此规则语义全进程一致 */
   const permissionRules = createFilePermissionRulesStore();
@@ -299,6 +306,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     // 工作区决定了工具是否可用；未选择时仍可对话，但工具会被路径校验拒绝
     const ws = await getWorkspaceInfo();
     const policy = await loadPolicy();
+    const skillCatalog = await skills.refresh(ws.valid ? ws.root : null);
+    mcpDebug('[skills] ' + summarizeCatalog(skillCatalog));
     const result = sendMessage(
       {
         connectionId,
@@ -315,6 +324,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         mode: policy.mode,
         rules: policy.rules,
         hooks: hookRunner,
+        skillCatalogText: skills.catalogText(),
       },
     );
     return chatSendResultSchema.parse({ ...result, accepted: true });

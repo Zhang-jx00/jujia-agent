@@ -94,6 +94,8 @@ export interface ChatDeps {
   rules?: ReadonlyArray<PermissionRule>;
   /** 生命周期钩子运行器（W5d） */
   hooks?: HookRunner;
+  /** 技能清单文本（W11a）：非空时并进系统提示；内容稳定 → 不破坏模型前缀缓存 */
+  skillCatalogText?: string;
 }
 
 /**
@@ -145,7 +147,11 @@ export function sendMessage(
             notes: notes.text,
           });
           const first = session.messages[0];
-          if (first && first.role === 'system') first.content = assembled;
+          if (first && first.role === 'system') {
+            // 技能清单只在需要时追加；它必须**逐字节稳定**，否则每轮系统提示都在变、模型缓存全失效
+            const catalog = deps.skillCatalogText ?? '';
+            first.content = catalog === '' ? assembled : `${assembled}\n\n${catalog}`;
+          }
         } catch (err) {
           // 记忆装配失败不能让对话挂掉：退回基础人格，并留下日志
           console.warn('[memory] 装配失败，退回基础人格:', err instanceof Error ? err.message : err);

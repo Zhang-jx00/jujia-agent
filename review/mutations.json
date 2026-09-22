@@ -1,61 +1,85 @@
 {
-  "note": "复核 013 · 对象：W5d-b（SessionStart / UserPromptSubmit / Stop 接入运行路径）。基线：W5d-b 主提交",
+  "note": "复核 014 · 对象：W11a（技能：目录 + SKILL.md + 渐进披露 + 前缀稳定）。基线：W11a 主提交",
   "mutations": [
     {
       "id": "M1",
-      "desc": "UserPromptSubmit 的 blocked 被忽略（钩子拦不下提示词，照样发模型）",
-      "file": "packages/agent-core/src/loop/agent-loop.ts",
-      "find": "  if (submit.blocked) {",
-      "replace": "  if (false) {",
-      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
+      "desc": "技能不按名称排序（系统提示前缀不再稳定，模型缓存每轮失效）",
+      "file": "packages/agent-core/src/skills/loader.ts",
+      "find": "  skills.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));",
+      "replace": "  // 变异：不排序",
+      "test": "packages/agent-core/src/skills/loader.test.ts"
     },
     {
       "id": "M2",
-      "desc": "钩子上下文塞成用户消息（污染会话历史：模型以为用户说过）",
-      "file": "packages/agent-core/src/loop/agent-loop.ts",
-      "find": "  if (submit.context !== '') injectIntoSystem(messages, submit.context);",
-      "replace": "  if (submit.context !== '') messages.push({ role: 'user', content: submit.context });",
-      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
+      "desc": "缺 description 的技能也收录（渐进披露失去判断依据）",
+      "file": "packages/agent-core/src/skills/loader.ts",
+      "find": "      if (description === '') {",
+      "replace": "      if (false) {",
+      "test": "packages/agent-core/src/skills/loader.test.ts"
     },
     {
       "id": "M3",
-      "desc": "Stop 的 continueTurn 被忽略（钩子要求再走一步但没走）",
-      "file": "packages/agent-core/src/loop/agent-loop.ts",
-      "find": "      if (stop.continueTurn && stopContinues < MAX_STOP_CONTINUATIONS) {",
-      "replace": "      if (false) {",
-      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
+      "desc": "同名技能不覆盖（工作区版本没起作用）",
+      "file": "packages/agent-core/src/skills/loader.ts",
+      "find": "      byName.set(name, skill);",
+      "replace": "      if (!byName.has(name)) byName.set(name, skill);",
+      "test": "packages/agent-core/src/skills/loader.test.ts"
     },
     {
       "id": "M4",
-      "desc": "Stop 续走次数上限被放开（钩子写错就是死循环）",
-      "file": "packages/agent-core/src/loop/agent-loop.ts",
-      "find": "const MAX_STOP_CONTINUATIONS = 2;",
-      "replace": "const MAX_STOP_CONTINUATIONS = 100;",
-      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
+      "desc": "描述超长不截断（清单长度无界）",
+      "file": "packages/agent-core/src/skills/types.ts",
+      "find": "      s.description.length > limits.maxDescriptionChars",
+      "replace": "      false",
+      "test": "packages/agent-core/src/skills/loader.test.ts"
     },
     {
       "id": "M5",
-      "desc": "取提示词原文时取**第一条**用户消息（拿历史里的旧话去匹配钩子）",
-      "file": "packages/agent-core/src/loop/agent-loop.ts",
-      "find": "  for (let i = messages.length - 1; i >= 0; i -= 1) {",
-      "replace": "  for (let i = 0; i < messages.length; i += 1) {",
-      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
+      "desc": "条数上限不生效（技能多了就把系统提示撑爆）",
+      "file": "packages/agent-core/src/skills/types.ts",
+      "find": "  const shown = catalog.skills.slice(0, limits.maxSkills);",
+      "replace": "  const shown = catalog.skills;",
+      "test": "packages/agent-core/src/skills/loader.test.ts"
     },
     {
       "id": "M6",
-      "desc": "钩子上下文不再带统一标记（用户/模型分不清这句是谁说的）",
-      "file": "packages/agent-core/src/hooks/points.ts",
-      "find": "export const HOOK_CONTEXT_MARKER = '[钩子补充上下文]';",
-      "replace": "export const HOOK_CONTEXT_MARKER = '';",
-      "test": "packages/agent-core/src/hooks/points.test.ts"
+      "desc": "正文为空也收录（空说明书，模型加载到空内容）",
+      "file": "packages/agent-core/src/skills/loader.ts",
+      "find": "      if (parsed.body === '') {",
+      "replace": "      if (false) {",
+      "test": "packages/agent-core/src/skills/loader.test.ts"
     },
     {
       "id": "M7",
-      "desc": "Stop 的最终文本不再截断（长答复把钩子的 stdin 灌爆）",
-      "file": "packages/agent-core/src/hooks/points.ts",
-      "find": "    payload: { text: finalText.slice(0, 4_000) },",
-      "replace": "    payload: { text: finalText },",
-      "test": "packages/agent-core/src/hooks/points.test.ts"
+      "desc": "技能名规则放宽（允许大写与任意字符 → 提示注入面）",
+      "file": "packages/agent-core/src/skills/types.ts",
+      "find": "const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;",
+      "replace": "const NAME_RE = /^.+$/;",
+      "test": "packages/agent-core/src/skills/loader.test.ts"
+    },
+    {
+      "id": "M8",
+      "desc": "清单里混入时间戳（前缀每轮都变，缓存失效）",
+      "file": "packages/agent-core/src/skills/types.ts",
+      "find": "    '不要凭技能名猜测内容。',",
+      "replace": "    '不要凭技能名猜测内容。',\n    new Date().toISOString(),",
+      "test": "packages/agent-core/src/skills/loader.test.ts"
+    },
+    {
+      "id": "M9",
+      "desc": "load_skill 遇到不存在的技能静默返回空内容（模型以为加载成功了）",
+      "file": "packages/agent-core/src/skills/tool.ts",
+      "find": "        throw new ToolError(",
+      "replace": "        return { ok: true, content: '' } as never; throw new ToolError(",
+      "test": "packages/agent-core/src/skills/tool.test.ts"
+    },
+    {
+      "id": "M10",
+      "desc": "技能来源标记永远写成用户级（用户无从判断覆盖关系）",
+      "file": "packages/agent-core/src/skills/tool.ts",
+      "find": "      const header = `# 技能：${skill.name}\\n（来源：${skill.origin === 'workspace' ? '工作区' : '用户级'}技能目录）\\n\\n`;",
+      "replace": "      const header = `# 技能：${skill.name}\\n（来源：用户级技能目录）\\n\\n`;",
+      "test": "packages/agent-core/src/skills/tool.test.ts"
     }
   ]
 }
