@@ -11,6 +11,8 @@ import {
   mcpApproveResultSchema,
   mcpConnectResultSchema,
   mcpServerInputSchema,
+  hooksSaveResultSchema,
+  hooksStateSchema,
   mcpServerViewSchema,
   permissionDecisionSchema,
   permissionRequestSchema,
@@ -34,6 +36,8 @@ import {
   type McpServerView,
   type PermissionDecisionPayload,
   type PermissionRequestPayload,
+  type HooksSaveResult,
+  type HooksState,
   type PermissionRuleInput,
   type PermissionRuleView,
   type StreamEvent,
@@ -268,6 +272,17 @@ const api = {
   },
 
   /* --------------------------- 权限规则表（W5c） --------------------------- */
+
+  /* --------------------------- 生命周期钩子（W5d） --------------------------- */
+
+  async hooksGet(): Promise<HooksState> {
+    return hooksStateSchema.parse(await ipcRenderer.invoke(IPC.HOOKS_GET));
+  },
+
+  /** 保存钩子配置：校验失败时**不落盘**，错误逐条返回 */
+  async hooksSet(input: Record<string, unknown>): Promise<HooksSaveResult> {
+    return hooksSaveResultSchema.parse(await ipcRenderer.invoke(IPC.HOOKS_SET, input));
+  },
 
   async permissionRulesList(): Promise<PermissionRuleView[]> {
     return z.array(permissionRuleViewSchema).parse(await ipcRenderer.invoke(IPC.PERMISSION_RULES_LIST));

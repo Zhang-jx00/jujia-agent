@@ -88,6 +88,19 @@ describe('工具注册表接线（防止各处各建一个）', () => {
     expect(ipcSource).toContain('const mcp = new McpService({\n    registry,');
   });
 
+  it('钩子运行器被接进工具执行与对话链路（否则钩子配置等于摆设）', () => {
+    const toolCall = ipcSource.slice(ipcSource.indexOf('runTool('), ipcSource.indexOf('runTool(') + 900).split(');')[0] ?? '';
+    expect(toolCall).toContain('hooks: hookRunner');
+    const chat = ipcSource.slice(ipcSource.indexOf('sendMessage('), ipcSource.indexOf('sendMessage(') + 1200).split(');')[0] ?? '';
+    expect(chat).toContain('hooks: hookRunner');
+  });
+
+  it('钩子配置在启动时被加载，且走同一个运行器实例', () => {
+    expect(ipcSource).toContain('hooksService.load()');
+    expect(ipcSource.split('createProcessHookRunner(').length - 1).toBe(1);
+    expect(ipcSource).toContain('getConfig: () => hooksService.getConfig()');
+  });
+
   it('MCP 服务在应用退出时被释放（不留孤儿进程）', () => {
     expect(ipcSource).toContain('mcp.disposeAll();');
   });

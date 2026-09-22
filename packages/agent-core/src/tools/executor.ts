@@ -1,5 +1,6 @@
 import { ToolError, type StoredTool, type ToolContext, type ToolKind, type ToolOutcome } from './types';
 import { decideGate, type PermissionMode } from '../permissions/policy';
+import { noopHookRunner, type HookRunner } from '../hooks/types';
 import type { PermissionRule } from '../permissions/rules';
 
 /**
@@ -63,6 +64,10 @@ export interface RunToolOptions {
   mode?: PermissionMode;
   /** 用户自定义规则（allow/deny/ask，按工具名 glob）。deny / ask 优先于模式 */
   rules?: ReadonlyArray<PermissionRule>;
+  /** 生命周期钩子运行器（不传 = 没有钩子，行为与从前完全一致） */
+  hooks?: HookRunner;
+  /** 会话 id：钩子需要在输入里知道自己在哪个会话；手动执行工具时没有会话 */
+  sessionId?: string;
 }
 
 export interface RunToolResult {
@@ -79,11 +84,12 @@ const defaultNewId = (): string => `perm-${Date.now()}-${(counter += 1)}`;
 
 export async function runTool(
   tool: StoredTool,
-  rawArgs: unknown,
+  rawArgsInput: unknown,
   ctx: ToolContext,
   resolver: PermissionResolver,
   opts: RunToolOptions = {},
 ): Promise<RunToolResult> {
+  let rawArgs = rawArgsInput;
   const started = Date.now();
   const newId = opts.newId ?? defaultNewId;
 
@@ -129,7 +135,80 @@ export async function runTool(
   let asked = false;
   let decision: PermissionDecision | undefined;
 
+  // 3) 生命周期钩子：PreToolUse（在权限门**之前**）
+  //    放在前面是有意的：钩子可以拒绝（连问都不用问），也可以改写参数
+  //    —— 改写后的参数必须**重新过一遍 tool.parse**，否则钩子就成了绕过校验的后门。
+  const hooks = opts.hooks ?? noopHookRunner;
+  const hookCtx = {
+    sessionId: opts.sessionId ?? 'manual',
+    cwd: ctx.workspaceRoot,
+  };
+  const pre = await hooks.run({
+    event: 'PreToolUse',
+    ...hookCtx,
+    payload: { toolName: tool.name, kind: tool.kind, args: summarizeForHook(rawArgs) },
+    matchTarget: tool.name,
+  });
+  if (pre.blocked) {
+    return {
+      outcome: {
+        ok: false,
+        content: `本次 ${tool.name} 被钩子拒绝：${pre.reason ?? '（钩子未给出理由）'}。请不要重试同一操作，改为向用户说明。`,
+      },
+      asked: false,
+      decision: 'deny',
+      durationMs: Date.now() - started,
+    };
+  }
+  if (pre.updatedInput !== null) {
+    try {
+      args = tool.parse(pre.updatedInput);
+      rawArgs = pre.updatedInput;
+    } catch (err) {
+      return {
+        outcome: {
+          ok: false,
+          content: `钩子改写后的参数不合法，已拒绝执行：${err instanceof Error ? err.message : String(err)}`,
+        },
+        asked: false,
+        decision: 'deny',
+        durationMs: Date.now() - started,
+      };
+    }
+  }
+
+  // 4) 权限门：PermissionRequest 钩子在**弹窗之前**参与决策
   if (gate.action === 'ask' && !alwaysAllowed) {
+    const permHook = await hooks.run({
+      event: 'PermissionRequest',
+      ...hookCtx,
+      payload: {
+        toolName: tool.name,
+        kind: tool.kind,
+        args: summarizeForHook(rawArgs),
+        reason: gate.reason,
+      },
+      matchTarget: tool.name,
+    });
+    if (permHook.blocked || permHook.permissionDecision === 'deny') {
+      return {
+        outcome: {
+          ok: false,
+          content: `本次 ${tool.name} 被审批钩子拒绝：${
+            permHook.reason ?? permHook.permissionReason ?? '（钩子未给出理由）'
+          }。请不要重试同一操作，改为向用户说明。`,
+        },
+        asked: false,
+        decision: 'deny',
+        durationMs: Date.now() - started,
+      };
+    }
+    if (permHook.permissionDecision === 'allow') {
+      decision = 'allow_once';
+    }
+  }
+
+  if (gate.action === 'ask' && !alwaysAllowed && decision === undefined) {
     asked = true;
     const paths = collectPaths(rawArgs);
     const answer = normalizeAnswer(
@@ -188,36 +267,88 @@ export async function runTool(
     }
   }
 
-  // 3) 执行
+  // 5) 执行；随后按成功/失败触发 PostToolUse / PostToolUseFailure
   try {
     const outcome = await tool.run(args as never, ctx);
     const evidence = { ...outcome.evidence, durationMs: Date.now() - started };
+    const appended = await runPostHook(
+      hooks,
+      hookCtx,
+      outcome.ok ? 'PostToolUse' : 'PostToolUseFailure',
+      tool,
+      rawArgs,
+      outcome,
+    );
     return {
-      outcome: { ...outcome, evidence },
+      outcome: { ...outcome, content: outcome.content + appended, evidence },
       asked,
       ...(decision ? { decision } : {}),
       durationMs: evidence.durationMs,
     };
   } catch (err) {
-    if (err instanceof ToolError) {
-      // 路径拒绝等安全类错误：回模型可读的说明，同时让 UI 能拿到 code
-      return {
-        outcome: { ok: false, content: `[${err.code}] ${err.message}` },
-        asked,
-        ...(decision ? { decision } : {}),
-        durationMs: Date.now() - started,
-      };
-    }
+    const failed =
+      err instanceof ToolError
+        ? { ok: false, content: `[${err.code}] ${err.message}` }
+        : { ok: false, content: `工具执行异常：${err instanceof Error ? err.message : String(err)}` };
+    // 抛异常也算失败：PostToolUseFailure 同样要能参与（否则"出错时没有钩子"很反直觉）
+    const appended = await runPostHook(hooks, hookCtx, 'PostToolUseFailure', tool, rawArgs, failed);
     return {
-      outcome: {
-        ok: false,
-        content: `工具执行异常：${err instanceof Error ? err.message : String(err)}`,
-      },
+      outcome: { ...failed, content: failed.content + appended },
       asked,
       ...(decision ? { decision } : {}),
       durationMs: Date.now() - started,
     };
   }
+}
+
+/**
+ * 触发 PostToolUse / PostToolUseFailure，并把钩子给的附加上下文接到工具结果后面。
+ *
+ * 接在结果里（而不是另开一条消息）的理由：模型看到的必须是一条自洽的工具结果，
+ * 否则它会读到"结果"与"补充说明"两条互相独立的输入，容易出现"结果说成功、补充说失败"的错位。
+ */
+async function runPostHook(
+  hooks: HookRunner,
+  hookCtx: { sessionId: string; cwd: string },
+  event: 'PostToolUse' | 'PostToolUseFailure',
+  tool: StoredTool,
+  rawArgs: unknown,
+  outcome: { ok: boolean; content: string },
+): Promise<string> {
+  const res = await hooks.run({
+    event,
+    ...hookCtx,
+    payload: {
+      toolName: tool.name,
+      kind: tool.kind,
+      args: summarizeForHook(rawArgs),
+      ok: outcome.ok,
+      // 工具输出可能很大（一次读文件几 MB），截断后再给钩子，避免灌爆它的 stdin
+      result: outcome.content.slice(0, HOOK_RESULT_PREVIEW_CHARS),
+      resultTruncated: outcome.content.length > HOOK_RESULT_PREVIEW_CHARS,
+    },
+    matchTarget: tool.name,
+  });
+  if (res.additionalContext.length === 0) return '';
+  return `\n\n[钩子补充上下文]\n${res.additionalContext.join('\n')}`;
+}
+
+/** 给钩子的负载预览上限（字符）：钩子多半只做判断，不需要完整结果 */
+const HOOK_RESULT_PREVIEW_CHARS = 4_000;
+
+/**
+ * 钩子负载里的参数摘要：对象直接给，其它类型转成可读字符串。
+ * 超长字符串（例如 write_file 的 content）截断 —— 钩子不该被一整份文件内容灌爆。
+ */
+function summarizeForHook(rawArgs: unknown): Record<string, unknown> {
+  if (typeof rawArgs !== 'object' || rawArgs === null || Array.isArray(rawArgs)) {
+    return { value: typeof rawArgs === 'string' ? rawArgs.slice(0, 2_000) : rawArgs };
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rawArgs as Record<string, unknown>)) {
+    out[k] = typeof v === 'string' && v.length > 2_000 ? `${v.slice(0, 2_000)}…（已截断）` : v;
+  }
+  return out;
 }
 
 function kindLabel(kind: ToolKind): string {

@@ -9,6 +9,8 @@ import {
   mcpApproveResultSchema,
   mcpConnectResultSchema,
   mcpServerViewSchema,
+  hooksSaveResultSchema,
+  hooksStateSchema,
   permissionDecisionSchema,
   permissionRuleInputSchema,
   permissionRuleViewSchema,
@@ -21,6 +23,7 @@ import {
   type ConfigSnapshot,
   type ConnectionView,
   type McpConnectResult,
+  type HooksState,
   type PermissionMode,
   type StreamEvent,
   type TestResult,
@@ -38,6 +41,8 @@ import { listModels } from '@jujia/agent-core';
 import { McpService } from './mcp/mcp-service';
 import { createRealTransport } from './mcp/real-transport';
 import { createFilePermissionRulesStore } from './permission-rules-store';
+import { createFileHooksService } from './hooks-store';
+import { createProcessHookRunner, parseHookConfig, HOOK_EVENTS } from '@jujia/agent-core';
 import { clearWorkspace, getWorkspaceInfo, pickWorkspace } from './workspace';
 import type { PermissionBridge } from './permission-bridge';
 import { getDataRoot } from './paths';
@@ -97,6 +102,35 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   app.on('before-quit', () => {
     mcp.disposeAll();
   });
+
+  /* --------------------------- 生命周期钩子（W5d） --------------------------- */
+  // 说明：load() 是异步的，而钩子默认 **关闭** —— 万一在读完之前就有工具调用，
+  // 结果只是这次没有钩子参与，主权限门仍然照常生效（fail-open 且有界），不是安全问题。
+  const hooksService = createFileHooksService();
+  void hooksService.load().catch((err: unknown) => {
+    console.error('[hooks] 读取钩子配置失败：', err);
+  });
+  const hookRunner = createProcessHookRunner({
+    getConfig: () => hooksService.getConfig(),
+    onDebug: mcpDebug,
+  });
+  const hooksState = async (): Promise<HooksState> => {
+    const raw = hooksService.raw();
+    const check = parseHookConfig(raw);
+    const events = (check.config?.events ?? {}) as Record<string, unknown>;
+    const counts: Record<string, number> = {};
+    for (const ev of HOOK_EVENTS) {
+      const groups = Array.isArray(events[ev]) ? (events[ev] as { hooks?: unknown[] }[]) : [];
+      counts[ev] = groups.reduce((n, g) => n + (Array.isArray(g.hooks) ? g.hooks.length : 0), 0);
+    }
+    return hooksStateSchema.parse({
+      raw,
+      errors: check.errors,
+      enabled: check.config?.enabled === true,
+      filePath: hooksService.filePath(),
+      counts,
+    });
+  };
 
   /** 权限规则表（W5c）：TOOL_RUN 与对话链路共用同一份，因此规则语义全进程一致 */
   const permissionRules = createFilePermissionRulesStore();
@@ -280,6 +314,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         registry,
         mode: policy.mode,
         rules: policy.rules,
+        hooks: hookRunner,
       },
     );
     return chatSendResultSchema.parse({ ...result, accepted: true });
@@ -348,6 +383,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     const res = await runTool(tool, args ?? {}, { workspaceRoot }, deps.permission.resolve, {
       mode: policy.mode,
       rules: policy.rules,
+      hooks: hookRunner,
+      sessionId: 'manual',
     });
 
     return toolRunResultSchema.parse({
@@ -390,6 +427,15 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.MCP_DISCONNECT, async (_e, id: unknown): Promise<boolean> => {
     if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
     return mcp.disconnect(id);
+  });
+
+  /* --------------------------- 生命周期钩子（W5d） --------------------------- */
+
+  ipcMain.handle(IPC.HOOKS_GET, async () => await hooksState());
+
+  ipcMain.handle(IPC.HOOKS_SET, async (_e, input: unknown) => {
+    const saved = await hooksService.save(input);
+    return hooksSaveResultSchema.parse({ ok: saved.ok, errors: saved.errors, state: await hooksState() });
   });
 
   /* --------------------------- 权限规则表（W5c） --------------------------- */

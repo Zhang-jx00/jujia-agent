@@ -416,3 +416,26 @@ export const permissionRuleViewSchema = z.object({
   updatedAt: z.string(),
 });
 export type PermissionRuleView = z.infer<typeof permissionRuleViewSchema>;
+
+/* ------------------------------------------------------------------ *
+ * 生命周期钩子（W5d）
+ * ------------------------------------------------------------------ */
+
+/** 界面看到的状态：原始配置 + 校验错误 + 每个事件命中的钩子数（便于一眼看出到底跑不跑） */
+export const hooksStateSchema = z.object({
+  raw: z.record(z.string(), z.unknown()),
+  /** 配置校验错误（逐条；非空时配置**不会**生效，钩子回落为关闭） */
+  errors: z.array(z.string()),
+  enabled: z.boolean(),
+  filePath: z.string(),
+  /** 事件名 → 钩子数量 */
+  counts: z.record(z.string(), z.number()),
+});
+export type HooksState = z.infer<typeof hooksStateSchema>;
+
+export const hooksSaveResultSchema = z.object({
+  ok: z.boolean(),
+  errors: z.array(z.string()),
+  state: hooksStateSchema,
+});
+export type HooksSaveResult = z.infer<typeof hooksSaveResultSchema>;

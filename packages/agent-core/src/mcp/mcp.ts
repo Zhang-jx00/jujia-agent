@@ -19,6 +19,7 @@
  * 工具分级**复用工具层的定义**（单一来源，避免两处 `ToolKind` 各自漂移）。
  * 之前这里漏了复用、自己又声明了一遍，导致包根出现同名重复导出（typecheck 报 TS2308）。
  */
+import { buildArgvCommand, checkArgvSafety } from '../commands/argv';
 import type { ToolKind } from '../tools/types';
 
 export type { ToolKind };
@@ -80,13 +81,8 @@ export function buildServerCommand(
   config: McpServerConfig,
   platform: NodeJS.Platform = process.platform,
 ): CommandSpec {
-  const isWin = platform === 'win32';
-  if (!isWin) return { file: config.command, args: [...config.args] };
-
-  // Windows：批处理包装器需要 cmd /c
-  const needsCmd = /\.(cmd|bat)$/i.test(config.command) || /^(npx|npm|yarn|pnpm)$/i.test(config.command);
-  if (!needsCmd) return { file: config.command, args: [...config.args] };
-  return { file: 'cmd.exe', args: ['/c', config.command, ...config.args] };
+  // 平台映射与元字符规则统一在 ../commands/argv —— MCP 与钩子共用同一套，避免两份安全规则分叉
+  return buildArgvCommand(config.command, config.args, platform);
 }
 
 /** 服务端配置校验结果 */
@@ -112,17 +108,10 @@ export function validateServerConfig(input: unknown): ConfigCheck {
     errors.push('args 必须是字符串数组');
   }
 
-  const danger = /[|&;<>`$]|\r|\n/;
-  if (typeof c['command'] === 'string' && danger.test(c['command'])) {
-    errors.push('command 含 shell 元字符，已拒绝（防止命令注入）');
-  }
-  if (Array.isArray(c['args'])) {
-    for (const a of c['args'] as unknown[]) {
-      if (typeof a === 'string' && danger.test(a)) {
-        errors.push(`args 含 shell 元字符，已拒绝：${a.slice(0, 40)}`);
-      }
-    }
-  }
+  // 元字符规则统一在 ../commands/argv：MCP 与生命周期钩子共用同一套，避免两份安全规则分叉
+  const safety = checkArgvSafety(c['command'], c['args']);
+  errors.push(...safety.errors);
+
   if (c['env'] !== undefined) {
     if (typeof c['env'] !== 'object' || c['env'] === null || Array.isArray(c['env'])) {
       errors.push('env 必须是对象');

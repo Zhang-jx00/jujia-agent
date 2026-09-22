@@ -1,6 +1,7 @@
 import { runTool, type PermissionResolver, type RunToolResult } from '../tools/executor';
 import type { PermissionMode } from '../permissions/policy';
 import type { PermissionRule } from '../permissions/rules';
+import type { HookRunner } from '../hooks/types';
 import type { StoredTool } from '../tools/types';
 import type { ToolRegistry } from '../tools/registry';
 import { streamChat, type ProviderDeps } from '../providers/openai-compat';
@@ -83,6 +84,10 @@ export interface AgentLoopDeps extends ProviderDeps {
   mode?: PermissionMode | undefined;
   /** 用户自定义权限规则（allow/deny/ask，按工具名 glob） */
   rules?: ReadonlyArray<PermissionRule>;
+  /** 生命周期钩子运行器（W5d）；不传 = 没有钩子 */
+  hooks?: HookRunner | undefined;
+  /** 会话 id：钩子输入里要带上，便于钩子区分会话 */
+  sessionId?: string | undefined;
   /** 可注入，便于单测（默认用真实 streamChat） */
   chat?: typeof streamChat | undefined;
   /** 可注入，便于单测（默认用真实 runTool） */
@@ -261,6 +266,8 @@ async function executeOne(
       // 模式与规则随调用传入：策略层（decideGate）在 W10g 起才真正作用于执行
       ...(deps.mode ? { mode: deps.mode } : {}),
       ...(deps.rules ? { rules: deps.rules } : {}),
+      ...(deps.hooks ? { hooks: deps.hooks } : {}),
+      ...(deps.sessionId ? { sessionId: deps.sessionId } : {}),
     },
   );
   return {

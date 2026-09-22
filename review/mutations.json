@@ -1,69 +1,93 @@
 {
-  "note": "复核 010 · 对象：W5c（权限规则表）+ 策略层激活。基线 13b0089",
+  "note": "复核 012 · 对象：W5d（生命周期钩子引擎 + 执行器接入）。基线：W5d 主提交",
   "mutations": [
     {
       "id": "M1",
-      "desc": "decideGate 不再看用户规则（规则表变成摆设）",
-      "file": "packages/agent-core/src/permissions/policy.ts",
-      "find": "  const matched = ctx.rules ? matchRules(ctx.rules, ctx.toolName) : null;",
-      "replace": "  const matched = null;",
-      "test": "packages/agent-core/src/tools/executor.test.ts"
+      "desc": "忽略 enabled 开关（关闭状态下钩子照样跑）",
+      "file": "packages/agent-core/src/hooks/runner.ts",
+      "find": "      if (!config.enabled) return result;",
+      "replace": "      // 变异：不再检查 enabled",
+      "test": "packages/agent-core/src/hooks/runner.test.ts"
     },
     {
       "id": "M2",
-      "desc": "allow 规则在 plan 模式下也生效（会话级只读意图被常设规则覆盖）",
-      "file": "packages/agent-core/src/permissions/policy.ts",
-      "find": "  if (matched?.action === 'allow' && ctx.mode !== 'plan' && ctx.mode !== 'dontAsk') {",
-      "replace": "  if (matched?.action === 'allow') {",
-      "test": "packages/agent-core/src/tools/executor.test.ts"
+      "desc": "退出码 2 不再视为拒绝（唯一被赋予阻断语义的退出码失效）",
+      "file": "packages/agent-core/src/hooks/runner.ts",
+      "find": "    if (code === 2) {",
+      "replace": "    if (false) {",
+      "test": "packages/agent-core/src/hooks/runner.test.ts"
     },
     {
       "id": "M3",
-      "desc": "执行器忽略 deny 判定（deny 规则被静默跳过，文件真的会被写）",
-      "file": "packages/agent-core/src/tools/executor.ts",
-      "find": "  if (gate.action === 'deny') {",
-      "replace": "  if (false) {",
-      "test": "packages/agent-core/src/tools/executor.test.ts"
+      "desc": "continue:false 不再视为阻止",
+      "file": "packages/agent-core/src/hooks/runner.ts",
+      "find": "    if (output?.continue === false) {",
+      "replace": "    if (false) {",
+      "test": "packages/agent-core/src/hooks/runner.test.ts"
     },
     {
       "id": "M4",
-      "desc": "matchRules 忽略 enabled 开关（禁用的规则仍在拦截）",
-      "file": "packages/agent-core/src/permissions/rules.ts",
-      "find": "    if (!rule.enabled) continue;",
-      "replace": "    // 变异：不再检查 enabled",
-      "test": "packages/agent-core/src/permissions/rules.test.ts"
+      "desc": "把「非 2 的非零退出」也当成拒绝（写坏的钩子会让应用变成砖）",
+      "file": "packages/agent-core/src/hooks/runner.ts",
+      "find": "    if (code !== 0) {",
+      "replace": "    if (code === 1) {",
+      "test": "packages/agent-core/src/hooks/runner.test.ts"
     },
     {
       "id": "M5",
-      "desc": "glob 不再转义正则元字符（用户输入进正则 = 注入面）",
-      "file": "packages/agent-core/src/permissions/rules.ts",
-      "find": "    source += ch.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');",
-      "replace": "    source += ch;",
-      "test": "packages/agent-core/src/permissions/rules.test.ts"
+      "desc": "钩子改写后的参数不再重新校验（改写成为绕过校验的后门）",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "      args = tool.parse(pre.updatedInput);",
+      "replace": "      args = pre.updatedInput;",
+      "test": "packages/agent-core/src/tools/executor.test.ts"
     },
     {
       "id": "M6",
-      "desc": "规则存储不再校验入参（空模式/非法动作都能落盘）",
-      "file": "apps/desktop/src/main/permission-rules-store.ts",
-      "find": "      if (!check.ok) throw new Error(`规则被拒绝：${check.errors.join('；')}`);",
-      "replace": "      // 变异：不再校验",
-      "test": "apps/desktop/src/main/permission-rules-store.test.ts"
+      "desc": "被拒绝后不再短路（继续跑后面的钩子，产生无意义副作用）",
+      "file": "packages/agent-core/src/hooks/runner.ts",
+      "find": "            // 已被拒绝就不再跑后面的钩子：拒绝之后再产生副作用没有意义\n            return result;",
+      "replace": "            // 变异：不短路",
+      "test": "packages/agent-core/src/hooks/runner.test.ts"
     },
     {
       "id": "M7",
-      "desc": "TOOL_RUN 不再传规则（规则表只对对话生效，手动执行不受限）",
-      "file": "apps/desktop/src/main/ipc.ts",
-      "find": "      rules: policy.rules,\n    });",
-      "replace": "      // 变异：不传规则\n    });",
-      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
+      "desc": "ranCount 把「没启动的钩子」也算进去（用户以为钩子跑了，其实被安全规则拦下）",
+      "file": "packages/agent-core/src/hooks/runner.ts",
+      "find": "          if (one.spawned) result.ranCount += 1;",
+      "replace": "          result.ranCount += 1;",
+      "test": "packages/agent-core/src/hooks/runner.test.ts"
     },
     {
       "id": "M8",
-      "desc": "对话链路不再传模式（plan 模式对模型调工具失效）",
-      "file": "apps/desktop/src/main/ipc.ts",
-      "find": "        mode: policy.mode,\n        rules: policy.rules,",
-      "replace": "        // 变异：不传模式与规则",
-      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
+      "desc": "输出不再截断（钩子吐一大坨就把内存吃光）",
+      "file": "packages/agent-core/src/hooks/runner.ts",
+      "find": "      if (Buffer.byteLength(stdout) > limit) {\n        truncated = true;\n        stdout = Buffer.from(stdout).subarray(0, limit).toString('utf8');\n      }",
+      "replace": "      // 变异：不截断",
+      "test": "packages/agent-core/src/hooks/runner.test.ts"
+    },
+    {
+      "id": "M9",
+      "desc": "超时的钩子不再被终止、也不记诊断（静默失败）",
+      "file": "packages/agent-core/src/hooks/runner.ts",
+      "find": "    if (timedOut) {",
+      "replace": "    if (false) {",
+      "test": "packages/agent-core/src/hooks/runner.test.ts"
+    },
+    {
+      "id": "M10",
+      "desc": "PermissionRequest 钩子的 deny 被忽略（策略程序说不也照弹窗）",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "    if (permHook.blocked || permHook.permissionDecision === 'deny') {",
+      "replace": "    if (false) {",
+      "test": "packages/agent-core/src/tools/executor.test.ts"
+    },
+    {
+      "id": "M11",
+      "desc": "多个钩子的权限决定取第一个而非最严格（deny 可能被 allow 盖过）",
+      "file": "packages/agent-core/src/hooks/runner.ts",
+      "find": "            if (result.permissionDecision === null || severity(next) > severity(result.permissionDecision)) {",
+      "replace": "            if (result.permissionDecision === null) {",
+      "test": "packages/agent-core/src/hooks/runner.test.ts"
     }
   ]
 }

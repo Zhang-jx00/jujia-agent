@@ -1101,3 +1101,38 @@ html[data-jj-bg-kind='glass'] .app-shell {
 .jj-perm-action-allow {
   color: var(--success);
 }
+
+/* --------------------------- 生命周期钩子（W5d） --------------------------- */
+
+.jj-hooks-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.jj-hooks-table th,
+.jj-hooks-table td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.jj-hooks-table th {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.jj-hooks-editor {
+  width: 100%;
+  background: var(--bg-layout);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}

@@ -81,6 +81,12 @@ export const IPC = {
   PERMISSION_RULES_ADD: 'permission:rules-add',
   PERMISSION_RULES_REMOVE: 'permission:rules-remove',
   PERMISSION_RULES_TOGGLE: 'permission:rules-toggle',
+
+  /* ---------------------------- 生命周期钩子（W5d） ---------------------------- */
+
+  /** 读取当前钩子配置（含校验错误）/ 保存；以及配置文件路径 */
+  HOOKS_GET: 'hooks:get',
+  HOOKS_SET: 'hooks:set',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -451,5 +451,140 @@ describe('对抗性实验（复核 010）：模式 + 规则叠加时，不该发
     expect(res.asked).toBe(true);
     expect(res.outcome.ok).toBe(true);
     await expect(stat(target)).resolves.toBeTruthy();
+  });
+});
+
+describe('生命周期钩子接入（W5d）：钩子能拒绝、能改写、能补充上下文', () => {
+  /** 假运行器：记录调用并返回预设结果（真进程的行为在 agent-core/hooks/runner.test.ts 里验） */
+  function fakeHooks(results: Partial<Record<string, unknown>> = {}) {
+    const calls: { event: string; matchTarget: string; payload: Record<string, unknown> }[] = [];
+    const runner = {
+      async run(p: { event: string; matchTarget: string; payload: Record<string, unknown> }) {
+        calls.push({ event: p.event, matchTarget: p.matchTarget, payload: p.payload });
+        const preset = (results[p.event] ?? {}) as Record<string, unknown>;
+        return {
+          blocked: false,
+          reason: null,
+          additionalContext: [],
+          updatedInput: null,
+          permissionDecision: null,
+          permissionReason: null,
+          continueTurn: false,
+          diagnostics: [],
+          ranCount: 1,
+          ...preset,
+        };
+      },
+    };
+    return { runner, calls };
+  }
+
+  it('PreToolUse 拒绝 → 不执行、不弹窗、磁盘未动', async () => {
+    const { runner, calls } = fakeHooks({ PreToolUse: { blocked: true, reason: '今天不许写文件' } });
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'hooked.txt'), content: 'x' },
+      ctx(),
+      () => {
+        throw new Error('钩子已拒绝，不应询问用户');
+      },
+      { hooks: runner },
+    );
+    expect(res.asked).toBe(false);
+    expect(res.decision).toBe('deny');
+    expect(res.outcome.content).toContain('今天不许写文件');
+    await expect(stat(join(root, 'hooked.txt'))).rejects.toThrow();
+    // 被拒绝后不应再触发 Post 钩子
+    expect(calls.map((c) => c.event)).toEqual(['PreToolUse']);
+    expect(calls[0]?.payload['toolName']).toBe('write_file');
+  });
+
+  it('PreToolUse 改写参数 → **重新过参数校验**后执行（改写不能变成绕过校验的后门）', async () => {
+    const { runner } = fakeHooks({ PreToolUse: { updatedInput: { path: join(root, 'rewritten.txt'), content: 'from-hook' } } });
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'original.txt'), content: 'x' },
+      ctx(),
+      async () => 'allow_once',
+      { hooks: runner },
+    );
+    expect(res.outcome.ok).toBe(true);
+    expect(await readFile(join(root, 'rewritten.txt'), 'utf8')).toBe('from-hook');
+    await expect(stat(join(root, 'original.txt'))).rejects.toThrow();
+  });
+
+  it('PreToolUse 改写出非法参数 → 拒绝执行并说明原因', async () => {
+    const { runner } = fakeHooks({ PreToolUse: { updatedInput: { bogus: true } } });
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'legit.txt'), content: 'x' },
+      ctx(),
+      async () => 'allow_once',
+      { hooks: runner },
+    );
+    expect(res.outcome.ok).toBe(false);
+    expect(res.outcome.content).toContain('改写后的参数不合法');
+    await expect(stat(join(root, 'legit.txt'))).rejects.toThrow();
+  });
+
+  it('PermissionRequest 钩子 allow → 跳过弹窗直接执行（审批策略可编程）', async () => {
+    const { runner, calls } = fakeHooks({ PermissionRequest: { permissionDecision: 'allow' } });
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'policy-allowed.txt'), content: 'ok' },
+      ctx(),
+      () => {
+        throw new Error('钩子已放行，不应弹窗');
+      },
+      { hooks: runner },
+    );
+    expect(res.asked).toBe(false);
+    expect(res.outcome.ok).toBe(true);
+    expect(calls.map((c) => c.event)).toEqual(['PreToolUse', 'PermissionRequest', 'PostToolUse']);
+  });
+
+  it('PermissionRequest 钩子 deny → 不弹窗、不执行', async () => {
+    const { runner } = fakeHooks({ PermissionRequest: { permissionDecision: 'deny', permissionReason: '策略程序说不' } });
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'policy-denied.txt'), content: 'x' },
+      ctx(),
+      () => {
+        throw new Error('钩子已拒绝，不应弹窗');
+      },
+      { hooks: runner },
+    );
+    expect(res.asked).toBe(false);
+    expect(res.decision).toBe('deny');
+    expect(res.outcome.content).toContain('策略程序说不');
+    await expect(stat(join(root, 'policy-denied.txt'))).rejects.toThrow();
+  });
+
+  it('PostToolUse 的 additionalContext 会被并入工具结果（模型看到的是同一条结果）', async () => {
+    const { runner, calls } = fakeHooks({ PostToolUse: { additionalContext: ['记得跑测试'] } });
+    // 必须让工具真的**成功**：读不存在的文件是失败路径，走的是 PostToolUseFailure
+    const target = join(root, 'existing.txt');
+    await writeFile(target, 'hello', 'utf8');
+    const res = await runTool(readFileTool, { path: target }, ctx(), async () => 'deny', { hooks: runner });
+    expect(res.outcome.ok).toBe(true);
+    expect(calls.map((c) => c.event)).toContain('PostToolUse');
+    expect(res.outcome.content).toContain('[钩子补充上下文]');
+    expect(res.outcome.content).toContain('记得跑测试');
+  });
+
+  it('工具失败时触发 PostToolUseFailure（而不是 PostToolUse）', async () => {
+    const { runner, calls } = fakeHooks({ PostToolUseFailure: { additionalContext: ['失败后建议检查路径'] } });
+    const res = await runTool(readFileTool, { path: join(root, '不存在.txt') }, ctx(), async () => 'deny', {
+      hooks: runner,
+    });
+    expect(calls.map((c) => c.event)).toContain('PostToolUseFailure');
+    expect(calls.map((c) => c.event)).not.toContain('PostToolUse');
+    expect(res.outcome.content).toContain('失败后建议检查路径');
+  });
+
+  it('不传 hooks 时行为与从前完全一致（默认空运行器）', async () => {
+    const res = await runTool(writeFileTool, { path: join(root, 'plain.txt'), content: 'ok' }, ctx(), async () => 'allow_once');
+    expect(res.outcome.ok).toBe(true);
+    expect(res.outcome.content).not.toContain('钩子');
   });
 });

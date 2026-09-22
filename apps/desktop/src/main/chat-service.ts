@@ -10,6 +10,7 @@ import {
   type LoopEvent,
   type PermissionMode,
   type PermissionResolver,
+  type HookRunner,
   type PermissionRule,
   type ToolRegistry,
 } from '@jujia/agent-core';
@@ -87,6 +88,8 @@ export interface ChatDeps {
   mode?: PermissionMode | undefined;
   /** 用户自定义权限规则 */
   rules?: ReadonlyArray<PermissionRule>;
+  /** 生命周期钩子运行器（W5d） */
+  hooks?: HookRunner;
 }
 
 /**
@@ -199,6 +202,8 @@ export function sendMessage(
           alwaysAllow: session.alwaysAllow,
           ...(deps.mode ? { mode: deps.mode } : {}),
           ...(deps.rules ? { rules: deps.rules } : {}),
+          ...(deps.hooks ? { hooks: deps.hooks } : {}),
+          sessionId: session.id,
           ...(deps.fetcher ? { fetcher: deps.fetcher } : {}),
         },
       );

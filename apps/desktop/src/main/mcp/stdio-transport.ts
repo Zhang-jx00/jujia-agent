@@ -20,13 +20,14 @@
 
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
+import { killProcessTree } from '@jujia/agent-core';
 import type { McpTransport } from '@jujia/agent-core';
 
 /** 单行上限：故障/恶意的服务端可能一直吐不换行的数据，把主进程内存吃光 */
 export const DEFAULT_MAX_LINE_BYTES = 8 * 1024 * 1024;
 
 /** 先礼后兵：SIGTERM 之后等这么久还没退就 SIGKILL */
-export const KILL_GRACE_MS = 2_000;
+export { KILL_GRACE_MS } from '@jujia/agent-core';
 
 /** 子进程的最小结构（便于测试注入假实现，不依赖真实的 ChildProcess 类型） */
 export interface StdioChildLike {
@@ -204,40 +205,9 @@ export function createStdioTransport(options: StdioTransportOptions): StdioTrans
   child.stdout.on('error', (err) => debug(`读取子进程输出失败：${err.message}`));
   child.stderr.on('error', (err) => debug(`读取子进程日志失败：${err.message}`));
 
-  /** 杀整棵进程树 */
+  /** 杀整棵进程树（实现在 @jujia/agent-core 的 commands/process，与钩子共用同一套） */
   const killTree = (): void => {
-    if (child.exitCode !== null && child.exitCode !== undefined) return;
-    if (child.signalCode !== null && child.signalCode !== undefined) return;
-
-    const pid = child.pid;
-    if (platform === 'win32' && typeof pid === 'number' && pid > 0) {
-      // Windows：cmd.exe /c npx … 是父 → 子 → 孙三层，kill() 只终止 cmd.exe。
-      // taskkill /T 才能把整棵树带走，否则会留下孤儿 node 进程一直跑。
-      try {
-        doSpawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
-          stdio: 'ignore',
-          windowsHide: true,
-        });
-        return;
-      } catch (err) {
-        debug(`taskkill 失败，回退到直接 kill：${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    try {
-      child.kill('SIGTERM');
-    } catch (err) {
-      debug(`SIGTERM 失败（可能已退出）：${err instanceof Error ? err.message : String(err)}`);
-    }
-    // 宽限期后强杀：卡死的子进程不能无限留在系统里
-    const timer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // 已退出，忽略
-      }
-    }, KILL_GRACE_MS);
-    (timer as { unref?: () => void }).unref?.();
+    killProcessTree(child, { spawn: doSpawn, debug, platform });
   };
 
   return {
