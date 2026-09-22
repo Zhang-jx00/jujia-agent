@@ -307,3 +307,93 @@ describe('extractText', () => {
     expect(extractText([{ type: 'image' }, null, 42])).toBe('');
   });
 });
+
+describe('握手超时（npx 首跑要下载包，2026-09-22 实测 55.2s）', () => {
+  it('initialize 用独立的更长超时：普通请求 50ms 会超时，慢握手在 1s 内仍能等到', async () => {
+    const srv = fakeServer((req) =>
+      req.method === 'initialize'
+        ? 'silent' // 不立即回，由测试手动延迟回包
+        : { jsonrpc: '2.0', id: req.id, result: {} },
+    );
+    const c = new McpClient(srv.transport, { requestTimeoutMs: 50, initializeTimeoutMs: 1000 });
+    const connecting = c.connect();
+
+    // 等 80ms（已超过普通超时 50ms，但在握手超时 1s 内）再回包
+    await new Promise((r) => setTimeout(r, 80));
+    const init = srv.received.find((r) => r.method === 'initialize');
+    expect(init).toBeTruthy();
+    srv.emit(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: init?.id,
+        result: { protocolVersion: '2025-06-18', serverInfo: { name: 'slow-npx', version: '1' } },
+      }),
+    );
+    await expect(connecting).resolves.toMatchObject({ name: 'slow-npx' });
+    c.dispose();
+  });
+
+  it('握手超时的报错带可操作提示（npx 首跑下载 / 重试命中缓存）', async () => {
+    const srv = fakeServer(() => 'silent');
+    const c = new McpClient(srv.transport, { initializeTimeoutMs: 60 });
+    await expect(c.connect()).rejects.toThrow(/下载包/);
+    c.dispose();
+  });
+
+  it('普通请求的超时报错**不带**握手提示（提示只出现在它该出现的地方）', async () => {
+    const srv = fakeServer((req) =>
+      req.method === 'initialize'
+        ? { jsonrpc: '2.0', id: req.id, result: { protocolVersion: '2025-06-18' } }
+        : 'silent',
+    );
+    const c = new McpClient(srv.transport, { requestTimeoutMs: 50 });
+    await c.connect();
+    await expect(c.request('tools/list', {})).rejects.toThrow(/^(?!.*下载包).*请求超时/);
+    c.dispose();
+  });
+});
+
+describe('握手超时（npx 首跑要下载包，2026-09-22 实测 55.2s）', () => {
+  it('initialize 用独立的更长超时：普通请求 50ms 会超时，慢握手在 1s 内仍能等到', async () => {
+    const srv = fakeServer((req) =>
+      req.method === 'initialize'
+        ? 'silent' // 不立即回，由测试手动延迟回包
+        : { jsonrpc: '2.0', id: req.id, result: {} },
+    );
+    const c = new McpClient(srv.transport, { requestTimeoutMs: 50, initializeTimeoutMs: 1000 });
+    const connecting = c.connect();
+
+    // 等 80ms（已超过普通超时 50ms，但在握手超时 1s 内）再回包
+    await new Promise((r) => setTimeout(r, 80));
+    const init = srv.received.find((r) => r.method === 'initialize');
+    expect(init).toBeTruthy();
+    srv.emit(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: init?.id,
+        result: { protocolVersion: '2025-06-18', serverInfo: { name: 'slow-npx', version: '1' } },
+      }),
+    );
+    await expect(connecting).resolves.toMatchObject({ name: 'slow-npx' });
+    c.dispose();
+  });
+
+  it('握手超时的报错带可操作提示（npx 首跑下载 / 重试命中缓存）', async () => {
+    const srv = fakeServer(() => 'silent');
+    const c = new McpClient(srv.transport, { initializeTimeoutMs: 60 });
+    await expect(c.connect()).rejects.toThrow(/下载包/);
+    c.dispose();
+  });
+
+  it('普通请求的超时报错**不带**握手提示（提示只出现在它该出现的地方）', async () => {
+    const srv = fakeServer((req) =>
+      req.method === 'initialize'
+        ? { jsonrpc: '2.0', id: req.id, result: { protocolVersion: '2025-06-18' } }
+        : 'silent',
+    );
+    const c = new McpClient(srv.transport, { requestTimeoutMs: 50 });
+    await c.connect();
+    await expect(c.request('tools/list', {})).rejects.toThrow(/^(?!.*下载包).*请求超时/);
+    c.dispose();
+  });
+});

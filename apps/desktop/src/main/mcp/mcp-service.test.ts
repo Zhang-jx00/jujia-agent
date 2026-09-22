@@ -105,7 +105,10 @@ function stubTool(name: string): StoredTool {
   };
 }
 
-function setup(script: FakeScript = {}, opts: { requestTimeoutMs?: number } = {}) {
+function setup(
+  script: FakeScript = {},
+  opts: { requestTimeoutMs?: number; initializeTimeoutMs?: number } = {},
+) {
   const registry = new ToolRegistry();
   const transports: FakeTransport[] = [];
   const service = new McpService({
@@ -117,6 +120,7 @@ function setup(script: FakeScript = {}, opts: { requestTimeoutMs?: number } = {}
       return t;
     },
     requestTimeoutMs: opts.requestTimeoutMs ?? 500,
+    initializeTimeoutMs: opts.initializeTimeoutMs ?? 1000,
   });
   return {
     service,
@@ -138,7 +142,10 @@ const SERVER = {
 };
 
 /** 建一个服务端并连接，返回它拿到的批准计划 */
-async function connectFresh(script: FakeScript = {}, opts: { requestTimeoutMs?: number } = {}) {
+async function connectFresh(
+  script: FakeScript = {},
+  opts: { requestTimeoutMs?: number; initializeTimeoutMs?: number } = {},
+) {
   const ctx = setup(script, opts);
   const view = await ctx.service.save(SERVER);
   const result = await ctx.service.connect(view.id);
@@ -270,7 +277,7 @@ describe('连接（connect）', () => {
   });
 
   it('服务端挂死（不回应）→ 返回失败、状态 error，且**进程被真的退掉**', async () => {
-    const { service, id, result, transports } = await connectFresh({ silent: true }, { requestTimeoutMs: 200 });
+    const { service, id, result, transports } = await connectFresh({ silent: true }, { requestTimeoutMs: 200, initializeTimeoutMs: 200 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toContain('超时');

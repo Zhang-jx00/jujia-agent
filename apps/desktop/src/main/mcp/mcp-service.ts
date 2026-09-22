@@ -69,6 +69,8 @@ export interface McpServiceDeps {
   store?: McpStore;
   onDebug?: (message: string) => void;
   requestTimeoutMs?: number;
+  /** 握手（initialize）专用超时；npx 首跑要下载包，默认 60s（见 McpClientOptions） */
+  initializeTimeoutMs?: number;
 }
 
 interface Session {
@@ -198,6 +200,9 @@ export class McpService {
     });
     const client = new McpClient(transport, {
       ...(this.deps.requestTimeoutMs !== undefined ? { requestTimeoutMs: this.deps.requestTimeoutMs } : {}),
+      ...(this.deps.initializeTimeoutMs !== undefined
+        ? { initializeTimeoutMs: this.deps.initializeTimeoutMs }
+        : {}),
       onDebug: (m) => this.debug(`[mcp:${record.id}] ${m}`),
     });
 

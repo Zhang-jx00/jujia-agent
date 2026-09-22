@@ -6,6 +6,38 @@
 
 ---
 
+## [v0.14.4-mcpfix] — 2026-09-22 11:05
+
+**阶段**：修复 **MCP 首次连接必然超时**（用户实测发现）—— 握手独立超时
+**范围**：`packages/agent-core/src/mcp/client.ts(+test)` · `apps/desktop/src/main/mcp/mcp-service.ts(+test)` ·
+`apps/desktop/package.json`（版本 0.9.0 → **0.14.0**，与实际阶段对齐）
+
+**现象**：用户在「MCP」页连接 `npx -y @modelcontextprotocol/server-filesystem`，报
+`请求超时（20000ms）：initialize`。
+
+**根因（真实探针实测，2026-09-22 10:52）**
+
+用与线上完全一致的链路（cmd /c npx → stdio → initialize）实测：
+**initialize 响应耗时 55.2 秒** —— npx 首次运行要从 registry 下载包（stderr 全是 npm 下载痕迹，
+最终 `Secure MCP Filesystem Server running on stdio`）。20s 的常规超时扛不住首跑下载，
+**表现为"第一次连必失败、第二次（命中缓存）才成功"**，用户会当成产品坏了。
+
+**修复**
+
+1. **握手（initialize）独立超时** `initializeTimeoutMs`，默认 **60s**（普通请求仍 20s）。
+   握手一次性、且常见合法慢源是包下载，不该与工具调用共用超时。
+2. **握手超时报错带可操作提示**：「首次经 npx 启动的服务端要先下载包，可能较慢；直接重试一次通常已命中缓存」。
+3. 服务层透传 `initializeTimeoutMs`（测试可用短值）。
+4. `apps/desktop` 版本号从 0.9.0 对齐到 **0.14.0**（UI「运行时」与产物文件名不再撒谎）。
+
+**验证**：typecheck 通过 · lint 干净 · 全量 **486/486**（含新增 3 例握手超时测试）·
+变异回归 8/8 被拦（确认本次改动未破坏既有防线）·
+真实探针：同一命令重跑时因已命中缓存显著变快；超时报错文案含提示（有测试断言）
+
+**回退点**：`git checkout v0.14.3-review`
+
+---
+
 ## [v0.14.2-devfix] — 2026-09-21 22:35
 
 **阶段**：修复 **dev 模式黑屏**（用户实测发现）—— 依赖版本错配

@@ -33,6 +33,13 @@ export interface McpTransport {
 export interface McpClientOptions {
   /** 单次请求超时（毫秒） */
   requestTimeoutMs?: number;
+  /**
+   * **握手（initialize）专用超时**，默认 60s —— 独立于普通请求是有实测依据的：
+   * 首次经 `npx` 启动的服务端要先下载包（走代理时可能要 50s+，2026-09-22 实测 55.2s），
+   * 20s 的常规超时会让"第一次连"必然失败、第二次（命中缓存）才成功 ——
+   * 这种"第一次必败"的体验会被用户当成产品坏了。
+   */
+  initializeTimeoutMs?: number;
   /** 诊断日志回调（不抛异常，仅记录） */
   onDebug?: (message: string) => void;
 }
@@ -46,6 +53,7 @@ export interface ToolCallOutcome {
 }
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
+export const DEFAULT_INITIALIZE_TIMEOUT_MS = 60_000;
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -73,6 +81,14 @@ export class McpClient {
 
   private get timeoutMs(): number {
     return this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  }
+
+  /** 握手用独立的长超时（npx 首跑要下载包，见 McpClientOptions.initializeTimeoutMs 的说明） */
+  private timeoutFor(method: string): number {
+    if (method === 'initialize') {
+      return this.options.initializeTimeoutMs ?? DEFAULT_INITIALIZE_TIMEOUT_MS;
+    }
+    return this.timeoutMs;
   }
 
   private debug(message: string): void {
@@ -123,10 +139,16 @@ export class McpClient {
         : ({ jsonrpc: '2.0', id, method, params } as const);
 
     return new Promise<unknown>((resolve, reject) => {
+      const ms = this.timeoutFor(method);
+      // 握手超时的报错带可操作提示：最常见原因是 npx 首跑下载包（2026-09-22 实测 55.2s）
+      const hint =
+        method === 'initialize'
+          ? '（提示：首次经 npx 启动的服务端要先下载包，可能较慢；直接重试一次通常已命中缓存）'
+          : '';
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`请求超时（${this.timeoutMs}ms）：${method}`));
-      }, this.timeoutMs);
+        reject(new Error(`请求超时（${ms}ms）：${method}${hint}`));
+      }, ms);
       this.pending.set(id, { resolve, reject, timer });
       this.transport.send(JSON.stringify(req));
     });
