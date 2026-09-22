@@ -1,77 +1,45 @@
 {
-  "note": "复核 015 · 对象：W11b（插件清单：manifest + 变量展开 + 贡献物 + 诊断）。基线：W11b 主提交",
+  "note": "复核 016 · 对象：零人工测试基建（界面级 e2e）+ 它抓到的两处集成缺陷的修复。基线：本轮主提交",
   "mutations": [
     {
       "id": "M1",
-      "desc": "变量展开不再限制前缀（插件可借 ${PATH}/${HOME} 读宿主环境）",
-      "file": "packages/agent-core/src/plugins/types.ts",
-      "find": "    if (name.startsWith('JUJIA_')) {",
-      "replace": "    if (true) {",
-      "test": "packages/agent-core/src/plugins/loader.test.ts"
+      "desc": "技能工具改回「第一次刷新时才注册」（没发过消息就找不到它）",
+      "file": "apps/desktop/src/main/skills.ts",
+      "find": "  registry.register(createSkillTool(() => latest));",
+      "replace": "  // 变异：不在这里注册",
+      "test": "apps/desktop/src/main/skills-e2e.test.ts"
     },
     {
       "id": "M2",
-      "desc": "缺失变量不再上报（静默留空串，用户无从发现配置写错）",
-      "file": "packages/agent-core/src/plugins/types.ts",
-      "find": "    missing.push(name);\n    return '';",
-      "replace": "    return '';",
-      "test": "packages/agent-core/src/plugins/loader.test.ts"
+      "desc": "技能工具的取值改成快照（会话中途新装的技能看不见）",
+      "file": "apps/desktop/src/main/skills.ts",
+      "find": "  registry.register(createSkillTool(() => latest));",
+      "replace": "  registry.register(createSkillTool(() => ({ skills: [], skipped: [], scannedDirs: [] })));",
+      "test": "apps/desktop/src/main/skills-e2e.test.ts"
     },
     {
       "id": "M3",
-      "desc": "缺失变量的 MCP 服务端仍然保留（拿空串去启动）",
-      "file": "packages/agent-core/src/plugins/loader.ts",
-      "find": "        if (expanded.missing.length > 0) {",
-      "replace": "        if (false) {",
-      "test": "packages/agent-core/src/plugins/loader.test.ts"
+      "desc": "手动执行工具前不再刷新技能与插件（界面状态与真实状态脱节）",
+      "file": "apps/desktop/src/main/ipc.ts",
+      "find": "    await plugins.refresh(info.root && info.valid ? info.root : null);\n    await skills.refresh(info.root && info.valid ? info.root : null);",
+      "replace": "    // 变异：不刷新",
+      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
     },
     {
       "id": "M4",
-      "desc": "清单校验不检查 name（非法名一路带到系统提示与文件路径）",
-      "file": "packages/agent-core/src/plugins/loader.ts",
-      "find": "  if (nameError !== null) errors.push(`name 不合法：${nameError}`);",
-      "replace": "  // 变异：不校验 name",
-      "test": "packages/agent-core/src/plugins/loader.test.ts"
+      "desc": "对话链路不再注入技能清单（模型看不到有哪些技能）",
+      "file": "apps/desktop/src/main/ipc.ts",
+      "find": "        skillCatalogText: skills.catalogText(),",
+      "replace": "        // 变异：不注入清单",
+      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
     },
     {
       "id": "M5",
-      "desc": "mcpServers 接受数组（形状校验漏掉 object 的数组情形）",
-      "file": "packages/agent-core/src/plugins/loader.ts",
-      "find": "      (typeof servers === 'object' && servers !== null && !Array.isArray(servers));",
-      "replace": "      (typeof servers === 'object' && servers !== null);",
-      "test": "packages/agent-core/src/plugins/loader.test.ts"
-    },
-    {
-      "id": "M6",
-      "desc": "skills 目录不存在也当贡献物（界面显示有技能，实际没有）",
-      "file": "packages/agent-core/src/plugins/loader.ts",
-      "find": "          if (st === null || !st.isDirectory()) {",
-      "replace": "          if (false) {",
-      "test": "packages/agent-core/src/plugins/loader.test.ts"
-    },
-    {
-      "id": "M7",
-      "desc": "同名插件不覆盖（工作区级插件失效，顺序优先级形同虚设）",
-      "file": "packages/agent-core/src/plugins/loader.ts",
-      "find": "      byName.set(manifest.name, plugin);",
-      "replace": "      if (!byName.has(manifest.name)) byName.set(manifest.name, plugin);",
-      "test": "packages/agent-core/src/plugins/loader.test.ts"
-    },
-    {
-      "id": "M8",
-      "desc": "插件结果不排序（贡献物进系统提示的顺序不确定 → 前缀不稳）",
-      "file": "packages/agent-core/src/plugins/loader.ts",
-      "find": "  const plugins = [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));",
-      "replace": "  const plugins = [...byName.values()];",
-      "test": "packages/agent-core/src/plugins/loader.test.ts"
-    },
-    {
-      "id": "M9",
-      "desc": "插件自己的诊断不再汇总到总诊断（装了没效果却查不到原因）",
-      "file": "packages/agent-core/src/plugins/loader.ts",
-      "find": "      diagnostics.push(...own);",
-      "replace": "      // 变异：不汇总",
-      "test": "packages/agent-core/src/plugins/loader.test.ts"
+      "desc": "插件贡献的技能目录不再接进技能来源（插件装了等于没装）",
+      "file": "apps/desktop/src/main/ipc.ts",
+      "find": "      ...plugins.skillSources(workspaceRoot),",
+      "replace": "      // 变异：不接插件来源",
+      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
     }
   ]
 }

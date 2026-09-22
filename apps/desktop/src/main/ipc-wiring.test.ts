@@ -117,6 +117,16 @@ describe('工具注册表接线（防止各处各建一个）', () => {
     expect(refresh).toContain('await skills.refresh(');
   });
 
+  it('手动执行工具前也刷新插件与技能（界面显示的状态必须与真实一致）', () => {
+    // 按通道切出 TOOL_RUN 的整段处理逻辑（刷新发生在 runTool 之前，不能只从 runTool( 开始切）
+    const from = ipcSource.indexOf('IPC.TOOL_RUN');
+    const to = ipcSource.indexOf('IPC.MCP_SERVER_LIST');
+    const region = ipcSource.slice(from, to);
+    expect(region).toContain('await plugins.refresh(');
+    expect(region).toContain('await skills.refresh(');
+    expect(region).toContain('runTool(');
+  });
+
   it('插件只读接口存在（贡献物与诊断必须能看见）', () => {
     expect(ipcSource).toContain('IPC.PLUGINS_GET');
     expect(ipcSource).toContain('pluginsStateSchema.parse');

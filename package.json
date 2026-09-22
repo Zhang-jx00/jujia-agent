@@ -24,11 +24,13 @@
     "perf": "npm run perf --workspace @jujia/desktop",
     "setup:terminal": "npm i -w @jujia/desktop node-pty @xterm/xterm @xterm/addon-fit",
     "check:pty": "node apps/desktop/scripts/check-pty.mjs",
-    "license:check": "node apps/desktop/scripts/license-check.mjs"
+    "license:check": "node apps/desktop/scripts/license-check.mjs",
+    "e2e": "npm run e2e --workspace @jujia/desktop"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.10.0",
+    "playwright-core": "^1.63.0",
     "prettier": "^3.9.8",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.0",

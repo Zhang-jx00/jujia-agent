@@ -41,6 +41,14 @@ async function writeSkill(
 const ws = (): string => join(root, 'ws');
 
 describe('技能端到端：装进去 → 进系统提示 → 模型能按名加载', () => {
+  it('技能工具**创建服务时就在注册表里**（不等第一次刷新 —— 否则没发过消息就找不到它）', () => {
+    // 界面端到端实测抓到过：load_skill 只在第一次 refresh 时注册，
+    // 于是手动执行工具的路径报未注册的工具。这条断言把它钉死。
+    const registry = new ToolRegistry();
+    createSkillsService(registry, { userDir, workspaceDir: () => wsDir });
+    expect(registry.has('load_skill')).toBe(true);
+  });
+
   it('用户级技能：清单进提示、正文能被工具读出来（且不触发权限询问——它是只读工具）', async () => {
     await writeSkill(
       userDir,

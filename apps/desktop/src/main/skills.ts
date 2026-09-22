@@ -55,7 +55,11 @@ export function createSkillsService(registry: ToolRegistry, deps: SkillsServiceD
   const userDir = deps.userDir ?? userSkillsDir();
   const wsDir = deps.workspaceDir ?? workspaceSkillsDir;
   let latest: SkillCatalog = EMPTY;
-  let toolRegistered = false;
+
+  // **立即注册**，不等第一次刷新：工具的取值是即时函数（读 latest），
+  // 所以注册得早没有任何代价，反而避免没发过消息就找不到这个工具这种时序怪象
+  // （界面端到端实测抓到过：手动执行工具的路径看不到 load_skill）。
+  registry.register(createSkillTool(() => latest));
 
   return {
     async refresh(workspaceRoot) {
@@ -69,12 +73,6 @@ export function createSkillsService(registry: ToolRegistry, deps: SkillsServiceD
               ...(workspaceRoot !== null ? [{ path: wsDir(workspaceRoot), origin: 'workspace' as const }] : []),
             ];
       latest = await loadSkillCatalog(sources);
-
-      // 工具在第一次刷新时注册；取值用函数而不是快照，因此**新装的技能立刻可见**
-      if (!toolRegistered) {
-        registry.register(createSkillTool(() => latest));
-        toolRegistered = true;
-      }
       return latest;
     },
 

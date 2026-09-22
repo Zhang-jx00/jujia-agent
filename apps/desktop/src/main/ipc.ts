@@ -402,6 +402,9 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     // 未选工作区时给一个不可能的根目录：内置工具会在路径守卫阶段被拒（fail closed）
     const workspaceRoot = info.root && info.valid ? info.root : '__no_workspace__';
     const policy = await loadPolicy();
+    // 手动执行工具前也刷新一次：界面上的当前技能/插件必须与真实状态一致
+    await plugins.refresh(info.root && info.valid ? info.root : null);
+    await skills.refresh(info.root && info.valid ? info.root : null);
     const res = await runTool(tool, args ?? {}, { workspaceRoot }, deps.permission.resolve, {
       mode: policy.mode,
       rules: policy.rules,
