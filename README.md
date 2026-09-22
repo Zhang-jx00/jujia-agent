@@ -87,6 +87,7 @@ git clone https://github.com/Zhang-jx00/jujia-agent.git
 cd jujia-agent
 npm install
 
+npm run app            # 构建 + 启动（从任何目录跑都行；构建产物不在时会给出提示）
 npm run dev            # 开发模式
 npm run typecheck      # 类型检查
 npm run lint           # 静态检查
@@ -99,6 +100,15 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 ```
 
 需要 **Node.js ≥ 22**。内置终端的依赖若装不上，看 [`docs/SETUP-TERMINAL.md`](docs/SETUP-TERMINAL.md)。
+
+### 常见问题
+
+| 现象 | 原因与解法 |
+|------|------------|
+| 弹窗 `Unable to find Electron app at …\out\main\index.js` | 启动时用了**相对仓库根**的路径，而构建产物在 `apps/desktop/out/`。用 `npm run app`（会自己构建，且入口按脚本位置解析）或 `npm run dev` |
+| 窗口打开是黑屏 | 依赖版本不匹配导致的渲染层加载失败。本项目曾因 `@vitejs/plugin-react` 与 vite 版本错配出现此问题（已修）。可先跑 `node apps/desktop/scripts/verify-dev-transform.mjs` 定位是不是渲染管线的问题 |
+| 打包版窗口打不开 | 环境里可能设了 `ELECTRON_RUN_AS_NODE=1`（Electron 会退化成纯 Node）。启动前清掉它：`set ELECTRON_RUN_AS_NODE=`（cmd）或 `$env:ELECTRON_RUN_AS_NODE=$null`（PowerShell） |
+| 想用一份**独立的**数据目录试东西 | 设 `JUJIA_DATA_BASE_DIR` 指向一个目录，数据就落在那里（自动化测试就是靠它隔离的） |
 
 ## 当前能力（v0.10 阶段）
 

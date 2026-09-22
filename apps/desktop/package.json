@@ -14,7 +14,8 @@
     "dist": "electron-vite build && electron-builder --win --publish never",
     "dist:dir": "electron-vite build && electron-builder --win --dir",
     "icon": "node scripts/make-icon.mjs",
-    "e2e": "electron-vite build && node scripts/e2e-ui.mjs"
+    "e2e": "electron-vite build && node scripts/e2e-ui.mjs",
+    "app": "electron-vite build && node scripts/run-electron.mjs"
   },
   "dependencies": {
     "@jujia/agent-core": "*",

@@ -6,6 +6,36 @@
 
 ---
 
+## [v0.19.1-launchfix] — 2026-09-22 14:50
+
+**阶段**：修复**启动路径混淆**（用户实测报告）+ 补跑上轮欠账
+**范围**：`apps/desktop/scripts/run-electron.mjs` · `README.md`（命令表 + 常见问题）· 根与 desktop 的 `app` 脚本
+
+**现象**：用户从仓库根启动时，Electron 弹出
+`Unable to find Electron app at D:\MiMo\ProjectOne\俱佳agent\out\main\index.js`。
+
+**根因**：启动器的入口写成了**相对当前工作目录**的 `./out/main/index.js`，
+而构建产物在 `apps/desktop/out/`。经 npm workspace 跑没问题（cwd 是 `apps/desktop`），
+一旦从仓库根直接调用就会去找 `<仓库根>/out/main/index.js` —— 而 Electron 只会弹一个
+看不懂的对话框，不告诉你"其实是路径错了"。
+
+**修复**（两处，都指向同一类问题）：
+1. **入口按脚本自身位置解析**（`import.meta.url`），与 cwd 无关 —— 从任何目录调用都对；
+2. **构建产物不存在时给出可执行提示**（列出 `npm run app` / `dev` / `build` / `smoke`），
+   而不是把 Electron 的原始报错丢给用户。
+3. 新增 **`npm run app`**（构建 + 启动，从任何目录都能跑）—— 与 `dev`（开发模式）区分开。
+
+**README** 补了「常见问题」四条：入口路径、黑屏（依赖版本错配）、
+`ELECTRON_RUN_AS_NODE` 导致打包版打不开、用 `JUJIA_DATA_BASE_DIR` 做独立数据目录。
+
+**验证**：缺产物时输出可执行提示并退出码 1（实测）·
+`node apps/desktop/scripts/run-electron.mjs` 从仓库根启动成功（主进程输出数据目录后被我主动终止）·
+**`npm run smoke` 补跑通过**（`SMOKE OK`，上轮因沙箱删除配额未跑成的欠账已还清）
+
+**回退点**：`git checkout v0.19.0-e2e`
+
+---
+
 ## [v0.19.0-e2e] — 2026-09-22 14:45
 
 **阶段**：**零人工测试基建** —— 界面级端到端（Playwright 驱动真实 Electron）+ 修复它抓到的两处集成缺陷

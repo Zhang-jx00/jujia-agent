@@ -25,7 +25,8 @@
     "setup:terminal": "npm i -w @jujia/desktop node-pty @xterm/xterm @xterm/addon-fit",
     "check:pty": "node apps/desktop/scripts/check-pty.mjs",
     "license:check": "node apps/desktop/scripts/license-check.mjs",
-    "e2e": "npm run e2e --workspace @jujia/desktop"
+    "e2e": "npm run e2e --workspace @jujia/desktop",
+    "app": "npm run app --workspace @jujia/desktop"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
