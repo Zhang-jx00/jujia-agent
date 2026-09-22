@@ -50,7 +50,7 @@
 | 长任务执行 | **W4** maxTurns + 中继续跑；**补充：断点续跑与后台执行** | 中断后可继续，不丢上下文 | 🔶 部分 |
 | **多子 agent 编排** | 🔴 **原计划只作画布节点 → 已补 M14/W18** | 可并发派发子代理、汇总结果、各自独立权限 | 🔴 待开发 |
 | 多代理分工 | 🔴 **同上（M14/W18）** | 任务拆分 → 并行执行 → 冲突检测 | 🔴 待开发 |
-| 钩子（Hooks） | **W5d 已落地**：七类事件（含 PermissionRequest）+ 完整契约（argv 执行 / stdin-stdout 各一个 JSON / 退出码 2 = 拒绝 / 默认禁用 / 输出上限 / 超时杀进程树） | 用户可写钩子参与工具与审批 | ✅ 4/7 已接入运行路径（PreToolUse、PermissionRequest、PostToolUse、PostToolUseFailure）；SessionStart / UserPromptSubmit / Stop 引擎已支持、接入待 W5d-b |
+| 钩子（Hooks） | **W5d + W5d-b 已落地**：七类事件全部接入运行路径（argv 执行 / stdin-stdout 各一个 JSON / 退出码 2 = 拒绝 / 默认禁用 / 输出上限 / 超时杀进程树 / Stop 续走上限 2 次） | 用户可写钩子参与工具、审批与回合流程 | ✅ 7/7 已接入 |
 | 定时任务 | **W11**：RRULE + 抖动 + 补跑 | 到点触发、错过的能补跑 | ⏳ W11 |
 
 ## E. 记忆与上下文
@@ -106,7 +106,7 @@
 | M13 | ~~主题与背景自定义~~ → **并入 M23**（同一件事，不做两个模块） | W17→W23 | M6b |
 | M14 | **多子 agent 编排**（并发派发、任务分工、结果汇总、各自权限） | W18 | M9 |
 | M15 | **自定义权限规则表**（allow/deny/ask + 参数 glob + 即时生效） | W5c | M4 |
-| M16 | **钩子七类事件**（PreToolUse/PermissionRequest/PostToolUse/PostToolUseFailure 已接入 + 三类待接入） | W5d | M4 |
+| M16 | **钩子七类事件全部接入** | W5d / W5d-b | M4 |
 | M17 | **长任务与断点续跑**（后台执行、中断恢复、进度可见） | W18 | M9 |
 | M18 | **启动性能预算与预加载策略**（冷启动 <1.5s、可交互 <1s） | W7 | M6b |
 

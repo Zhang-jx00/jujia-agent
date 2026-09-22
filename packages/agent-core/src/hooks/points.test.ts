@@ -30,10 +30,16 @@ function fake(result: Partial<HookRunResult> = {}): { runner: HookRunner; calls:
 const ctx = { sessionId: 's1', cwd: 'D:/ws' };
 
 describe('回合级钩子接入点（W5d-b）', () => {
+  it('标记本身是固定字面量（断言用真值，不用常量自证 —— 常量被改坏也拦得住）', () => {
+    // 这一条存在的理由：原先的断言写成 expect(context).toContain(HOOK_CONTEXT_MARKER)，
+    // 标记被改成空串时 toContain('') 恒真，测试照样绿 —— 变异 M6 就是这么逃逸的。
+    expect(HOOK_CONTEXT_MARKER).toBe('[钩子补充上下文]');
+  });
+
   it('SessionStart：把附加上下文格式化好，来源作为匹配目标', async () => {
     const { runner, calls } = fake({ additionalContext: ['本项目用 pnpm', '先读 AGENTS.md'] });
     const out = await sessionStart(runner, ctx);
-    expect(out.context).toContain(HOOK_CONTEXT_MARKER);
+    expect(out.context).toContain('[钩子补充上下文]');
     expect(out.context).toContain('本项目用 pnpm');
     expect(calls[0]?.event).toBe('SessionStart');
     expect(calls[0]?.matchTarget).toBe('startup');
@@ -56,7 +62,8 @@ describe('回合级钩子接入点（W5d-b）', () => {
   it('UserPromptSubmit：附带上下文格式化一致', async () => {
     const out = await userPromptSubmit(fake({ additionalContext: ['记得用中文回答'] }).runner, ctx, 'hi');
     expect(out.blocked).toBe(false);
-    expect(out.context).toBe(`${HOOK_CONTEXT_MARKER}\n记得用中文回答`);
+    // 用字面量而不是常量：常量被改坏时这条必须能红（M6 变异逃逸过一次，就是因为用了常量自证）
+    expect(out.context).toBe('[钩子补充上下文]\n记得用中文回答');
   });
 
   it('Stop：匹配目标是会话 id，并要求"再走一步"时如实带出', async () => {
