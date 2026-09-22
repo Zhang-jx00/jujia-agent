@@ -16,14 +16,26 @@ import { describe, expect, it } from 'vitest';
 
 const read = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
-const runElectron = read('../../scripts/run-electron.mjs');
-const e2e = read('../../scripts/e2e-ui.mjs');
+/**
+ * 剥掉注释再扫描（**必须剥**）。
+ * 复核 017 实测：变异 M2 起初逃逸，因为文件头的说明注释里也写着 `JUJIA_DATA_BASE_DIR`，
+ * 只做 `toContain` 等于在注释里"找到"了实现。这与复核 009 的教训同源 ——
+ * **源码扫描类断言必须先说清注释算不算**。
+ */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
+const runElectron = stripComments(read('../../scripts/run-electron.mjs'));
+const e2e = stripComments(read('../../scripts/e2e-ui.mjs'));
 const gitignore = read('../../../../.gitignore');
 const cleanupPy = read('../../../../scripts/cleanup.py');
 
 describe('测试临时文件不落系统盘（C 盘）', () => {
   it('启动器在测试模式下同时挪走「数据根」与「Electron 配置目录」', () => {
-    expect(runElectron).toContain('JUJIA_DATA_BASE_DIR');
+    // 断言**完整赋值**：只写 `env.JUJIA_DATA_BASE_DIR =` 会被
+    // 紧邻的 `=== undefined`（比较）满足 —— 变异 M2 连逃两次就是这么来的
+    expect(runElectron).toContain("env.JUJIA_DATA_BASE_DIR = join(testRoot, 'data');");
     expect(runElectron).toContain('--user-data-dir=');
     // 只对测试模式生效：日常使用（npm run app / dev）应当用你自己的数据目录
     expect(runElectron).toContain("a === '--smoke' || a === '--perf'");

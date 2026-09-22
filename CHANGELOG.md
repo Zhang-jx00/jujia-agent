@@ -6,6 +6,75 @@
 
 ---
 
+## [v0.20.0-cdrive] — 2026-09-22 15:10
+
+**阶段**：**测试与临时文件不占系统盘**（用户明确要求）+ 清理 C 盘本项目目录
+**范围**：`apps/desktop/scripts/{run-electron.mjs,e2e-ui.mjs}` · `apps/desktop/src/main/test-policy.test.ts`（新增）·
+`.gitignore` · `scripts/cleanup.py` · `packages/shared/src/json-store.test.ts`（超时配置）·
+`docs/TEST-POLICY.md`（新增）· `README.md`
+
+**一、把"不写 C 盘"做成默认行为（不靠记性）**
+
+| 场景 | 数据根 | Electron 配置/缓存 |
+|------|--------|---------------------|
+| `npm run smoke` | `<仓库>/.tmp/smoke/data` | `<仓库>/.tmp/smoke/profile` |
+| `npm run perf` | `<仓库>/.tmp/perf/data` | `<仓库>/.tmp/perf/profile` |
+| `npm run e2e` | `<仓库>/.tmp/e2e/data` | `<仓库>/.tmp/e2e/profile` |
+
+**两处都要挪才叫真隔离**：`JUJIA_DATA_BASE_DIR` 管应用自己的数据根，
+`--user-data-dir` 管 Electron 的配置与缓存（Windows 上默认在 `%APPDATA%`，也就是 C 盘）——
+只挪一个，另一个还在 C 盘。启动器在测试模式下自动设这两项；`npm run app` / `dev`（你日常使用）
+保持默认（用你自己的数据目录），需要时可用 `JUJIA_DATA_BASE_DIR` 换位置。
+
+`.tmp/` 已加进 `.gitignore` 与 `scripts/cleanup.py`（不会被提交，也不会越积越多）。
+
+**二、清理 C 盘上本项目产生的目录（有备份）**
+
+先备份到 `D:\MiMo\ProjectOne\.workbuddy\backup-cdrive-2026-09-22\` 并确认可读，然后删除：
+
+| 位置 | 内容 | 结果 |
+|------|------|------|
+| `%APPDATA%\JujiaAgent` | Electron 配置 + 应用数据（10MB） | 已清除 |
+| `%APPDATA%\jujia-agent` | 旧凭据目录（`.token` / `git-credentials`） | 已清除（**凭据已迁到 D 盘**） |
+| `%LOCALAPPDATA%\electron-builder` | 打包缓存（77MB） | 已清除 |
+| `%LOCALAPPDATA%\electron` | Electron 二进制缓存（空） | 已清除 |
+
+凭据迁移到 `D:\MiMo\ProjectOne\.workbuddy\credentials\`，并更新了仓库级 git 配置
+（`.git/config` 不入库）；迁移后 `git ls-remote` 验证通过。
+**未触碰任何与本项目无关的文件**（只删上表四个路径，逐个复核确认）。
+
+**三、顺带修掉的两处问题**
+
+1. **`json-store.test.ts` 的并发写用例在全量下偶发超时**（实测 5.88s > vitest 默认 5s，
+   单独跑 1.9s）。这是**超时配置问题**：该用例要连做 12 次真实 fsync 落盘，
+   断言本身在慢机器上依然有效。已按既有先例（git 工具测试）显式放宽到 30s ——
+   门禁从此不再有"偶发红灯"。
+2. `run-electron.mjs` 的隔离块最初插在 `env` 定义之前 → `Cannot access 'env' before initialization`。
+   **这是我自己引入的缺陷，靠"不构建直接跑启动器"当场定位并修正**（记在注释里防再犯）。
+
+**验证**
+
+| 项 | 结果 |
+|----|------|
+| **C 盘零写入（实测）** | 运行 e2e / smoke 前后，`%APPDATA%\JujiaAgent` 与 `%LOCALAPPDATA%\electron-builder` **均未重新出现** |
+| **隔离证据** | smoke 输出 `数据根目录: …\俱佳agent\.tmp\smoke\data`，且 `.tmp/smoke/data/config.json` 确实生成在项目内 |
+| 界面级 e2e | **12/12 通过**（修掉了删除步骤的固定等待 → 改轮询） |
+| smoke | **通过**（`SMOKE OK`） |
+| 全量测试 | **587 通过 / 1 跳过** |
+| 变异测试 | **4/4 全部被拦住**（新增"不写系统盘"行为锁） |
+| typecheck / lint | 0 错误 / 0 警告 |
+
+**复核 017 的教训（第 7 次同类，又是注释与断言的坑）**：行为锁 M2 起初逃逸两次 ——
+第一次是**文件头注释里也写着 `JUJIA_DATA_BASE_DIR`**（只做 `toContain` 等于在注释里"找到"了实现）；
+改成剥离注释后又逃逸，因为断言前缀 `env.JUJIA_DATA_BASE_DIR =` **恰好是 `=== undefined` 的前缀**，
+被紧邻的比较语句满足。最终改为断言**完整赋值**才拦住。
+**源码扫描类断言的两条铁律（已写进项目记忆）**：① 先剥注释；② 断言的字符串要包含足以区分
+"赋值/比较/注释"的完整上下文。
+
+**回退点**：`git checkout v0.19.1-launchfix`
+
+---
+
 ## [v0.19.1-launchfix] — 2026-09-22 14:50
 
 **阶段**：修复**启动路径混淆**（用户实测报告）+ 补跑上轮欠账
