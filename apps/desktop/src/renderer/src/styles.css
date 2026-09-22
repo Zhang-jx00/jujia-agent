@@ -1136,3 +1136,33 @@ html[data-jj-bg-kind='glass'] .app-shell {
   line-height: 1.5;
   margin-bottom: 10px;
 }
+
+/* ------------------------------ 插件（W11b） ------------------------------ */
+
+.jj-plugin-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.jj-plugin-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--bg-container);
+}
+
+.jj-plugin-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jj-plugin-dir {
+  word-break: break-all;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+}

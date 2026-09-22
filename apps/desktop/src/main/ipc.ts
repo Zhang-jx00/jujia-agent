@@ -11,6 +11,7 @@ import {
   mcpServerViewSchema,
   hooksSaveResultSchema,
   hooksStateSchema,
+  pluginsStateSchema,
   permissionDecisionSchema,
   permissionRuleInputSchema,
   permissionRuleViewSchema,
@@ -42,7 +43,8 @@ import { McpService } from './mcp/mcp-service';
 import { createRealTransport } from './mcp/real-transport';
 import { createFilePermissionRulesStore } from './permission-rules-store';
 import { createFileHooksService } from './hooks-store';
-import { createSkillsService } from './skills';
+import { createSkillsService, userSkillsDir, workspaceSkillsDir } from './skills';
+import { createPluginsService } from './plugins';
 import { createProcessHookRunner, parseHookConfig, summarizeCatalog, HOOK_EVENTS } from '@jujia/agent-core';
 import { clearWorkspace, getWorkspaceInfo, pickWorkspace } from './workspace';
 import type { PermissionBridge } from './permission-bridge';
@@ -137,7 +139,15 @@ export function registerIpcHandlers(deps: IpcDeps): void {
 
   // 技能目录在每次对话前重新扫描（毫秒级），因此**新装的技能立刻生效**，不需要重启；
   // load_skill 工具在首次刷新时注册进同一个注册表，权限门照常适用（它是只读工具）。
-  const skills = createSkillsService(registry);
+  const plugins = createPluginsService();
+  // 技能来源 = 用户级 → 用户级插件 → 工作区级 → 工作区级插件（越靠后优先级越高）
+  const skills = createSkillsService(registry, {
+    sourcesFor: (workspaceRoot) => [
+      { path: userSkillsDir(), origin: 'user' },
+      ...plugins.skillSources(workspaceRoot),
+      ...(workspaceRoot !== null ? [{ path: workspaceSkillsDir(workspaceRoot), origin: 'workspace' as const }] : []),
+    ],
+  });
 
   /** 权限规则表（W5c）：TOOL_RUN 与对话链路共用同一份，因此规则语义全进程一致 */
   const permissionRules = createFilePermissionRulesStore();
@@ -306,7 +316,9 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     // 工作区决定了工具是否可用；未选择时仍可对话，但工具会被路径校验拒绝
     const ws = await getWorkspaceInfo();
     const policy = await loadPolicy();
+    await plugins.refresh(ws.valid ? ws.root : null);
     const skillCatalog = await skills.refresh(ws.valid ? ws.root : null);
+    mcpDebug('[plugins] ' + plugins.summary());
     mcpDebug('[skills] ' + summarizeCatalog(skillCatalog));
     const result = sendMessage(
       {
@@ -437,6 +449,28 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.MCP_DISCONNECT, async (_e, id: unknown): Promise<boolean> => {
     if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
     return mcp.disconnect(id);
+  });
+
+  /* ------------------------------ 插件（W11b） ------------------------------ */
+
+  ipcMain.handle(IPC.PLUGINS_GET, async () => {
+    const ws = await getWorkspaceInfo();
+    const result = await plugins.refresh(ws.valid ? ws.root : null);
+    return pluginsStateSchema.parse({
+      summary: plugins.summary(),
+      scannedDirs: result.scannedDirs,
+      plugins: result.plugins.map((pl) => ({
+        name: pl.name,
+        version: pl.manifest.version ?? null,
+        description: pl.manifest.description ?? null,
+        dir: pl.dir,
+        skillsCount: pl.skillsDirs.length,
+        commandsCount: pl.commandsDirs.length,
+        mcpServers: pl.mcpServers.map((s) => s.name),
+        diagnostics: pl.diagnostics,
+      })),
+      diagnostics: result.diagnostics,
+    });
   });
 
   /* --------------------------- 生命周期钩子（W5d） --------------------------- */

@@ -13,6 +13,7 @@ import {
   mcpServerInputSchema,
   hooksSaveResultSchema,
   hooksStateSchema,
+  pluginsStateSchema,
   mcpServerViewSchema,
   permissionDecisionSchema,
   permissionRequestSchema,
@@ -38,6 +39,7 @@ import {
   type PermissionRequestPayload,
   type HooksSaveResult,
   type HooksState,
+  type PluginsState,
   type PermissionRuleInput,
   type PermissionRuleView,
   type StreamEvent,
@@ -282,6 +284,11 @@ const api = {
   /** 保存钩子配置：校验失败时**不落盘**，错误逐条返回 */
   async hooksSet(input: Record<string, unknown>): Promise<HooksSaveResult> {
     return hooksSaveResultSchema.parse(await ipcRenderer.invoke(IPC.HOOKS_SET, input));
+  },
+
+  /** 插件加载结果（只读；含贡献物与诊断） */
+  async pluginsGet(): Promise<PluginsState> {
+    return pluginsStateSchema.parse(await ipcRenderer.invoke(IPC.PLUGINS_GET));
   },
 
   async permissionRulesList(): Promise<PermissionRuleView[]> {

@@ -39,18 +39,35 @@ export interface SkillsService {
   catalogText(): string;
 }
 
-export function createSkillsService(registry: ToolRegistry): SkillsService {
+export interface SkillsServiceDeps {
+  /** 用户级技能目录（默认取数据目录下的 skills/）；可注入，便于端到端验证 */
+  userDir?: string;
+  /** 工作区级技能目录（默认 <工作区>/.jujia/skills） */
+  workspaceDir?: (workspaceRoot: string) => string;
+  /**
+   * 完整来源列表（按优先级从低到高）。
+   * 默认是 [用户级, 工作区级]；接入插件后由调用方把插件贡献的技能目录按插件所在层插进去。
+   */
+  sourcesFor?: (workspaceRoot: string | null) => SkillSource[];
+}
+
+export function createSkillsService(registry: ToolRegistry, deps: SkillsServiceDeps = {}): SkillsService {
+  const userDir = deps.userDir ?? userSkillsDir();
+  const wsDir = deps.workspaceDir ?? workspaceSkillsDir;
   let latest: SkillCatalog = EMPTY;
   let toolRegistered = false;
 
   return {
     async refresh(workspaceRoot) {
-      // 顺序即优先级：先用户级、后工作区 → 工作区同名技能覆盖用户级
-      // （显式标注类型：否则 TS 会把数组推断成 origin 只能是 'user'）
-      const sources: SkillSource[] = [{ path: userSkillsDir(), origin: 'user' }];
-      if (workspaceRoot !== null) {
-        sources.push({ path: workspaceSkillsDir(workspaceRoot), origin: 'workspace' });
-      }
+      // 顺序即优先级（越靠后越高）：默认「用户级 → 工作区级」；
+      // 接入插件后由 sourcesFor 把插件贡献的目录按插件所在层插进去。
+      const sources: SkillSource[] =
+        deps.sourcesFor !== undefined
+          ? deps.sourcesFor(workspaceRoot)
+          : [
+              { path: userDir, origin: 'user' },
+              ...(workspaceRoot !== null ? [{ path: wsDir(workspaceRoot), origin: 'workspace' as const }] : []),
+            ];
       latest = await loadSkillCatalog(sources);
 
       // 工具在第一次刷新时注册；取值用函数而不是快照，因此**新装的技能立刻可见**

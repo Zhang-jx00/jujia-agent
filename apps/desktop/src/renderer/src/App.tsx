@@ -26,6 +26,9 @@ const TerminalPanel = lazy(() =>
 const McpPanel = lazy(() =>
   import('./features/mcp/McpPanel').then((m) => ({ default: m.McpPanel })),
 );
+const PluginsPanel = lazy(() =>
+  import('./features/plugins/PluginsPanel').then((m) => ({ default: m.PluginsPanel })),
+);
 const HooksPanel = lazy(() =>
   import('./features/hooks/HooksPanel').then((m) => ({ default: m.HooksPanel })),
 );
@@ -47,7 +50,16 @@ type LoadState =
   | { phase: 'ready'; loaded: Loaded }
   | { phase: 'error'; message: string };
 
-type Tab = 'overview' | 'connections' | 'chat' | 'terminal' | 'mcp' | 'permissions' | 'hooks' | 'appearance';
+type Tab =
+  | 'overview'
+  | 'connections'
+  | 'chat'
+  | 'terminal'
+  | 'mcp'
+  | 'permissions'
+  | 'hooks'
+  | 'plugins'
+  | 'appearance';
 
 const sourceLabel: Record<ConfigSnapshot['source'], string> = {
   primary: '主文件',
@@ -63,6 +75,7 @@ const TAB_LABEL: Record<Tab, string> = {
   mcp: 'MCP',
   permissions: '权限',
   hooks: '钩子',
+  plugins: '插件',
   appearance: '外观',
 };
 
@@ -192,6 +205,7 @@ export function App(): ReactElement {
           {state.phase === 'ready' && tab === 'mcp' && <McpPanel />}
           {state.phase === 'ready' && tab === 'permissions' && <PermissionRulesPanel />}
           {state.phase === 'ready' && tab === 'hooks' && <HooksPanel />}
+          {state.phase === 'ready' && tab === 'plugins' && <PluginsPanel />}
           {state.phase === 'ready' && tab === 'appearance' && themePack !== null && (
             <AppearancePanel
               pack={themePack}

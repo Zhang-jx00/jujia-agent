@@ -87,6 +87,11 @@ export const IPC = {
   /** 读取当前钩子配置（含校验错误）/ 保存；以及配置文件路径 */
   HOOKS_GET: 'hooks:get',
   HOOKS_SET: 'hooks:set',
+
+  /* ------------------------------ 插件（W11b） ------------------------------ */
+
+  /** 读取插件加载结果（含诊断）；界面用它展示装了什么、贡献了什么、哪里有问题 */
+  PLUGINS_GET: 'plugins:get',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

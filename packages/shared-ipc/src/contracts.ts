@@ -439,3 +439,35 @@ export const hooksSaveResultSchema = z.object({
   state: hooksStateSchema,
 });
 export type HooksSaveResult = z.infer<typeof hooksSaveResultSchema>;
+
+/* ------------------------------------------------------------------ *
+ * 插件（W11b）
+ * ------------------------------------------------------------------ */
+
+export const pluginDiagnosticSchema = z.object({
+  plugin: z.string(),
+  dir: z.string(),
+  severity: z.enum(['error', 'warning']),
+  message: z.string(),
+});
+
+export const pluginsStateSchema = z.object({
+  summary: z.string(),
+  scannedDirs: z.array(z.string()),
+  plugins: z.array(
+    z.object({
+      name: z.string(),
+      version: z.string().nullable(),
+      description: z.string().nullable(),
+      dir: z.string(),
+      /** 贡献的技能目录数（**只统计真实存在的**） */
+      skillsCount: z.number(),
+      commandsCount: z.number(),
+      /** 贡献的 MCP 服务端名（本轮只解析、未接入，界面会如实标注） */
+      mcpServers: z.array(z.string()),
+      diagnostics: z.array(pluginDiagnosticSchema),
+    }),
+  ),
+  diagnostics: z.array(pluginDiagnosticSchema),
+});
+export type PluginsState = z.infer<typeof pluginsStateSchema>;

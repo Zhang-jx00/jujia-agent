@@ -89,7 +89,8 @@ describe('工具注册表接线（防止各处各建一个）', () => {
   });
 
   it('技能服务被接进对话链路，且清单走同一条系统提示', () => {
-    expect(ipcSource).toContain('createSkillsService(registry)');
+    // 断言共享注册表仍是第一个参数，而不是死盯整行文本 —— 参数会随功能增加
+    expect(ipcSource).toContain('createSkillsService(registry');
     expect(ipcSource).toContain('await skills.refresh(');
     const chat = ipcSource.slice(ipcSource.indexOf('sendMessage('), ipcSource.indexOf('sendMessage(') + 1400).split(');')[0] ?? '';
     expect(chat).toContain('skillCatalogText: skills.catalogText()');
@@ -106,6 +107,19 @@ describe('工具注册表接线（防止各处各建一个）', () => {
     expect(ipcSource).toContain('hooksService.load()');
     expect(ipcSource.split('createProcessHookRunner(').length - 1).toBe(1);
     expect(ipcSource).toContain('getConfig: () => hooksService.getConfig()');
+  });
+
+  it('插件贡献的技能目录被接进技能来源，且刷新顺序在对话链路里', () => {
+    expect(ipcSource).toContain('createPluginsService()');
+    expect(ipcSource).toContain('plugins.skillSources(workspaceRoot)');
+    // 先刷新插件、再刷新技能（否则插件贡献的目录这一轮看不到）
+    const refresh = ipcSource.slice(ipcSource.indexOf('await plugins.refresh('), ipcSource.indexOf('await plugins.refresh(') + 220);
+    expect(refresh).toContain('await skills.refresh(');
+  });
+
+  it('插件只读接口存在（贡献物与诊断必须能看见）', () => {
+    expect(ipcSource).toContain('IPC.PLUGINS_GET');
+    expect(ipcSource).toContain('pluginsStateSchema.parse');
   });
 
   it('MCP 服务在应用退出时被释放（不留孤儿进程）', () => {
