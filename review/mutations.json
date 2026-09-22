@@ -1,37 +1,45 @@
 {
-  "note": "复核 017 · 对象：测试不写系统盘（C 盘）策略 + 相关脚本改造。基线：本轮主提交",
+  "note": "复核 018 · 对象：W11c（插件贡献的 MCP 服务端接入）。基线：W11c 主提交",
   "mutations": [
     {
       "id": "M1",
-      "desc": "启动器不再挪 Electron 配置目录（测试又往 %APPDATA%（C 盘）写）",
-      "file": "apps/desktop/scripts/run-electron.mjs",
-      "find": "    extraArgs.push(`--user-data-dir=${join(testRoot, 'profile')}`);",
-      "replace": "    // 变异：不挪配置目录",
-      "test": "apps/desktop/src/main/test-policy.test.ts"
+      "desc": "插件带来的服务端不再合并进列表（装了插件在 MCP 页看不见）",
+      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
+      "find": "    const external = this.deps.externalServers?.() ?? [];",
+      "replace": "    const external: ExternalMcpServer[] = [];",
+      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
     },
     {
       "id": "M2",
-      "desc": "启动器不再挪应用数据根（应用配置写回 C 盘）",
-      "file": "apps/desktop/scripts/run-electron.mjs",
-      "find": "    env.JUJIA_DATA_BASE_DIR = join(testRoot, 'data');",
-      "replace": "    // 变异：不挪数据根",
-      "test": "apps/desktop/src/main/test-policy.test.ts"
+      "desc": "插件标成未启用的服务端仍可连接（插件等于被迫放行）",
+      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
+      "find": "    if (target.kind === 'plugin' && target.external.disabledByPlugin) {",
+      "replace": "    if (false) {",
+      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
     },
     {
       "id": "M3",
-      "desc": "e2e 又用系统临时目录（在别的机器上可能就是 C 盘）",
-      "file": "apps/desktop/scripts/e2e-ui.mjs",
-      "find": "const TMP_ROOT = join(here, '..', '..', '..', '.tmp', 'e2e');",
-      "replace": "const TMP_ROOT = join(here, '..', '..', '..', '.tmp-e2e');",
-      "test": "apps/desktop/src/main/test-policy.test.ts"
+      "desc": "允许在应用里修改插件带来的服务端（插件一更新就被覆盖，用户以为丢了配置）",
+      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
+      "find": "    if (parsed.id !== undefined && parsed.id.startsWith(PLUGIN_SERVER_ID_PREFIX)) {",
+      "replace": "    if (false) {",
+      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
     },
     {
       "id": "M4",
-      "desc": ".tmp 不再纳入清理脚本（临时数据越积越多）",
-      "file": "scripts/cleanup.py",
-      "find": "    \".tmp\",                  # 测试/临时数据的统一落点（不写 C 盘，见 docs/TEST-POLICY.md）",
-      "replace": "    # 变异：不清理 .tmp",
-      "test": "apps/desktop/src/main/test-policy.test.ts"
+      "desc": "允许删除插件带来的服务端",
+      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
+      "find": "    this.assertEditable(id, '删除');",
+      "replace": "    // 变异：不保护删除",
+      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+    },
+    {
+      "id": "M5",
+      "desc": "插件服务端的来源标注丢失（看不出它来自哪个插件）",
+      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
+      "find": "      pluginName: external.pluginName,",
+      "replace": "      pluginName: null,",
+      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
     }
   ]
 }

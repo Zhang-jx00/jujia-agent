@@ -337,6 +337,20 @@ export const mcpServerViewSchema = z.object({
   enabledTools: z.array(z.string()),
   /** 上次失败原因（成功时为 null） */
   lastError: z.string().nullable(),
+  /**
+   * 这个服务端是谁给的：你自己配的（`user`）还是插件清单里带的（`plugin`）。
+   *
+   * 界面必须区分：插件带来的服务端**由插件决定**，不能在这里改或删 ——
+   * 否则用户改完、插件一更新就被覆盖，还会以为是应用丢了配置。
+   */
+  source: z.enum(['user', 'plugin']).default('user'),
+  /** 来自哪个插件（source=plugin 时非空） */
+  pluginName: z.string().nullable().default(null),
+  /**
+   * 插件清单把它标成 `enabled: false` 时为 true。
+   * 仍然列出来（"被插件禁用了"这件事必须可见），但**不允许连接**，连接会给出明确理由。
+   */
+  disabledByPlugin: z.boolean().default(false),
 });
 export type McpServerView = z.infer<typeof mcpServerViewSchema>;
 

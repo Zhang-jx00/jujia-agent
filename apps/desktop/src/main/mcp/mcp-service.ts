@@ -71,7 +71,29 @@ export interface McpServiceDeps {
   requestTimeoutMs?: number;
   /** 握手（initialize）专用超时；npx 首跑要下载包，默认 60s（见 McpClientOptions） */
   initializeTimeoutMs?: number;
+  /**
+   * **插件带来的**服务端（W11c）。
+   *
+   * 它们和用户自己配的走**完全一样的**连接与批准流程 —— 插件只是把"要连什么"替你写好了，
+   * **不代表它有权放行**：连上之后仍然要逐工具批准。
+   * 差别只在归属：这些条目不能在界面里编辑或删除（改插件清单才是正途）。
+   */
+  externalServers?: () => ExternalMcpServer[];
 }
+
+/** 插件声明的 MCP 服务端（配置里的变量已在插件加载阶段展开） */
+export interface ExternalMcpServer {
+  /** 稳定 id，形如 `plugin:<插件名>:<服务端名>` */
+  id: string;
+  name: string;
+  pluginName: string;
+  config: McpServerConfig;
+  /** 插件清单把它标成 `enabled: false` */
+  disabledByPlugin: boolean;
+}
+
+/** 外部服务端的 id 前缀：用它来判断"这条是不是插件给的" */
+export const PLUGIN_SERVER_ID_PREFIX = 'plugin:';
 
 interface Session {
   /** 单调递增的连接代次，用于挡住「旧连接的晚到回调」 */
@@ -125,7 +147,13 @@ export class McpService {
 
   async views(): Promise<McpServerView[]> {
     const records = await (await this.store()).list();
-    return records.map((r) => this.viewOf(r));
+    const external = this.deps.externalServers?.() ?? [];
+    // 用户自己配的在前，插件带来的在后；两者同 id 时**用户配置优先**（见 resolveServer 的说明）
+    const storedIds = new Set(records.map((r) => r.id));
+    return [
+      ...records.map((r) => this.viewOf(r)),
+      ...external.filter((e) => !storedIds.has(e.id)).map((e) => this.viewOfExternal(e)),
+    ];
   }
 
   private viewOf(record: StoredMcpServer): McpServerView {
@@ -141,7 +169,43 @@ export class McpService {
       discoveredTools: session?.tools.length ?? 0,
       enabledTools: session?.enabledQualified ?? [],
       lastError: session?.lastError ?? null,
+      source: 'user',
+      pluginName: null,
+      disabledByPlugin: false,
     });
+  }
+
+  private viewOfExternal(external: ExternalMcpServer): McpServerView {
+    const session = this.sessions.get(external.id);
+    return mcpServerViewSchema.parse({
+      id: external.id,
+      name: external.name,
+      command: external.config.command,
+      args: external.config.args,
+      envKeys: Object.keys(external.config.env ?? {}),
+      state: session?.state ?? 'idle',
+      discoveredTools: session?.tools.length ?? 0,
+      enabledTools: session?.enabledQualified ?? [],
+      lastError: session?.lastError ?? null,
+      source: 'plugin',
+      pluginName: external.pluginName,
+      disabledByPlugin: external.disabledByPlugin,
+    });
+  }
+
+  /**
+   * 按 id 找服务端：先找用户配置，再找插件带来的。
+   *
+   * 同 id 时**用户配置优先**是有意为之：万一插件用了一个和用户配置撞名的 id，
+   * 也不能让插件悄悄顶掉用户自己的配置 —— 那种"我的配置凭空变了"最难排查。
+   */
+  private async resolveServer(
+    id: string,
+  ): Promise<{ kind: 'user'; record: StoredMcpServer } | { kind: 'plugin'; external: ExternalMcpServer } | null> {
+    const record = await (await this.store()).find(id);
+    if (record) return { kind: 'user', record };
+    const external = (this.deps.externalServers?.() ?? []).find((e) => e.id === id);
+    return external ? { kind: 'plugin', external } : null;
   }
 
   /* ------------------------------ 配置 ------------------------------ */
@@ -149,6 +213,10 @@ export class McpService {
   /** 新增或更新配置。命令/参数/环境变量变了 → **必须先断开旧连接**（旧进程跑的已不是这份配置） */
   async save(input: unknown): Promise<McpServerView> {
     const parsed = mcpServerInputSchema.parse(input);
+    // 带了 id 就可能是"在改一个插件带来的服务端" —— 明确拒绝（改插件清单才是正途）
+    if (parsed.id !== undefined && parsed.id.startsWith(PLUGIN_SERVER_ID_PREFIX)) {
+      this.assertEditable(parsed.id, '修改');
+    }
 
     // 与 agent-core 共用同一套校验：**含 shell 元字符的命令/参数一律拒绝**。
     // 这里必须再走一遍 —— IPC 入参来自渲染层，不能假定它已经过滤过。
@@ -170,40 +238,75 @@ export class McpService {
 
   /** 删除：先断开（摘工具 + 退进程），再从存储里删 */
   async remove(id: string): Promise<boolean> {
+    this.assertEditable(id, '删除');
     await this.disconnect(id);
     const removed = await (await this.store()).remove(id);
     this.notify();
     return removed;
   }
 
+  /**
+   * 插件带来的服务端**不能在应用里改或删**。
+   *
+   * 理由不是"权限不够"，而是"改了也没用"：它们的定义在插件清单里，
+   * 插件一更新你的修改就被覆盖 —— 用户会以为是应用丢了配置，最难排查。
+   * 所以宁可明确拒绝，并告诉他正途是改插件清单。
+   */
+  private assertEditable(id: string, action: string): void {
+    const external = (this.deps.externalServers?.() ?? []).find((e) => e.id === id);
+    if (external) {
+      throw new Error(
+        `「${external.name}」来自插件「${external.pluginName}」，不能在应用里${action} —— ` +
+          '请改那个插件的清单（plugin.json 的 mcpServers），或在插件页里停用它。',
+      );
+    }
+  }
+
   /* ------------------------------ 连接 ------------------------------ */
 
   async connect(id: string): Promise<McpConnectResult> {
-    const store = await this.store();
-    const record = await store.find(id);
-    if (!record) throw new Error(`MCP 服务端不存在: ${id}`);
+    const target = await this.resolveServer(id);
+    if (!target) throw new Error(`MCP 服务端不存在: ${id}`);
+
+    // 插件把它标成未启用 → 明确拒绝并说明原因，而不是"点了一下没反应"
+    if (target.kind === 'plugin' && target.external.disabledByPlugin) {
+      throw new Error(
+        `这个服务端在插件「${target.external.pluginName}」的清单里被标为未启用（enabled: false），` +
+          '所以不能连接。要使用它请改那个插件的清单。',
+      );
+    }
 
     // 先彻底断掉旧连接：否则会有两个进程同时跑，且工具重名会让第二次注册被跳过
     await this.disconnect(id);
 
     const generation = (this.generationSeq += 1);
-    const config: McpServerConfig = {
-      id: record.id,
-      name: record.name,
-      command: record.command,
-      args: [...record.args],
-      env: { ...record.env },
-    };
+    // 用户配置与插件配置在这里汇成同一个形状 —— 之后的流程（握手、批准、权限门）**完全一致**
+    const config: McpServerConfig =
+      target.kind === 'user'
+        ? {
+            id: target.record.id,
+            name: target.record.name,
+            command: target.record.command,
+            args: [...target.record.args],
+            env: { ...target.record.env },
+          }
+        : {
+            id: target.external.id,
+            name: target.external.name,
+            command: target.external.config.command,
+            args: [...target.external.config.args],
+            env: { ...target.external.config.env },
+          };
 
     const transport = this.deps.createTransport(config, {
-      onExit: (info) => this.handleExit(record.id, generation, info),
+      onExit: (info) => this.handleExit(config.id, generation, info),
     });
     const client = new McpClient(transport, {
       ...(this.deps.requestTimeoutMs !== undefined ? { requestTimeoutMs: this.deps.requestTimeoutMs } : {}),
       ...(this.deps.initializeTimeoutMs !== undefined
         ? { initializeTimeoutMs: this.deps.initializeTimeoutMs }
         : {}),
-      onDebug: (m) => this.debug(`[mcp:${record.id}] ${m}`),
+      onDebug: (m) => this.debug(`[mcp:${config.id}] ${m}`),
     });
 
     const session: Session = {
@@ -217,14 +320,14 @@ export class McpService {
       lastError: null,
       closing: false,
     };
-    this.sessions.set(record.id, session);
+    this.sessions.set(config.id, session);
     this.notify();
 
     try {
       await client.connect();
       // 前缀必须用**我们配置的 id**，不能用服务端自报的名字 ——
       // 否则两个自报同名的服务端会撞成同一组 qualifiedName，后者的工具会被静默跳过
-      const tools = await client.listTools(record.id);
+      const tools = await client.listTools(config.id);
       session.tools = tools;
       session.pendingPlan = planConnectionApproval(config, tools);
       session.state = 'awaiting_approval';
@@ -237,7 +340,7 @@ export class McpService {
       session.state = 'error';
       session.lastError = message;
       // 握手/列工具失败 → 必须真的退掉进程，不能留一个连不上的第三方进程在跑
-      this.teardown(record.id, session);
+      this.teardown(config.id, session);
       this.notify();
       return { ok: false, error: message };
     }

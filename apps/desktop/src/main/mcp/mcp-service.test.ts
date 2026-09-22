@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ToolRegistry, runTool, type McpTransport, type StoredTool } from '@jujia/agent-core';
-import { McpService, type McpExitInfo, type McpTransportHooks } from './mcp-service';
+import { McpService, type ExternalMcpServer, type McpExitInfo, type McpTransportHooks } from './mcp-service';
 import { createMemoryMcpStore } from './mcp-store';
 
 /* ------------------------------------------------------------------ *
@@ -107,7 +107,11 @@ function stubTool(name: string): StoredTool {
 
 function setup(
   script: FakeScript = {},
-  opts: { requestTimeoutMs?: number; initializeTimeoutMs?: number } = {},
+  opts: {
+    requestTimeoutMs?: number;
+    initializeTimeoutMs?: number;
+    externalServers?: ExternalMcpServer[];
+  } = {},
 ) {
   const registry = new ToolRegistry();
   const transports: FakeTransport[] = [];
@@ -121,6 +125,7 @@ function setup(
     },
     requestTimeoutMs: opts.requestTimeoutMs ?? 500,
     initializeTimeoutMs: opts.initializeTimeoutMs ?? 1000,
+    ...(opts.externalServers ? { externalServers: () => opts.externalServers! } : {}),
   });
   return {
     service,
@@ -144,7 +149,11 @@ const SERVER = {
 /** 建一个服务端并连接，返回它拿到的批准计划 */
 async function connectFresh(
   script: FakeScript = {},
-  opts: { requestTimeoutMs?: number; initializeTimeoutMs?: number } = {},
+  opts: {
+    requestTimeoutMs?: number;
+    initializeTimeoutMs?: number;
+    externalServers?: ExternalMcpServer[];
+  } = {},
 ) {
   const ctx = setup(script, opts);
   const view = await ctx.service.save(SERVER);
@@ -562,5 +571,70 @@ describe('状态广播', () => {
 
     expect(seen).toContain('connected');
     expect(seen).toContain('exited');
+  });
+});
+
+describe('插件带来的 MCP 服务端（W11c）', () => {
+  /** 一个外部服务端：走与用户配置完全相同的连接/批准流程 */
+  const external = (over: Partial<ExternalMcpServer> = {}): ExternalMcpServer => ({
+    id: 'plugin:my-team:files',
+    name: 'my-team 文件服务',
+    pluginName: 'my-team',
+    config: { id: 'plugin:my-team:files', name: 'my-team 文件服务', command: 'node', args: [] },
+    disabledByPlugin: false,
+    ...over,
+  });
+
+  it('出现在列表里，且标明来自插件', async () => {
+    const ctx = setup({}, { externalServers: [external()] });
+    const views = await ctx.service.views();
+    expect(views).toHaveLength(1);
+    expect(views[0]?.source).toBe('plugin');
+    expect(views[0]?.pluginName).toBe('my-team');
+    expect(views[0]?.disabledByPlugin).toBe(false);
+  });
+
+  it('用户配置**不能占用插件命名空间**（`plugin:` 前缀的 id 由插件保留）', async () => {
+    const ctx = setup({}, { externalServers: [external()] });
+    await expect(
+      ctx.service.save({ id: 'plugin:my-team:files', name: '冒名顶替', command: 'node', args: [] }),
+    ).rejects.toThrow(/不能在应用里修改/);
+    // 且插件的服务端仍然在列表里、来源不变
+    const views = await ctx.service.views();
+    expect(views).toHaveLength(1);
+    expect(views[0]?.source).toBe('plugin');
+  });
+
+  it('可以连接、批准并调用（流程与用户配置的服务端完全一致）', async () => {
+    const ctx = setup({ tools: TOOLS }, { externalServers: [external()] });
+    const result = await ctx.service.connect('plugin:my-team:files');
+    expect(result.ok).toBe(true);
+    const out = await ctx.service.approve('plugin:my-team:files', { action: 'approve_all' });
+    expect(out.registered.length).toBeGreaterThan(0);
+    // 批准后的工具真的进了注册表（经同一套权限门）
+    expect(ctx.registry.all().length).toBe(out.registered.length);
+  });
+
+  it('插件把它标成未启用 → 拒绝连接并说明原因', async () => {
+    const ctx = setup({}, { externalServers: [external({ disabledByPlugin: true })] });
+    await expect(ctx.service.connect('plugin:my-team:files')).rejects.toThrow(/enabled: false/);
+  });
+
+  it('不能在应用里**修改**插件带来的服务端（改了也会被插件更新覆盖）', async () => {
+    const ctx = setup({}, { externalServers: [external()] });
+    await expect(
+      ctx.service.save({ id: 'plugin:my-team:files', name: 'x', command: 'node', args: [] }),
+    ).rejects.toThrow(/插件「my-team」/);
+  });
+
+  it('不能**删除**插件带来的服务端（断开可以，删除不行）', async () => {
+    const ctx = setup({}, { externalServers: [external()] });
+    await expect(ctx.service.remove('plugin:my-team:files')).rejects.toThrow(/不能在应用里删除/);
+  });
+
+  it('断开插件服务端是允许的（断开 ≠ 删除）', async () => {
+    const ctx = setup({ tools: TOOLS }, { externalServers: [external()] });
+    await ctx.service.connect('plugin:my-team:files');
+    expect(await ctx.service.disconnect('plugin:my-team:files')).toBe(true);
   });
 });

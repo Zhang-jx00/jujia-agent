@@ -97,6 +97,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     registry,
     createTransport: (config, hooks) => createRealTransport(config, hooks, mcpDebug),
     onDebug: mcpDebug,
+    // 插件声明的 MCP 服务端也进列表与连接流程（审批照旧 —— 插件不能自带权限）
+    externalServers: () => plugins.externalServers(),
   });
   mcp.onChanged((views) => {
     deps.getWindow?.()?.webContents.send(IPC.MCP_STATE_CHANGED, views);
@@ -426,6 +428,9 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   /* ------------------------------ MCP（W10e） ------------------------------ */
 
   ipcMain.handle(IPC.MCP_SERVER_LIST, async () => {
+    // 先刷新插件：新装插件的贡献要立刻出现在列表里，不能等一次对话
+    const wsInfo = await getWorkspaceInfo();
+    await plugins.refresh(wsInfo.valid ? wsInfo.root : null);
     return z.array(mcpServerViewSchema).parse(await mcp.views());
   });
 

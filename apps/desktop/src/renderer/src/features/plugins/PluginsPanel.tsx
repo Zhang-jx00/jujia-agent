@@ -11,7 +11,7 @@ import type { PluginsState } from '@jujia/shared-ipc';
  * 2. 每个插件**真的**贡献了什么（技能/命令目录只统计真实存在的）；
  * 3. 哪些地方有问题（清单写错、变量缺失、目录不存在）。
  *
- * 本轮**未接入**：插件贡献的 MCP 服务端（只解析出来列在此处，界面上明确标注"待接入"）——
+ * 插件贡献的 MCP 服务端**已接入** MCP 列表与连接流程（W11c）；自定义命令目录仍只识别。
  * 配了不能用的事，不能靠用户自己猜。
  */
 export function PluginsPanel(): ReactElement {
@@ -84,7 +84,7 @@ export function PluginsPanel(): ReactElement {
                         <>
                           {' · '}
                           MCP 服务端 {p.mcpServers.length} 个（{p.mcpServers.join(', ')}）
-                          <strong> —— 待接入，当前不会出现在 MCP 列表里</strong>
+                          <strong> —— 已接入，连接与逐工具批准在「MCP」页进行</strong>
                         </>
                       )}
                     </div>

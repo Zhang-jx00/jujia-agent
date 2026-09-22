@@ -1166,3 +1166,12 @@ html[data-jj-bg-kind='glass'] .app-shell {
   font-family: 'Cascadia Mono', Consolas, monospace;
   font-size: 12px;
 }
+
+/* 来源标注（用户配置 / 插件） */
+.jj-mcp-source {
+  font-size: 12px;
+  color: var(--text-secondary);
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  padding: 0 8px;
+}

@@ -203,6 +203,9 @@ export function McpPanel(): ReactElement {
                 <div className="jj-mcp-head">
                   <strong>{s.name}</strong>
                   <span className={`jj-mcp-state jj-mcp-state-${s.state}`}>{STATE_LABEL[s.state]}</span>
+                  <span className="jj-mcp-source">
+                    {s.source === 'plugin' ? `插件 ${s.pluginName ?? ''}` : '你自己配置'}
+                  </span>
                 </div>
                 <div className="jj-mcp-cmd">
                   <code>
@@ -216,6 +219,12 @@ export function McpPanel(): ReactElement {
                   发现工具 {s.discoveredTools} 个 · 已启用 {s.enabledTools.length} 个
                   {s.lastError ? ` · ${s.lastError}` : ''}
                 </div>
+                {s.disabledByPlugin && (
+                  <p className="p0-warn">
+                    插件清单把它标成了 <code>enabled: false</code> —— 已停用，不能连接。
+                    要用请改那个插件的清单。
+                  </p>
+                )}
                 <div className="w2-actions">
                   {s.state === 'connected' || s.state === 'awaiting_approval' ? (
                     <button type="button" className="w2-btn" disabled={busy} onClick={() => void disconnect(s.id)}>
@@ -225,35 +234,46 @@ export function McpPanel(): ReactElement {
                     <button
                       type="button"
                       className="w2-btn-primary"
-                      disabled={busy}
+                      disabled={busy || s.disabledByPlugin}
+                      title={s.disabledByPlugin ? '插件清单里 enabled 为 false，已停用' : undefined}
                       onClick={() => void connect(s.id)}
                     >
                       连接
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="w2-btn"
-                    disabled={busy}
-                    onClick={() => {
-                      // 值不会回传到界面，这里只回填键名并留空值；不动这一段即保持原值
-                      const envText = s.envKeys.map((k) => `${k}=`).join('\n');
-                      setForm({
-                        id: s.id,
-                        name: s.name,
-                        command: s.command,
-                        argsText: s.args.join('\n'),
-                        envText,
-                        envBaseline: envText,
-                      });
-                    }}
-                  >
-                    编辑
-                  </button>
-                  <button type="button" className="w2-btn-danger" disabled={busy} onClick={() => void remove(s)}>
-                    删除
-                  </button>
+                  {s.source === 'user' && (
+                    <button
+                      type="button"
+                      className="w2-btn"
+                      disabled={busy}
+                      onClick={() => {
+                        // 值不会回传到界面，这里只回填键名并留空值；不动这一段即保持原值
+                        const envText = s.envKeys.map((k) => `${k}=`).join('\n');
+                        setForm({
+                          id: s.id,
+                          name: s.name,
+                          command: s.command,
+                          argsText: s.args.join('\n'),
+                          envText,
+                          envBaseline: envText,
+                        });
+                      }}
+                    >
+                      编辑
+                    </button>
+                  )}
+                  {s.source === 'user' && (
+                    <button type="button" className="w2-btn-danger" disabled={busy} onClick={() => void remove(s)}>
+                      删除
+                    </button>
+                  )}
                 </div>
+                {s.source === 'plugin' && (
+                  <p className="p0-subtitle">
+                    这个服务端由插件提供：<strong>不能在这里编辑或删除</strong> —— 它由插件清单决定，
+                    插件更新后会跟着变。连接与逐工具批准照常需要。
+                  </p>
+                )}
               </li>
             ))}
           </ul>

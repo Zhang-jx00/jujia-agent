@@ -62,7 +62,13 @@ mkdirSync(join(pluginDir, 'skills', 'my-check'), { recursive: true });
 writeFileSync(
   join(pluginDir, 'plugin.json'),
   JSON.stringify(
-    { name: 'my-team', version: '1.0.0', description: '端到端验证用插件', skills: 'skills' },
+    {
+      name: 'my-team',
+      version: '1.0.0',
+      description: '端到端验证用插件',
+      skills: 'skills',
+      mcpServers: { demo: { type: 'stdio', command: 'node', args: ['-v'] } },
+    },
     null,
     2,
   ),
@@ -217,7 +223,8 @@ try {
   if (mcpReady !== true) fail('MCP 页没有加载出新增表单', String(mcpReady).slice(0, 800));
   const mcp = await bodyText();
   if (!mcp.includes('新增服务端')) fail('MCP 页缺少新增表单', mcp.slice(0, 600));
-  if (!mcp.includes('还没有配置任何 MCP 服务端')) fail('MCP 空列表提示缺失', mcp.slice(0, 600));
+  if (!mcp.includes('插件 my-team')) fail('插件带来的服务端没有出现在 MCP 列表', mcp.slice(0, 900));
+  if (!mcp.includes('不能在这里编辑或删除')) fail('插件服务端没有标注不可编辑/删除', mcp.slice(0, 900));
   ok('MCP 页就绪');
 
   step('关闭应用：应干净退出（不留孤儿进程）');
