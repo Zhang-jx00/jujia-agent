@@ -1,45 +1,85 @@
 {
-  "note": "复核 018 · 对象：W11c（插件贡献的 MCP 服务端接入）。基线：W11c 主提交",
+  "note": "复核 019（补跑）· 对象：安全加固批次（审批硬软分级 / IPC 发送方校验 / 终端环境剔敏 / alwaysAsk 接通）。基线：本轮主提交",
   "mutations": [
     {
       "id": "M1",
-      "desc": "插件带来的服务端不再合并进列表（装了插件在 MCP 页看不见）",
-      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
-      "find": "    const external = this.deps.externalServers?.() ?? [];",
-      "replace": "    const external: ExternalMcpServer[] = [];",
-      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+      "desc": "「总是允许」重新能压掉硬询问（执行器忽略 bypassable）",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "    gate.action === 'ask' && gate.bypassable && (opts.alwaysAllow?.has(tool.name) ?? false);",
+      "replace": "    gate.action === 'ask' && (opts.alwaysAllow?.has(tool.name) ?? false);",
+      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
     },
     {
       "id": "M2",
-      "desc": "插件标成未启用的服务端仍可连接（插件等于被迫放行）",
-      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
-      "find": "    if (target.kind === 'plugin' && target.external.disabledByPlugin) {",
-      "replace": "    if (false) {",
-      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+      "desc": "执行类命令降级为软 ask（等于放行任意命令）",
+      "file": "packages/agent-core/src/permissions/policy.ts",
+      "find": "  return { action: 'ask', reason: '执行命令，需确认', risk: 'high', bypassable: false };",
+      "replace": "  return { action: 'ask', reason: '执行命令，需确认', risk: 'high', bypassable: true };",
+      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
     },
     {
       "id": "M3",
-      "desc": "允许在应用里修改插件带来的服务端（插件一更新就被覆盖，用户以为丢了配置）",
-      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
-      "find": "    if (parsed.id !== undefined && parsed.id.startsWith(PLUGIN_SERVER_ID_PREFIX)) {",
-      "replace": "    if (false) {",
-      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+      "desc": "敏感路径降级为软 ask",
+      "file": "packages/agent-core/src/permissions/policy.ts",
+      "find": "        reason: `目标是敏感路径（${why}），需人工确认`,\n        risk: 'high',\n        bypassable: false,",
+      "replace": "        reason: `目标是敏感路径（${why}），需人工确认`,\n        risk: 'high',\n        bypassable: true,",
+      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
     },
     {
       "id": "M4",
-      "desc": "允许删除插件带来的服务端",
-      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
-      "find": "    this.assertEditable(id, '删除');",
-      "replace": "    // 变异：不保护删除",
-      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+      "desc": "用户自己写的 ask 规则降级为软 ask",
+      "file": "packages/agent-core/src/permissions/policy.ts",
+      "find": "    return { action: 'ask', reason: matched.reason, risk: 'high', bypassable: false };",
+      "replace": "    return { action: 'ask', reason: matched.reason, risk: 'high', bypassable: true };",
+      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
     },
     {
       "id": "M5",
-      "desc": "插件服务端的来源标注丢失（看不出它来自哪个插件）",
-      "file": "apps/desktop/src/main/mcp/mcp-service.ts",
-      "find": "      pluginName: external.pluginName,",
-      "replace": "      pluginName: null,",
-      "test": "apps/desktop/src/main/mcp/mcp-service.test.ts"
+      "desc": "硬 ask 被回答「总是允许」时又写进会话白名单（产生隐性放行）",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "      if (gate.action === 'ask' && gate.bypassable) {\n        opts.alwaysAllow?.add(tool.name);\n      }",
+      "replace": "      opts.alwaysAllow?.add(tool.name);",
+      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
+    },
+    {
+      "id": "M6",
+      "desc": "高危清单不再传给策略层（alwaysAsk 又变死代码）",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "    ...(opts.alwaysAsk ? { alwaysAsk: opts.alwaysAsk } : {}),",
+      "replace": "    // 变异：不传高危清单",
+      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
+    },
+    {
+      "id": "M7",
+      "desc": "IPC 发送方校验永远放行",
+      "file": "apps/desktop/src/main/security.ts",
+      "find": "export function isTrustedSenderUrl(senderUrl: string, devServerUrl?: string, rendererDir?: string): boolean {\n  if (senderUrl === '') return false;",
+      "replace": "export function isTrustedSenderUrl(senderUrl: string, devServerUrl?: string, rendererDir?: string): boolean {\n  if (true) return true;\n  if (senderUrl === '') return false;",
+      "test": "apps/desktop/src/main/security.test.ts"
+    },
+    {
+      "id": "M8",
+      "desc": "file: 恢复无条件放行（任意本地页都能占住主窗口）",
+      "file": "apps/desktop/src/main/security.ts",
+      "find": "      if (rendererDir === undefined) return false;",
+      "replace": "      return true;",
+      "test": "apps/desktop/src/main/security.test.ts"
+    },
+    {
+      "id": "M9",
+      "desc": "终端环境不再剔除敏感变量（模型跑一句 env 就能带走密钥）",
+      "file": "packages/agent-core/src/terminal/terminal.ts",
+      "find": "    if (SENSITIVE_ENV_RE.test(k)) continue;",
+      "replace": "    // 变异：不剔除敏感变量",
+      "test": "packages/agent-core/src/terminal/terminal.test.ts"
+    },
+    {
+      "id": "M10",
+      "desc": "代理变量不再脱掉内嵌的用户名口令",
+      "file": "packages/agent-core/src/terminal/terminal.ts",
+      "find": "    env[k] = PROXY_ENV_RE.test(k) ? stripUrlCredentials(v) : v;",
+      "replace": "    env[k] = v;",
+      "test": "packages/agent-core/src/terminal/terminal.test.ts"
     }
   ]
 }

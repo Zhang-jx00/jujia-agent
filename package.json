@@ -26,7 +26,8 @@
     "check:pty": "node apps/desktop/scripts/check-pty.mjs",
     "license:check": "node apps/desktop/scripts/license-check.mjs",
     "e2e": "npm run e2e --workspace @jujia/desktop",
-    "app": "npm run app --workspace @jujia/desktop"
+    "app": "npm run app --workspace @jujia/desktop",
+    "mut": "node scripts/mutation-check.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
