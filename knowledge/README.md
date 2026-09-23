@@ -1,59 +1,90 @@
 # 俱佳Agent · 统一知识库
 
-> 一个文件夹收拢所有「检索到的知识、方案与计划」的**知识部分**；
-> 「怎么做」的规划与开发计划在 `../docs/`，需求达成度评估在 `../review/`。
+> 一个文件夹收拢所有「检索到的知识、方案」的**知识部分**。
+> 「怎么做」的规划在 `../docs/`；当前进度以 `../docs/PROGRESS.md` 为准；排期见 `../docs/TRACK-ROADMAP.md`。
+
+## 体系导航（四层，从"要学什么"到"我们决定怎么做"）
+
+```
+docs/LEARNING-MAP.md     ① 地图：108 个领域 + 学习顺序（先看这个知道范围）
+        ↓
+sources/S1–S11           ② 来源：每个领域 T1–T5 五类权威来源（要看证据时来这里）
+        ↓
+SOURCE-MATRIX.md         ③ 矩阵：108 领域 × 5 类来源的逐格覆盖（脚本生成，查缺口）
+        ↓
+findings/F1–F7           ④ 结论：按知识簇归纳的发现（含取舍与依据）
+        ↓
+REPORT.md                ⑤ 综合：12 条核心结论 + 架构建议（只有时间看一份时看它）
+cards/001–016            ⑥ 落地：对俱佳Agent 的具体决定（开发前按编号速览）
+```
+
+**领域数口径**：当前 **108 个**（`SOURCE-MATRIX.md` 与 `LEARNING-MAP.md` 一致）；
+本文件早期写过的"89+"是扩领域之前的旧口径，已作废。
 
 ## 目录导览
 
-| 路径 | 内容 | 怎么读 |
-|------|------|--------|
-| `BRIEF.md` | 调研任务书（问题定义、范围、8 个研究角度） | 想了解调研边界时读 |
-| `REPORT.md` | **综合调研报告**（12 条核心结论 + 架构建议 + 来源清单） | **先读这个** |
-| `SOURCE-MATRIX.md` | **89+ 领域 × 5 类来源的逐格矩阵**（脚本自动生成） | 查某个领域有哪些权威来源 |
-| `sources/` | 五类来源补齐 S1–S11（每领域 T1–T5 五类权威来源） | 按簇找课程 / 社区讨论 / 源码 |
-| `cards/` | 知识卡片（对俱佳Agent 的落地决定，编号递增） | 开发前按编号速览 |
+| 路径 | 内容 | 什么时候读 |
+|------|------|------------|
+| `BRIEF.md` | 调研任务书（问题定义、范围、研究角度） | 想了解调研边界时 |
+| `REPORT.md` | **综合调研报告**（核心结论 + 架构建议 + 来源清单） | 只看一份时读它 |
+| `SOURCE-MATRIX.md` | **108 领域 × 5 类来源逐格矩阵**（`scripts/gen_matrix.py` 生成，勿手改） | 查某领域有哪些权威来源 / 查缺口 |
+| `sources/S1–S11` | 五类来源补齐（每领域 T1–T5） | 按簇找官方文档 / 源码 / 论文 / 课程 / 社区 |
+| `findings/F1–F7` | 按知识簇的发现（7 个簇） | 想知道"结论是什么、依据是什么" |
+| `cards/` | 知识卡片：对俱佳Agent 的落地决定（清单见下） | 开发前速览（编号递增） |
+
+## 知识卡片清单（开发前速览）
+
+| 卡片 | 主题 |
+|------|------|
+| `cards/001-agent-loop.md` | Agent Loop 三分支 |
+| `cards/002-permission-no-auto-reject.md` | 权限请求禁止自动拒绝 |
+| `cards/003-atomic-json-store.md` | JSON 状态原子写 |
+| `cards/004-streaming-ui-budget.md` | 流式 UI 性能预算 |
+| `cards/005-skills-vs-mcp.md` | Skills ≠ MCP（职责分离） |
+| `cards/006-memory-tiers.md` | 记忆分层与压缩 |
+| `cards/007-electron-p0-gotchas.md` | P0 踩坑：`ELECTRON_RUN_AS_NODE` 与包外部化 |
+| `cards/008-streaming-sse-pitfalls.md` | SSE 边界、尾包与「中止不是异常」 |
+| `cards/009-vendor-api-verification-2026-09.md` | 厂商 API 核实记录（含废弃项） |
+| `cards/010-path-sandbox-windows.md` | 路径沙箱：字符串前缀匹配一定会出事 |
+| `cards/011-streaming-tool-calls-rules.md` | 流式 tool_calls 拼装的四个陷阱 |
+| `cards/012-permission-tiering-2026.md` | 权限分级：处处都问 = 没问 |
+| `cards/014-motion-and-fluidity-2026.md` | 动效铁律：加了动效反而更卡 |
+| `cards/015-memory-and-context-2026.md` | 记忆管理：AGENTS.md 只写不可见的逻辑 |
+| `cards/016-electron-terminal-selection.md` | 终端选型：直接用官方 `node-pty` |
+
+> 编号 013 空缺：该卡片的内容已并入 `cards/015` 与 `review/REVIEW-LOG.md` 的对应复核记录，
+> 不再单独存在（**编号不回收**，避免历史引用指向新内容）。
 
 ## 知识簇 → 文件对照
 
-| 簇 | 知识簇 | findings | sources |
-|----|--------|----------|---------|
-| A | Agent 核心机制与设计模式（#1–10） | `findings/F1.md` | `sources/S1-agent-core.md §1–10` |
-| B | 多 Agent / 子代理 / 编排（#11–18） | `findings/F2.md` | `sources/S1-agent-core.md §11–18` |
-| C | 技能 / 钩子 / 定时 / 连接 / MCP（#19–30） | `findings/F3.md` | `sources/S2-extensions.md §1–12` |
-| D | 记忆与上下文管理（#31–40） | `findings/F4.md` | `sources/S3-memory.md §1–10` |
-| E | 系统架构与 Electron 工程（#41–52） | `findings/F5.md` | `sources/S4-architecture.md §1–12` |
-| F | 性能 / 缓存 / 预加载 / 流畅（#53–62） | `findings/F6.md` | `sources/S5-performance.md §1–10` |
-| G | UI / UX / 视觉 / 动效 / 组件卡片（#63–74） | `findings/F7.md` | `sources/S6-uiux.md §1–12` |
-| H | 模型适配与产品工程（#75–84） | `findings/F8.md` | `sources/S7-model.md §1–10` |
-| I | 预加载 / 启动 / 体积 / 内存 / 功耗（#85–89） | — | `sources/S8-preload-appopt.md` |
-| J | 无限画布与工作流节点编排（#86–94） | — | `sources/S9-canvas-workflow.md` |
-| K | 内置浏览器与文档查看（#95–99） | — | `sources/S10-browser-docs.md` |
-| L | 多模态能力适配与视频生成（#100–104） | — | `sources/S11-multimodal-video.md` |
+| 簇 | 知识簇 | 领域编号 | findings | sources |
+|----|--------|----------|----------|---------|
+| A | Agent 核心机制与设计模式 | #1–10 | `findings/F1.md` | `sources/S1-agent-core.md §1–10` |
+| B | 多 Agent / 子代理 / 编排 | #11–18 | `findings/F2.md` | `sources/S1-agent-core.md §11–18` |
+| C | 技能 / 钩子 / 定时 / 连接 / MCP | #19–30 | `findings/F3.md` | `sources/S2-extensions.md §1–12` |
+| D | 记忆与上下文管理 | #31–40 | `findings/F4.md` | `sources/S3-memory.md §1–10` |
+| E | 系统架构与 Electron 工程 | #41–52 | `findings/F5.md` | `sources/S4-architecture.md §1–12` |
+| F | 性能 / 缓存 / 预加载 / 流畅 | #53–62 | `findings/F6.md` | `sources/S5-performance.md §1–10` |
+| G | UI / UX / 视觉 / 动效 | #63–74 | `findings/F7.md` | `sources/S6-uiux.md §1–12` |
+| H | 模型适配与产品工程 | #75–84 | —（**未单独成文**，结论并入 `REPORT.md`） | `sources/S7-model.md §1–10` |
+| I | 预加载 / 启动 / 体积 / 内存 / 功耗 | #85–89 | — | `sources/S8-preload-appopt.md` |
+| J | 无限画布与工作流节点编排 | #86–94 | — | `sources/S9-canvas-workflow.md` |
+| K | 内置浏览器与文档查看 | #95–99 | — | `sources/S10-browser-docs.md` |
+| L | 多模态能力适配与视频生成 | #100–104 | — | `sources/S11-multimodal-video.md` |
+
+> H 簇此前在本表里指向一份 **F8** 文档，但该文件**从未存在**（悬空引用，全项目排查时发现，编号 017）。
+> 现按事实改写为"未单独成文"。**宁可写"没有"，也不留一个点不开的链接。**
 
 ## 五类权威信息来源（T1–T5）
 
-每个知识领域要求覆盖：
+每个知识领域要求覆盖：**T1 官方文档/规范** · **T2 开源项目源码（指到目录/文件）** ·
+**T3 论文/权威报告/官方工程博客** · **T4 在线课程/系统教程** · **T5 技术社区讨论**。
 
-1. **T1 权威官方文档 / 官方规范**
-2. **T2 开源项目源码或仓库**（指到具体目录/文件）
-3. **T3 论文 / 权威技术报告 / 官方工程博客**
-4. **T4 在线课程 / 系统教程 / 交互式教学**
-5. **T5 技术社区讨论**（GitHub Issues、Stack Overflow、Reddit、HN、掘金/知乎）
-
-找不到合格来源的格子**留空并写明原因**，绝不编造——这是本知识库的第一纪律。
-
-## 真实性保障
-
-- 所有 URL 均来自实际检索或实际打开的页面；`canonical` = 高度稳定的经典权威资源。
-- 全量 URL 曾用脚本逐一做 HTTP 状态校验；GitHub 在本环境被整体阻断（curl 返回 000，连首页亦然），
-  属环境限制而非链接失效，已在评估报告中说明。
-- 已修复的问题：26 处「URL 后粘连中文注释」导致链接不可点击；4 处已核实 404 的错误路径
-  （openai-agents-python 文档下划线、agentskills.io 快速上手页）。
-- 修复脚本：`../scripts/fix_source_urls.py`；覆盖度统计：`../scripts/count_coverage.py`；
-  矩阵生成：`../scripts/gen_matrix.py`。
+**找不到合格来源的格子留空并写明原因，绝不编造** —— 这是本知识库的第一纪律。
 
 ## 维护约定
 
-1. 新增知识 → 先在 `sources/` 补来源，再在 `cards/` 写落地决定，卡片编号递增。
-2. 修改任何「覆盖度自评」表后，重跑 `../scripts/gen_matrix.py` 重新生成 `SOURCE-MATRIX.md`。
-3. **每次任务收尾必须执行 `python ../scripts/cleanup.py`** 清理临时文件与陈旧记录（用户约定，已记入项目记忆）。
+1. 新增知识 → 先在 `sources/` 补来源，再在 `cards/` 写落地决定（编号递增）；**不要新增没有来源的结论**。
+2. 改过任何"覆盖度自评"表后，重跑 `python scripts/gen_matrix.py` 重新生成 `SOURCE-MATRIX.md`。
+3. 统计一律用脚本（`scripts/count_coverage.py`），**不采信正文里的口头汇总数字**。
+4. 任务收尾执行 `python scripts/cleanup.py`（项目约定）。

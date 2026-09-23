@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decideGate, fatigueHint, sensitiveReason, type GateContext } from './policy';
+import { decideGate, sensitiveReason, type GateContext } from './policy';
 
 /**
  * 权限策略的验收重点：
@@ -119,15 +119,11 @@ describe('模式语义', () => {
   });
 });
 
-describe('审批疲劳防护', () => {
-  it('连续少于 3 次不提示', () => {
-    expect(fatigueHint(1, 'write_file')).toBeNull();
-    expect(fatigueHint(2, 'write_file')).toBeNull();
-  });
-
-  it('连续 3 次以上提示改用规则或模式', () => {
-    const hint = fatigueHint(4, 'write_file');
-    expect(hint).toContain('总是允许');
-    expect(hint).toContain('acceptEdits');
-  });
-});
+/*
+ * 「审批疲劳防护」的两条用例已随该函数一起移除（轨道回归计划 2 · R-04）。
+ *
+ * 原因：`fatigueHint` **从未被任何生产代码调用** —— 留着函数 + 留着测试，
+ * 会让人以为"疲劳防护已经做了"。真实的缓解来自**硬/软 ask 分级**与"只读不打扰"。
+ * 若要真正做这个提示（在审批弹窗里显示、main 侧记录连续批准次数），
+ * 按 `docs/TRACK-ROADMAP.md` 的 R-04 重新实现并补测试 —— **不要只把函数加回来**。
+ */

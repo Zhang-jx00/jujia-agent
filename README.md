@@ -35,8 +35,9 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 有副作用的动作一律先问。所有数据落在本机一个数据根目录里。
 
 **5. 把"可验证"当产品特性，而不是开发者的自觉。**
-- 每阶段做**变异测试**（故意改坏实现，看测试红不红）—— 累计 40+ 例全部被拦住，
-  并且真的抓到过三次"测试看着绿、其实什么都没锁住"的漏洞；
+- 每阶段做**变异测试**（故意改坏实现，看测试红不红）—— 累计例数与逐轮明细见
+  [`docs/PROGRESS.md`](docs/PROGRESS.md) 与 [`review/REVIEW-LOG.md`](review/REVIEW-LOG.md)（**数字只写一处**，避免漂移），
+  并且真的抓到过多次"测试看着绿、其实什么都没锁住"的漏洞（逐次见复核台账）；
 - 端到端用**真子进程**（真 spawn、真超时、真杀进程树），不靠假实现推断结论；
 - 有一条**无头 dev 管线探针**，专门防"构建全绿但开发模式黑屏"这类只在一种模式下暴露的问题；
 - 复核台账（`review/REVIEW-LOG.md`）**公开在仓库里**，包括未通过项与原因。
@@ -198,12 +199,16 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 | `docs/COVERAGE-MATRIX.md` | **领域覆盖矩阵**：60+ 领域逐项落点 / 验收 / 状态（含 6 项补缺） |
 | `knowledge/cards/016-electron-terminal-selection.md` | Electron 终端选型调研（含 8 个来源与结论） |
 | `docs/SETUP-TERMINAL.md` | **在自己终端里怎么跑命令**（装内置终端的依赖 + 自检 + 常见报错） |
-| `docs/PROGRESS.md` | **进度盘点**：已完成 / 未完成 / 被阻塞项 |
-| `docs/PERF-BUDGET.md` | **性能预算与实测**（冷启动/可交互 预算 + 实测值 + 待办） |
-| `docs/UX-AUDIT.md` | **体验细节排查表**（62 项：动效衔接/加载/响应/反馈/可达性/稳定性） |
-| `docs/PLAN.md` | **开发计划（唯一执行依据，v3）**：目标与范围、选型、架构、模块、阶段任务与验收、风险、设计稿 |
+| `docs/PROGRESS.md` | **进度盘点（状态的唯一权威）**：已完成 / 未开始 / 被阻塞 |
+| `docs/TRACK-ROADMAP.md` | **排期与里程碑编号规范**（M1–M23）+ 修复队列 + 开发队列 |
+| `docs/TRACK-PLANS.md` | 十条轨道的分类法与**历史成果归类映射** |
+| `review/TRACK-SWEEP-1.md` | **全项目排查报告**（轨道排查计划 1：问题清单与证据） |
+| `review/REVIEW-LOG.md` | 每轮复核台账（更早在 `review/REVIEW-LOG-ARCHIVE.md`） |
+| `docs/CHANGELOG-ARCHIVE.md` | 变更记录归档（主 `CHANGELOG.md` 只留最近若干条） |
+| `docs/PERF-BUDGET.md` | **性能预算与实测**（含采样铁律） |
+| `docs/UX-AUDIT.md` | **体验细节排查表**（动效/加载/响应/反馈/可达性/稳定性） |
+| `docs/PLAN.md` | **开发计划**：目标与范围、选型、架构、模块、阶段任务与验收、风险 |
 | `docs/LEARNING-MAP.md` | 108 个知识领域的地图与学习顺序 |
-| `review/EVALUATION.md` | **需求达成度评估**：此前运行各项要求的达成/未达成明细 |
 | `knowledge/` | ★ 统一知识库（索引见 `knowledge/README.md`） |
 | `knowledge/SOURCE-MATRIX.md` | 108 领域 × 5 类来源的逐格矩阵（脚本自动生成） |
 | `knowledge/sources/` | S1–S11：每领域 T1–T5 五类权威来源 |
@@ -230,12 +235,12 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 | `npm run test` | 单元测试（vitest） |
 | `python scripts/cleanup.py` | 任务收尾清理（项目约定） |
 
-## 快速开始
+## 想在仓库里继续开发
 
-1. 阅读 `review/EVALUATION.md` 了解「已完成什么、还缺什么」
-2. 按 `docs/PLAN.md` §5–6 执行（阶段划分与逐周任务/验收）
-3. 按 `docs/LEARNING-MAP.md` 从 Electron + 流式模型开始
-4. 实现顺序严格按 PLAN 的 W1 → W16
+1. 读 [`docs/PROGRESS.md`](docs/PROGRESS.md) 知道**做到哪了**（状态唯一权威）
+2. 读 [`docs/TRACK-ROADMAP.md`](docs/TRACK-ROADMAP.md) 知道**下一步做什么**（编号规范 + 修复队列 + 开发队列）
+3. 读 [`docs/TRACK-PLANS.md`](docs/TRACK-PLANS.md) 知道**改动该记在哪条轨道**（记录规则）
+4. 提交前跑门禁（清单见 `docs/PROGRESS.md`）；**未跑成的项要如实标注**，不要写"应该没问题"
 
 ## 核心能力路线
 

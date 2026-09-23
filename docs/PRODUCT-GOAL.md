@@ -41,7 +41,7 @@
 |------|------|------|------|
 | M13 | 主题与背景高度自定义（已**并入 M23 外观系统**，不做两个模块） | W17→W23 | 改设置立即生效且重启保留 |
 | M14 | **多子 agent 编排**（并发派发、任务分工、结果汇总、各自独立权限） | W18 | 一次任务可并行派 3 个子代理并汇总 |
-| M15 | **自定义权限规则表**（allow/deny/ask + 参数 glob，即时生效） | W5c | 写一条 deny 规则后立刻被拦 |
+| M15 | **自定义权限规则表**（allow/deny/ask，**按工具名 glob** 即时生效；按参数 glob 刻意未做，理由见 CHANGELOG v0.14.0） | W5c | 写一条 deny 规则后立刻被拦 |
 | M16 | **钩子七类齐备**（SessionStart / UserPromptSubmit / PreToolUse / PermissionRequest / PostToolUse / PostToolUseFailure / Stop） | W5d | 七类均可挂载并生效 |
 | M17 | **长任务与断点续跑**（后台执行、中断恢复、进度可见） | W18 | 中断后可继续，不丢上下文 |
 | M18 | **启动性能预算与预加载策略** | W7 | 冷启动 < 1.5s、可交互 < 1s |

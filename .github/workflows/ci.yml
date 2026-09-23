@@ -30,5 +30,12 @@ jobs:
       - name: 单元测试
         run: npm run test
 
+      # 文档一致性（轨道回归计划 2 · R-06 补上）
+      # 它便宜且确定：只读文件做结构比对，不需要构建 —— 正好适合 CI。
+      # **CI 不跑什么，也如实写在这里**：smoke / perf / e2e 需要真实 Electron 与图形环境，
+      # 在 GitHub 托管的无头环境里不稳定，因此**只在本地门禁跑**（见 docs/PROGRESS.md 的门禁清单）。
+      - name: 文档一致性
+        run: npm run check:docs
+
       - name: 构建（main / preload / renderer）
         run: npm run build

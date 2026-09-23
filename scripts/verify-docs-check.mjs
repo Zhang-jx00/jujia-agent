@@ -66,7 +66,7 @@ const cases = [
   {
     name: 'e2e 步数与脚本不一致',
     file: 'README.md',
-    from: '13 步全自动',
+    from: '14 步全自动',
     to: '99 步全自动',
     expect: 'e2e 步数与脚本一致',
   },

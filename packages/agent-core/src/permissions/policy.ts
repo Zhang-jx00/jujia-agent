@@ -16,16 +16,23 @@ import { matchRules, type PermissionRule } from './rules';
  * 本模块是**纯函数**：输入模式与调用上下文，输出「放行 / 询问 / 拒绝」，可单测、无副作用。
  */
 
-export type PermissionMode =
-  | 'default'
-  /** 自动接受工作区内的文件编辑（等价于业界 acceptEdits），exec 仍需询问 */
-  | 'acceptEdits'
-  /** 只读模式：写与执行一律拒绝 */
-  | 'plan'
-  /** 拒绝而非询问（锁定环境）；注意这与本项目「不静默自动拒绝」的默认取向相反，需用户显式选择 */
-  | 'dontAsk'
-  /** 全部放行（危险，仅在沙箱内使用；需要一次显式确认才可开启） */
-  | 'bypassPermissions';
+/**
+ * 权限模式清单（**唯一来源**）。
+ *
+ * 为什么用 `as const` 数组再推导类型：`shared-ipc` 里有一份**独立定义**的 zod 枚举
+ * （那个包刻意不依赖 agent-core，见其 `contracts.ts` 的说明）。
+ * 两个包各自定义是设计选择，但**成员必须完全一致** —— 靠 `policy-consistency.test.ts`
+ * 的一致性锁保证，而不是靠人记得同步（此前正是"两处各写一份、谁也不知道有没有漂"）。
+ */
+export const PERMISSION_MODES = [
+  'default',
+  'acceptEdits',
+  'plan',
+  'dontAsk',
+  'bypassPermissions',
+] as const;
+
+export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
 export type RiskLevel = 'low' | 'medium' | 'high';
 
@@ -193,20 +200,14 @@ export function decideGate(ctx: GateContext): GateDecision {
   return { action: 'ask', reason: '执行命令，需确认', risk: 'high', bypassable: false };
 }
 
-export const MODE_LABEL: Record<PermissionMode, string> = {
-  default: '默认（写与执行需确认）',
-  acceptEdits: '自动接受工作区内文件编辑',
-  plan: '计划（只读）',
-  dontAsk: '拒绝而不询问',
-  bypassPermissions: '全部放行（危险）',
-};
-
-/**
- * 审批疲劳防护（核实到的「engagement gate」思路）：
- * 连续同类询问达到阈值时，提示 UI 引导用户改用**规则**而不是继续逐个点允许。
- * 返回 null 表示无需提示。
+/*
+ * 已删除（轨道回归计划 2 · R-04/R-05，2026-09-23）：
+ *
+ * - `MODE_LABEL`：界面文案放错了地方（本模块自称纯函数层），且**没有任何生产调用方**
+ *   —— 渲染层自己有一份并且用的是它。死导出只会让人以为"改了这里就改了界面"。
+ * - `fatigueHint`：审批疲劳提示**从未接线**（没有任何调用方）。审计把它记为"防护缺失"，
+ *   但如实判断是：疲劳的缓解已由**硬/软 ask 分级**（执行类每次必问、普通写可「总是允许」）
+ *   与"只读不打扰"承担；再挂一个没人调用的提示函数不是防护，是**看起来有防护**。
+ *   若将来要真做，应做在审批弹窗里（需要 main 侧记录连续批准次数），并配测试。
+ *   → 已登记到 `docs/TRACK-ROADMAP.md`，需要时按那条做，而不是留个死函数假装做了。
  */
-export function fatigueHint(consecutiveSameTool: number, toolName: string): string | null {
-  if (consecutiveSameTool < 3) return null;
-  return `你已连续 ${consecutiveSameTool} 次批准 ${toolName}。若这是常规操作，建议改用「本次会话总是允许」，或切换到 acceptEdits 模式；逐个点允许容易漏看风险。`;
-}

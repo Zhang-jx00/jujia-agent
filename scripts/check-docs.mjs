@@ -74,14 +74,63 @@ const allScripts = new Set([
 {
   const docs = readdirSync(join(repoRoot, 'docs')).filter((f) => f.endsWith('.md'));
   // 白名单：内部/过程性文档不要求出现在导航里
-  const internal = new Set(['PROGRESS.md', 'PLAN.md', 'TEST-POLICY.md']);
+  const internal = new Set([
+    'PROGRESS.md',
+    'PLAN.md',
+    'TEST-POLICY.md',
+    // 归档文件：由主文件（CHANGELOG/REVIEW-LOG）指针引用，不作为对外导航项
+    'CHANGELOG-ARCHIVE.md',
+  ]);
   const missing = docs.filter((f) => !internal.has(f) && !readme.includes(`docs/${f}`));
   report('docs/ 下的文档都在 README 导航里（或已列为内部文档）', missing.length === 0, `未挂出：${missing.join(', ')}`);
 }
 
 /* ------------------------------------------------------------------ *
- * 4. 结构性事实：钩子事件数 / 权限模式数 / e2e 步数
+ * 3b. 孤儿文档检测（2026-09-23 加，清理要可持续）
+ *
+ * 规则：`docs/` 与 `review/` 下的 .md 必须**至少被别的文件引用一次**（或用中文名/路径出现在
+ * 某处），否则就是"写了没人看得到"的死文档 —— 这类文件越积越多，最后没人敢删。
+ * 明确列进 INTERNAL 的除外（过程性文件，允许不被引用）。
  * ------------------------------------------------------------------ */
+
+{
+  const INTERNAL = new Set([
+    'docs/PROGRESS.md', // 状态权威，被 check-docs 自己读
+    'review/REVIEW-LOG.md', // 复核台账，按惯例不互相引用
+    'review/TRACK-SWEEP-1.md', // 排查报告，可能只在 CHANGELOG 提及
+    'docs/DEPENDENCY-LICENSES.md', // 自动生成
+  ]);
+
+  const scanDirs = ['docs', 'review'];
+  const mdFiles = [];
+  for (const dir of scanDirs) {
+    for (const name of readdirSync(join(repoRoot, dir))) {
+      if (name.endsWith('.md')) mdFiles.push(`${dir}/${name}`);
+    }
+  }
+
+  // 引用来源：仓库内所有 .md 的正文（含 README）——用相对路径或文件名匹配
+  const allText = [
+    readme,
+    read('CONTRIBUTING.md'),
+    read('SECURITY.md'),
+    read('CHANGELOG.md'),
+    ...mdFiles.map((f) => read(f)),
+  ].join('\n');
+
+  const orphans = mdFiles.filter((f) => {
+    if (INTERNAL.has(f)) return false;
+    const base = f.split('/')[1] ?? f;
+    // 被提到即算被引用（`docs/X.md` 或 `X.md`）
+    return !allText.includes(f) && !allText.includes(base);
+  });
+
+  report(
+    'docs/ 与 review/ 下没有"没人引用"的孤儿文档',
+    orphans.length === 0,
+    `这些文件没有任何地方引用（要么挂进导航，要么删/归档）：${orphans.join(', ')}`,
+  );
+}
 
 {
   const hookTypes = read('packages/agent-core/src/hooks/types.ts');
@@ -163,7 +212,88 @@ const allScripts = new Set([
 }
 
 /* ------------------------------------------------------------------ *
+ * 5b. 版本号一致（轨道回归计划 2 · R-07）
+ *
+ * 此前：`package.json` 0.0.0 · desktop 0.14.0 · CHANGELOG 已到 v0.25.0 —— 三处互不相同，
+ * 安装包名字、README 阶段、变更记录对不上号。这里把"应用版本 = 最新变更记录版本"钉住。
+ * ------------------------------------------------------------------ */
+
+{
+  const desktopVersion = JSON.parse(read('apps/desktop/package.json')).version;
+  const latest = /^## \[v(\d+\.\d+\.\d+)/m.exec(read('CHANGELOG.md'))?.[1];
+  report(
+    '应用版本号 = 最新变更记录版本',
+    latest !== undefined && desktopVersion === latest,
+    `apps/desktop/package.json = ${String(desktopVersion)}；CHANGELOG 最新 = ${latest ?? '(未找到)'}`,
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 5. 门禁清单：命令必须真实存在；**"N件套"这类数字只允许出现在 PROGRESS 一处**
+ * ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ *
+ * 3c. 知识库：孤儿文件 + 悬空引用（2026-09-23 加）
+ *
+ * 排查时在这里抓到过 `findings/F8.md` —— **被索引引用但文件根本不存在**。
+ * 这类"点不开的链接"比缺文档更坏：读者会以为是自己权限/路径的问题。
+ * ------------------------------------------------------------------ */
+
+{
+  const knowRoot = join(repoRoot, 'knowledge');
+  const collect = (dir, prefix = '') => {
+    const out = [];
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) out.push(...collect(join(dir, e.name), `${prefix}${e.name}/`));
+      else if (e.name.endsWith('.md')) out.push(`knowledge/${prefix}${e.name}`);
+    }
+    return out;
+  };
+  const files = existsSync(knowRoot) ? collect(knowRoot) : [];
+  const knowIndex = read('knowledge/README.md');
+  const allText = [readme, read('docs/PROGRESS.md'), read('docs/LEARNING-MAP.md'), knowIndex].join('\n');
+
+  const orphans = files.filter((f) => {
+    const base = f.split('/').pop() ?? f;
+    if (f === 'knowledge/README.md' || f === 'knowledge/BRIEF.md') return false; // 入口/任务书
+    return !allText.includes(base);
+  });
+  report(
+    'knowledge/ 下没有被引用的孤儿文件',
+    orphans.length === 0,
+    `这些知识文件没有任何索引引用它们：${orphans.join(', ')}`,
+  );
+
+  // 悬空引用：索引里提到的 .md 必须真实存在（限定在本仓库范围内）
+  const referenced = [...knowIndex.matchAll(/([A-Za-z0-9_-]+\.md)/g)].map((m) => m[1]);
+  const knownNames = new Set(files.map((f) => f.split('/').pop()));
+  // 允许跨目录引用（索引里会写 ../docs/X.md、scripts/x.py 这类）：在仓库内按文件名找一次
+  const allRepoFiles = [];
+  const walkRepo = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (['node_modules', '.git', '.trash', '.tmp'].includes(e.name)) continue;
+      const full = join(dir, e.name);
+      if (e.isDirectory()) walkRepo(full);
+      else allRepoFiles.push(e.name);
+    }
+  };
+  walkRepo(repoRoot);
+  const anywhere = new Set(allRepoFiles);
+  // 约定俗成的文件名：是"概念名"而不是本仓库的文档（工作区指令文件、技能文件等）
+  const CONVENTIONAL_NAMES = new Set(['AGENTS.md', 'README.md', 'SKILL.md', 'NOTES.md', 'plugin.json']);
+  const dangling = [...new Set(referenced)].filter(
+    (name) =>
+      !CONVENTIONAL_NAMES.has(name) && !knownNames.has(name) && !anywhere.has(name) && !existsSync(join(repoRoot, name)),
+  );
+  report(
+    'knowledge/README.md 里引用的文件都存在（无悬空引用）',
+    dangling.length === 0,
+    `索引提到但并不存在：${dangling.join(', ')}`,
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. 结构性事实：钩子事件数 / 权限模式数 / e2e 步数
  * ------------------------------------------------------------------ */
 
 const GATE = ['typecheck', 'lint', 'test', 'smoke', 'perf', 'e2e', 'check:docs'];
@@ -189,6 +319,9 @@ const expectedCn = CN_NUM[GATE.length];
     'SECURITY.md',
     ...readdirSync(join(repoRoot, 'docs'))
       .filter((f) => f.endsWith('.md'))
+      // **历史归档不算漂移**：归档里保留着当时的说法（"四件套""五件套"），
+      // 那是审计轨迹，改掉反而破坏证据。规则只约束"活的文档"。
+      .filter((f) => !f.includes('ARCHIVE'))
       .map((f) => 'docs/' + f),
   ];
   const violations = [];
