@@ -1,85 +1,61 @@
 {
-  "note": "复核 019（补跑）· 对象：安全加固批次（审批硬软分级 / IPC 发送方校验 / 终端环境剔敏 / alwaysAsk 接通）。基线：本轮主提交",
+  "note": "轨道回归计划 2 · R-03：给回归1 的修复补变异测试（配置白名单 / 会话淘汰 / 窗口收尾）。基线：本轮主提交",
   "mutations": [
     {
       "id": "M1",
-      "desc": "「总是允许」重新能压掉硬询问（执行器忽略 bypassable）",
-      "file": "packages/agent-core/src/tools/executor.ts",
-      "find": "    gate.action === 'ask' && gate.bypassable && (opts.alwaysAllow?.has(tool.name) ?? false);",
-      "replace": "    gate.action === 'ask' && (opts.alwaysAllow?.has(tool.name) ?? false);",
-      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
+      "desc": "配置写入不再筛白名单（越权字段被静默放行 —— S1 的原病）",
+      "file": "apps/desktop/src/main/config-write.ts",
+      "find": "    if (!writable.includes(key)) rejected.push(String(key));",
+      "replace": "    // 变异：不筛白名单",
+      "test": "apps/desktop/src/main/config-write.test.ts"
     },
     {
       "id": "M2",
-      "desc": "执行类命令降级为软 ask（等于放行任意命令）",
-      "file": "packages/agent-core/src/permissions/policy.ts",
-      "find": "  return { action: 'ask', reason: '执行命令，需确认', risk: 'high', bypassable: false };",
-      "replace": "  return { action: 'ask', reason: '执行命令，需确认', risk: 'high', bypassable: true };",
-      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
+      "desc": "白名单里去掉 permissionMode（权限模式又变成界面改不了）",
+      "file": "apps/desktop/src/main/config-write.ts",
+      "find": "  'permissionMode',\n];",
+      "replace": "  // 变异：去掉 permissionMode\n];",
+      "test": "apps/desktop/src/main/config-write.test.ts"
     },
     {
       "id": "M3",
-      "desc": "敏感路径降级为软 ask",
-      "file": "packages/agent-core/src/permissions/policy.ts",
-      "find": "        reason: `目标是敏感路径（${why}），需人工确认`,\n        risk: 'high',\n        bypassable: false,",
-      "replace": "        reason: `目标是敏感路径（${why}），需人工确认`,\n        risk: 'high',\n        bypassable: true,",
-      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
+      "desc": "越权字段只报第一个（用户要来回试好几次才知道还有哪些不能改）",
+      "file": "apps/desktop/src/main/config-write.ts",
+      "find": "    if (!writable.includes(key)) rejected.push(String(key));",
+      "replace": "    if (!writable.includes(key)) { rejected.push(String(key)); break; }",
+      "test": "apps/desktop/src/main/config-write.test.ts"
     },
     {
       "id": "M4",
-      "desc": "用户自己写的 ask 规则降级为软 ask",
-      "file": "packages/agent-core/src/permissions/policy.ts",
-      "find": "    return { action: 'ask', reason: matched.reason, risk: 'high', bypassable: false };",
-      "replace": "    return { action: 'ask', reason: matched.reason, risk: 'high', bypassable: true };",
-      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
+      "desc": "显式 undefined 也算一次写入（会产生「被拒绝」的假告警）",
+      "file": "apps/desktop/src/main/config-write.ts",
+      "find": "    if (patch[key] === undefined) continue; // 显式 undefined 不算一次写入",
+      "replace": "    // 变异：不跳过显式 undefined",
+      "test": "apps/desktop/src/main/config-write.test.ts"
     },
     {
       "id": "M5",
-      "desc": "硬 ask 被回答「总是允许」时又写进会话白名单（产生隐性放行）",
-      "file": "packages/agent-core/src/tools/executor.ts",
-      "find": "      if (gate.action === 'ask' && gate.bypassable) {\n        opts.alwaysAllow?.add(tool.name);\n      }",
-      "replace": "      opts.alwaysAllow?.add(tool.name);",
-      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
+      "desc": "会话淘汰不挑最久未用的（随便挑一个 → 可能把刚在用的会话删掉）",
+      "file": "apps/desktop/src/main/session-lru.ts",
+      "find": "    if (s.lastUsedAt < oldest.lastUsedAt) oldest = s;",
+      "replace": "    // 变异：不比较使用时间",
+      "test": "apps/desktop/src/main/session-lru.test.ts"
     },
     {
       "id": "M6",
-      "desc": "高危清单不再传给策略层（alwaysAsk 又变死代码）",
-      "file": "packages/agent-core/src/tools/executor.ts",
-      "find": "    ...(opts.alwaysAsk ? { alwaysAsk: opts.alwaysAsk } : {}),",
-      "replace": "    // 变异：不传高危清单",
-      "test": "packages/agent-core/src/tools/executor-hard-ask.test.ts"
+      "desc": "淘汰边界写成 >（上限差 1，实际会多留一个会话）",
+      "file": "apps/desktop/src/main/session-lru.ts",
+      "find": "  return count >= max;",
+      "replace": "  return count > max;",
+      "test": "apps/desktop/src/main/session-lru.test.ts"
     },
     {
       "id": "M7",
-      "desc": "IPC 发送方校验永远放行",
-      "file": "apps/desktop/src/main/security.ts",
-      "find": "export function isTrustedSenderUrl(senderUrl: string, devServerUrl?: string, rendererDir?: string): boolean {\n  if (senderUrl === '') return false;",
-      "replace": "export function isTrustedSenderUrl(senderUrl: string, devServerUrl?: string, rendererDir?: string): boolean {\n  if (true) return true;\n  if (senderUrl === '') return false;",
-      "test": "apps/desktop/src/main/security.test.ts"
-    },
-    {
-      "id": "M8",
-      "desc": "file: 恢复无条件放行（任意本地页都能占住主窗口）",
-      "file": "apps/desktop/src/main/security.ts",
-      "find": "      if (rendererDir === undefined) return false;",
-      "replace": "      return true;",
-      "test": "apps/desktop/src/main/security.test.ts"
-    },
-    {
-      "id": "M9",
-      "desc": "终端环境不再剔除敏感变量（模型跑一句 env 就能带走密钥）",
-      "file": "packages/agent-core/src/terminal/terminal.ts",
-      "find": "    if (SENSITIVE_ENV_RE.test(k)) continue;",
-      "replace": "    // 变异：不剔除敏感变量",
-      "test": "packages/agent-core/src/terminal/terminal.test.ts"
-    },
-    {
-      "id": "M10",
-      "desc": "代理变量不再脱掉内嵌的用户名口令",
-      "file": "packages/agent-core/src/terminal/terminal.ts",
-      "find": "    env[k] = PROXY_ENV_RE.test(k) ? stripUrlCredentials(v) : v;",
-      "replace": "    env[k] = v;",
-      "test": "packages/agent-core/src/terminal/terminal.test.ts"
+      "desc": "窗口关闭时不再收尾挂起的审批（挂 120 秒才超时）",
+      "file": "apps/desktop/src/main/index.ts",
+      "find": "    permissionBridge.cancelAll('窗口已关闭');",
+      "replace": "    // 变异：不收尾",
+      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
     }
   ]
 }

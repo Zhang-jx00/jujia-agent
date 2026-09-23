@@ -34,6 +34,15 @@ function stripComments(source: string): string {
 
 const ipcSource = stripComments(ipcRaw);
 
+/**
+ * 窗口关闭必须收尾挂起的审批（轨道回归计划 2 · R-03）。
+ *
+ * 背景：`PermissionBridge.cancelAll` 定义了却**从未被调用**（注释承诺"窗口销毁立即收尾"，
+ * 实际只能等满 120 秒超时）。这条锁住"确实有人在窗口 closed 时调它"。
+ */
+const indexRaw = readFileSync(fileURLToPath(new URL('./index.ts', import.meta.url)), 'utf8');
+const indexSource = stripComments(indexRaw);
+
 describe('工具注册表接线（防止各处各建一个）', () => {
   it('全进程只有一个注册表创建点', () => {
     const hits = ipcSource.split('createDefaultRegistry()').length - 1;
@@ -153,5 +162,22 @@ describe('工具注册表接线（防止各处各建一个）', () => {
 
   it('MCP 服务在应用退出时被释放（不留孤儿进程）', () => {
     expect(ipcSource).toContain('mcp.disposeAll();');
+  });
+});
+
+describe('轨道回归计划 1 的修复有接线锁', () => {
+  it('ipc.ts **真的调用** pickWritableConfig（而不是自己再写一遍白名单）', () => {
+    // 否则 config-write 的单测测的是死代码（双份真相）
+    expect(ipcSource).toContain('pickWritableConfig(parsed)');
+    expect(ipcSource).not.toContain('const WRITABLE_CONFIG_KEYS');
+  });
+
+  it('窗口 closed 时收尾挂起的审批请求', () => {
+    expect(indexSource).toContain('permissionBridge.cancelAll(');
+    // 必须挂在窗口关闭事件里，不能只是"某处出现了这行"
+    const closedIdx = indexSource.indexOf("win.on('closed'");
+    const callIdx = indexSource.indexOf('permissionBridge.cancelAll(');
+    expect(closedIdx).toBeGreaterThanOrEqual(0);
+    expect(callIdx).toBeGreaterThan(closedIdx);
   });
 });

@@ -44,6 +44,7 @@ import { McpService } from './mcp/mcp-service';
 import { createRealTransport } from './mcp/real-transport';
 import { createFilePermissionRulesStore } from './permission-rules-store';
 import { createFileHooksService } from './hooks-store';
+import { pickWritableConfig } from './config-write';
 import { isTrustedSenderUrl } from './security';
 import { createSkillsService, userSkillsDir, workspaceSkillsDir } from './skills';
 import { createPluginsService } from './plugins';
@@ -242,31 +243,30 @@ export function registerIpcHandlers(deps: IpcDeps): void {
    * 为什么 `workspace` 仍然不可写：它决定**工具能碰哪些路径**，属于权限边界，
    * 只能由用户在主进程的目录选择器里指定（那是一个真实的人手动作）。
    */
-  const WRITABLE_CONFIG_KEYS: ReadonlyArray<keyof AppConfig> = ['theme', 'appearance', 'permissionMode'];
-
   handle(IPC.CONFIG_SET, async (_e, patch: unknown): Promise<ConfigSnapshot> => {
     // 只接受已知字段，防止渲染层塞任意键污染配置；
     // 显式剔除 undefined 以配合 exactOptionalPropertyTypes
     const parsed = appConfigSchema.partial().parse(patch);
 
-    const notWritable = (Object.keys(parsed) as (keyof AppConfig)[]).filter(
-      (key) => !WRITABLE_CONFIG_KEYS.includes(key),
-    );
-    if (notWritable.length > 0) {
+    /**
+     * 白名单判定来自 `config-write.ts`（纯函数，有独立单测）。
+     *
+     * 为什么抽出去：这段逻辑此前内联在这里，**只有界面级 e2e 能覆盖，变异测试咬不到**。
+     * 抽出后"白名单外必须被拒绝"这条约束有真正的单测（轨道回归计划 2 · R-03）。
+     * **ipc.ts 必须调用它，不能自己再写一遍** —— 否则测试的是死代码（双份真相）。
+     */
+    const { clean: allowed, rejected } = pickWritableConfig(parsed);
+    if (rejected.length > 0) {
       throw new Error(
-        `这些配置项不允许由界面写入：${notWritable.join('、')}。` +
+        `这些配置项不允许由界面写入：${rejected.join('、')}。` +
           '工作区请用「选择目录」按钮（主进程对话框）设置；高危清单请直接改配置文件。',
       );
     }
 
-    const clean: Partial<AppConfig> = {};
-    if (parsed.theme !== undefined) clean.theme = parsed.theme;
-    if (parsed.permissionMode !== undefined) {
-      clean.permissionMode = parsed.permissionMode;
+    const clean: Partial<AppConfig> = { ...allowed };
+    if (parsed.permissionMode !== undefined && parsed.permissionMode === 'bypassPermissions') {
       // bypassPermissions = 全部放行，值得在日志里留痕（会话之外可回溯"谁在什么时候放开了它"）
-      if (parsed.permissionMode === 'bypassPermissions') {
-        console.warn('[security] 权限模式已切到 bypassPermissions（全部放行）—— 请确认你在可信环境中');
-      }
+      console.warn('[security] 权限模式已切到 bypassPermissions（全部放行）—— 请确认你在可信环境中');
     }
     if (parsed.appearance !== undefined) {
       // 外观必须过一遍受控字段校验才允许落盘：
