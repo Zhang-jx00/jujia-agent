@@ -237,6 +237,7 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 
 ## 想在仓库里继续开发
 
+0. **接手项目？先读交接文档** [`docs/HANDOVER.md`](docs/HANDOVER.md)（全貌 + 已完成/未完成 + 踩坑清单）
 1. 读 [`docs/PROGRESS.md`](docs/PROGRESS.md) 知道**做到哪了**（状态唯一权威）
 2. 读 [`docs/TRACK-ROADMAP.md`](docs/TRACK-ROADMAP.md) 知道**下一步做什么**（编号规范 + 修复队列 + 开发队列）
 3. 读 [`docs/TRACK-PLANS.md`](docs/TRACK-PLANS.md) 知道**改动该记在哪条轨道**（记录规则）
