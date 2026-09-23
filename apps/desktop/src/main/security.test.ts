@@ -4,6 +4,7 @@ import {
   assertBaselineConstantIntact,
   assertSecureWebPreferences,
   isAllowedNavigation,
+  isTrustedSenderUrl,
   safeProtocol,
 } from './security';
 
@@ -61,9 +62,29 @@ describe('assertSecureWebPreferences（安全基线 fail-closed）', () => {
 });
 
 describe('isAllowedNavigation', () => {
-  it('放行 file:// 与 dev server 同源', () => {
-    expect(isAllowedNavigation('file:///D:/app/index.html')).toBe(true);
+  it('放行渲染层目录内的 file:// 与 dev server 同源', () => {
+    expect(
+      isAllowedNavigation('file:///D:/app/out/renderer/index.html', undefined, 'D:/app/out/renderer'),
+    ).toBe(true);
     expect(isAllowedNavigation('http://localhost:5173/x', 'http://localhost:5173')).toBe(true);
+  });
+
+  it('**file: 不再无条件放行**：渲染层目录之外一律拦截（2026-09-23 收紧）', () => {
+    // 此前任何 file: 都被当成"应用自身"，于是 file:///C:/任意本地页 也能占住主窗口
+    expect(isAllowedNavigation('file:///C:/evil.html', undefined, 'D:/app/out/renderer')).toBe(false);
+    expect(
+      isAllowedNavigation('file:///D:/app/out/renderer/../../secret.html', undefined, 'D:/app/out/renderer'),
+    ).toBe(false);
+  });
+
+  it('没给渲染层目录基线时 file: 一律不放行（fail closed）', () => {
+    expect(isAllowedNavigation('file:///D:/app/out/renderer/index.html')).toBe(false);
+  });
+
+  it('子目录（渲染层资源）仍然放行', () => {
+    expect(
+      isAllowedNavigation('file:///D:/app/out/renderer/assets/index.js', undefined, 'D:/app/out/renderer'),
+    ).toBe(true);
   });
 
   it('拦截外部站点与非法 URL', () => {
@@ -78,5 +99,30 @@ describe('safeProtocol', () => {
     expect(safeProtocol('https://a.com')).toBe('https:');
     expect(safeProtocol('javascript:alert(1)')).toBe('javascript:');
     expect(safeProtocol('###')).toBe('');
+  });
+});
+
+describe('isTrustedSenderUrl（IPC 发送方校验）', () => {
+  const RENDERER = 'D:/app/out/renderer';
+
+  it('放行应用自身渲染层（file: 且落在渲染层目录内）', () => {
+    expect(isTrustedSenderUrl('file:///D:/app/out/renderer/index.html', undefined, RENDERER)).toBe(true);
+  });
+
+  it('放行开发模式的 dev server 源', () => {
+    expect(
+      isTrustedSenderUrl('http://localhost:5173/index.html', 'http://localhost:5173', RENDERER),
+    ).toBe(true);
+  });
+
+  it('拦截其他本地文件、外部站点、以及空来源（fail closed）', () => {
+    expect(isTrustedSenderUrl('file:///C:/evil.html', undefined, RENDERER)).toBe(false);
+    expect(isTrustedSenderUrl('https://evil.example.com/', undefined, RENDERER)).toBe(false);
+    expect(isTrustedSenderUrl('', undefined, RENDERER)).toBe(false);
+    expect(isTrustedSenderUrl('about:blank', undefined, RENDERER)).toBe(false);
+  });
+
+  it('开发者工具自身的调用放行（否则调试时工具链会失灵）', () => {
+    expect(isTrustedSenderUrl('devtools://devtools/bundled/panel.html', undefined, RENDERER)).toBe(true);
   });
 });

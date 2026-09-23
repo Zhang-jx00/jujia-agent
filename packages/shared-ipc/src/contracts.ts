@@ -52,6 +52,14 @@ export const appConfigSchema = z.object({
   appearance: appearanceSchema.default({ packId: 'default-dark', pack: null }),
   /** 会话级权限模式；规则表是常设配置，二者关系见 agent-core 的 decideGate */
   permissionMode: permissionModeSchema.default('default'),
+  /**
+   * 高危清单：命中即**硬 ask**（任何「总是允许」都压不掉）。
+   *
+   * 面向用户的"这个工具永远问我"请用权限规则里的 `ask`（同样是硬 ask）；
+   * 这里是**引擎级兜底**，默认空 —— 由用户直接改配置文件设置，
+   * **不经渲染层写入**（安全相关字段不接受界面写入，见 CONFIG_SET 的白名单）。
+   */
+  alwaysAskTools: z.array(z.string()).default([]),
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
@@ -62,6 +70,7 @@ export const defaultAppConfig = (): AppConfig => ({
   workspace: null,
   appearance: { packId: 'default-dark', pack: null },
   permissionMode: 'default',
+  alwaysAskTools: [],
 });
 
 /** 配置读取结果：带上「来源」与「是否从损坏中恢复」，供 UI 如实提示用户 */

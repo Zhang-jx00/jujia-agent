@@ -29,9 +29,24 @@ export type PermissionMode =
 
 export type RiskLevel = 'low' | 'medium' | 'high';
 
+/**
+ * `ask` 分两种（2026-09-23 补）：
+ *
+ * - **软 ask（`bypassable: true`）**：默认的"写文件要不要做"。用户可以选「本次会话总是允许」把它压掉 ——
+ *   因为同一工具的写操作风险差异由**敏感路径**那条硬 ask 兜住。
+ * - **硬 ask（`bypassable: false`）**：**任何"总是允许"都压不掉**，必须每次都过人手（或由钩子/规则决定）：
+ *   命中高危清单 · 命中用户自己写的 `ask` 规则 · 目标是敏感路径 · **执行类命令**。
+ *
+ * 为什么执行类也算硬 ask：`alwaysAllow` 是按**工具名**记的，而"总是允许 run_command"等于
+ * 把**任意命令**永久放行 —— 那不是省事，那是把权限门拆了。真要全放行请用 `bypassPermissions`
+ * 或写一条显式规则，那样至少是**看得见、写下来的决定**。
+ *
+ * 为什么硬 ask 还要保留钩子：`PermissionRequest` 钩子是用户自己写的审批程序，
+ * 它不能被界面上的一个"总是允许"按钮连带废掉。
+ */
 export type GateDecision =
   | { action: 'allow'; reason: string; risk: RiskLevel }
-  | { action: 'ask'; reason: string; risk: RiskLevel }
+  | { action: 'ask'; reason: string; risk: RiskLevel; bypassable: boolean }
   | { action: 'deny'; reason: string; risk: RiskLevel };
 
 export interface GateContext {
@@ -101,7 +116,8 @@ export function decideGate(ctx: GateContext): GateDecision {
     return { action: 'deny', reason: matched.reason, risk: 'high' };
   }
   if (matched?.action === 'ask') {
-    return { action: 'ask', reason: matched.reason, risk: 'high' };
+    // 用户自己写下的 ask 规则：**硬 ask**，不被「总是允许」抑制
+    return { action: 'ask', reason: matched.reason, risk: 'high', bypassable: false };
   }
   if (matched?.action === 'allow' && ctx.mode !== 'plan' && ctx.mode !== 'dontAsk') {
     return { action: 'allow', reason: matched.reason, risk: 'low' };
@@ -118,6 +134,7 @@ export function decideGate(ctx: GateContext): GateDecision {
       action: 'ask',
       reason: `${ctx.toolName} 在高危清单中，需人工确认`,
       risk: 'high',
+      bypassable: false,
     };
   }
 
@@ -148,6 +165,7 @@ export function decideGate(ctx: GateContext): GateDecision {
         action: 'ask',
         reason: `目标是敏感路径（${why}），需人工确认`,
         risk: 'high',
+        bypassable: false,
       };
     }
   }
@@ -166,9 +184,13 @@ export function decideGate(ctx: GateContext): GateDecision {
       action: 'ask',
       reason: ctx.isOverwrite ? '覆盖已有文件，需确认' : '写入文件，需确认',
       risk: ctx.isOverwrite ? 'medium' : 'low',
+      // 软 ask：同一工具的写操作风险差异由上面那条**敏感路径**硬 ask 兜住
+      bypassable: true,
     };
   }
-  return { action: 'ask', reason: '执行命令，需确认', risk: 'high' };
+  // 执行类：**硬 ask**。按工具名记住「总是允许」等于放行**任意命令** ——
+  // 那不是省事，那是把权限门拆了；真要全放行请用 bypassPermissions 或写一条显式规则。
+  return { action: 'ask', reason: '执行命令，需确认', risk: 'high', bypassable: false };
 }
 
 export const MODE_LABEL: Record<PermissionMode, string> = {

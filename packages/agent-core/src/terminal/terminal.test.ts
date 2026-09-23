@@ -4,6 +4,8 @@ import {
   clampSize,
   describeTerminalPermission,
   pickShell,
+  sensitiveEnvKeys,
+  stripUrlCredentials,
   splitChunks,
   TERMINAL_LIMITS,
 } from './terminal';
@@ -18,12 +20,24 @@ import {
  */
 
 describe('pickShell', () => {
-  it('Windows 用 ComSpec，取不到时退回 cmd.exe', () => {
+  it('Windows 用 ComSpec', () => {
     expect(pickShell('win32', { ComSpec: 'C:\\Windows\\System32\\cmd.exe' }).file).toBe(
       'C:\\Windows\\System32\\cmd.exe',
     );
-    expect(pickShell('win32', {}).file).toBe('cmd.exe');
-    expect(pickShell('win32', { ComSpec: '   ' }).file).toBe('cmd.exe');
+  });
+
+  it('取不到 ComSpec 时退回**绝对路径**的 cmd.exe（2026-09-23 修）', () => {
+    // 此前回退成裸 `'cmd.exe'`，那会走 PATH 查找 —— PATH 里靠前的同名文件会被优先执行
+    const bySystemRoot = pickShell('win32', { SystemRoot: 'D:\\Win' }).file;
+    expect(bySystemRoot).not.toBe('cmd.exe');
+    expect(bySystemRoot).toContain('System32');
+
+    const blank = pickShell('win32', { ComSpec: '   ' }).file;
+    expect(blank).not.toBe('cmd.exe');
+    expect(blank).toContain('System32');
+
+    // 连 SystemRoot 都没有时也要给绝对路径
+    expect(pickShell('win32', {}).file).toBe('C:\\Windows\\System32\\cmd.exe');
   });
 
   it('类 Unix 用 SHELL，取不到时退回 /bin/bash', () => {
@@ -129,5 +143,64 @@ describe('describeTerminalPermission', () => {
     const text = describeTerminalPermission({ file: 'cmd.exe', args: [] }, 'D:\\ws');
     expect(text).toContain('cmd.exe');
     expect(text).toContain('D:\\ws');
+  });
+});
+
+describe('终端环境变量：敏感项不得进入终端（2026-09-23）', () => {
+  /**
+   * 背景：Agent 能在终端里执行命令 → 终端子进程的环境变量等于一份"随时可被读走的密钥清单"。
+   * 模型只要跑一句 `env` 就能带走它们。这些变量对终端里的日常命令也没有用处。
+   */
+  const withSecrets = {
+    PATH: 'C://Windows//System32',
+    SystemRoot: 'C://Windows',
+    ANTHROPIC_API_KEY: 'sk-ant-xxx',
+    OPENAI_API_KEY: 'sk-xxx',
+    GITHUB_TOKEN: 'ghp_xxx',
+    MY_SECRET: 'shh',
+    DB_PASSWORD: 'p@ss',
+    AWS_CREDENTIAL_FILE: 'C:/creds',
+    HTTPS_PROXY: 'http://user:pass@proxy.local:8080',
+    HTTP_PROXY: 'http://proxy.local:8080',
+    ELECTRON_RUN_AS_NODE: '1',
+  };
+
+  it('API Key / Token / Secret / Password / 凭据类变量一律不传', () => {
+    const env = buildTerminalEnv(withSecrets, { workspaceRoot: 'D://ws' });
+    for (const key of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GITHUB_TOKEN', 'MY_SECRET', 'DB_PASSWORD', 'AWS_CREDENTIAL_FILE']) {
+      expect(env[key], `${key} 不该出现在终端环境里`).toBeUndefined();
+    }
+  });
+
+  it('日常变量照常保留（PATH 等），否则终端根本不能用', () => {
+    const env = buildTerminalEnv(withSecrets, { workspaceRoot: 'D://ws' });
+    expect(env['PATH']).toBe('C://Windows//System32');
+    expect(env['SystemRoot']).toBe('C://Windows');
+  });
+
+  it('代理变量**保留**（否则终端里的网络会坏），但内嵌的用户名口令被脱掉', () => {
+    const env = buildTerminalEnv(withSecrets, { workspaceRoot: 'D://ws' });
+    expect(env['HTTPS_PROXY']).toBe('http://proxy.local:8080');
+    expect(env['HTTP_PROXY']).toBe('http://proxy.local:8080');
+  });
+
+  it('ELECTRON_RUN_AS_NODE 仍然被清掉（它会让 Electron 退化成纯 Node）', () => {
+    const env = buildTerminalEnv(withSecrets, { workspaceRoot: 'D://ws' });
+    expect(env['ELECTRON_RUN_AS_NODE']).toBeUndefined();
+  });
+
+  it('sensitiveEnvKeys 给出被剔除的名单（可用于界面说明"为什么终端里没有这个变量"）', () => {
+    const keys = sensitiveEnvKeys(withSecrets);
+    expect(keys).toContain('ANTHROPIC_API_KEY');
+    expect(keys).toContain('GITHUB_TOKEN');
+    expect(keys).not.toContain('PATH');
+    expect(keys).not.toContain('HTTPS_PROXY'); // 代理是脱敏而非剔除
+    expect(keys).toEqual([...keys].sort());
+  });
+
+  it('stripUrlCredentials 只动凭据，不动主机端口', () => {
+    expect(stripUrlCredentials('http://u:p@h:8080')).toBe('http://h:8080');
+    expect(stripUrlCredentials('http://h:8080')).toBe('http://h:8080');
+    expect(stripUrlCredentials('socks5://h')).toBe('socks5://h');
   });
 });

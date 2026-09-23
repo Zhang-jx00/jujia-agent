@@ -92,6 +92,8 @@ export interface ChatDeps {
   mode?: PermissionMode | undefined;
   /** 用户自定义权限规则 */
   rules?: ReadonlyArray<PermissionRule>;
+  /** 高危清单（来自配置，引擎级兜底） */
+  alwaysAsk?: ReadonlyArray<string>;
   /** 生命周期钩子运行器（W5d） */
   hooks?: HookRunner;
   /** 技能清单文本（W11a）：非空时并进系统提示；内容稳定 → 不破坏模型前缀缓存 */
@@ -235,6 +237,7 @@ export function sendMessage(
           alwaysAllow: session.alwaysAllow,
           ...(deps.mode ? { mode: deps.mode } : {}),
           ...(deps.rules ? { rules: deps.rules } : {}),
+          ...(deps.alwaysAsk ? { alwaysAsk: deps.alwaysAsk } : {}),
           ...(deps.hooks ? { hooks: deps.hooks } : {}),
           sessionId: session.id,
           ...(deps.fetcher ? { fetcher: deps.fetcher } : {}),

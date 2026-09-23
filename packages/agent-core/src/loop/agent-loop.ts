@@ -85,6 +85,8 @@ export interface AgentLoopDeps extends ProviderDeps {
   mode?: PermissionMode | undefined;
   /** 用户自定义权限规则（allow/deny/ask，按工具名 glob） */
   rules?: ReadonlyArray<PermissionRule>;
+  /** 高危清单（引擎级兜底，见 RunToolOptions.alwaysAsk） */
+  alwaysAsk?: ReadonlyArray<string>;
   /** 生命周期钩子运行器（W5d）；不传 = 没有钩子 */
   hooks?: HookRunner | undefined;
   /** 会话 id：钩子输入里要带上，便于钩子区分会话 */
@@ -337,6 +339,7 @@ async function executeOne(
       // 模式与规则随调用传入：策略层（decideGate）在 W10g 起才真正作用于执行
       ...(deps.mode ? { mode: deps.mode } : {}),
       ...(deps.rules ? { rules: deps.rules } : {}),
+      ...(deps.alwaysAsk ? { alwaysAsk: deps.alwaysAsk } : {}),
       ...(deps.hooks ? { hooks: deps.hooks } : {}),
       ...(deps.sessionId ? { sessionId: deps.sessionId } : {}),
     },

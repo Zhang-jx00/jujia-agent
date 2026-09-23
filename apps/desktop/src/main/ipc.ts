@@ -1,4 +1,5 @@
-import { ipcMain, app } from 'electron';
+import { join } from 'node:path';
+import { ipcMain, app, type IpcMainInvokeEvent } from 'electron';
 import {
   IPC,
   appConfigSchema,
@@ -43,6 +44,7 @@ import { McpService } from './mcp/mcp-service';
 import { createRealTransport } from './mcp/real-transport';
 import { createFilePermissionRulesStore } from './permission-rules-store';
 import { createFileHooksService } from './hooks-store';
+import { isTrustedSenderUrl } from './security';
 import { createSkillsService, userSkillsDir, workspaceSkillsDir } from './skills';
 import { createPluginsService } from './plugins';
 import { createProcessHookRunner, parseHookConfig, summarizeCatalog, HOOK_EVENTS } from '@jujia/agent-core';
@@ -78,6 +80,39 @@ export interface IpcDeps {
  */
 export function registerIpcHandlers(deps: IpcDeps): void {
   const fetchImpl = deps.fetcher ?? fetch;
+
+  /**
+   * **所有通道的统一入口：先校验发送方是应用自己的渲染层**，再交给具体处理函数。
+   *
+   * 为什么放在统一入口而不是逐个通道里写：33 个通道逐个写，新增一个就会漏一个；
+   * 挂在入口上，新通道**默认就是受保护的**（安全默认值）。
+   * 拿不到来源 URL 时**拒绝**（fail closed），而不是放行。
+   *
+   * 说明：渲染层的导航与新窗口早已被安全基线挡住，所以这不是"已经能被利用"的漏洞，
+   * 而是纵深防御 —— 将来一旦引入第二个 webContents（内置浏览器、扩展页），
+   * 没有这道校验就等于给它开全套 IPC。
+   *
+   * 位置很关键：必须定义在**任何 handle(...) 调用之前**，
+   * 否则 `const` 还在暂时性死区里，注册阶段就抛 ReferenceError（本轮实测踩过）。
+   */
+  const handle = (channel: string, fn: (event: IpcMainInvokeEvent, ...args: never[]) => unknown): void => {
+    ipcMain.handle(channel, (event, ...args) => {
+      const senderUrl = event.senderFrame?.url ?? '';
+      const trusted = isTrustedSenderUrl(
+        senderUrl,
+        process.env['ELECTRON_RENDERER_URL'],
+        join(__dirname, '../renderer'),
+      );
+      if (!trusted) {
+        throw new Error(
+          `[security] 拒绝来自不受信任发送方的 IPC 调用（${channel}）：${
+            senderUrl === '' ? '(来源未知)' : senderUrl
+          }`,
+        );
+      }
+      return fn(event, ...(args as never[]));
+    });
+  };
 
   /**
    * **全进程只用一个工具注册表**。
@@ -154,15 +189,21 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   /** 权限规则表（W5c）：TOOL_RUN 与对话链路共用同一份，因此规则语义全进程一致 */
   const permissionRules = createFilePermissionRulesStore();
   /** 每次都重新读：规则改动必须立即生效，缓存会让用户以为删掉的规则还在拦截 */
-  const loadPolicy = async (): Promise<{ mode: PermissionMode; rules: PermissionRule[] }> => {
+  const loadPolicy = async (): Promise<{
+    mode: PermissionMode;
+    rules: PermissionRule[];
+    alwaysAsk: string[];
+  }> => {
     const snapshot = await readConfigSnapshot();
     return {
       mode: snapshot.config.permissionMode,
       rules: await permissionRules.list(),
+      // 高危清单：引擎级兜底（命中即硬 ask）。来自配置，不经渲染层写入
+      alwaysAsk: snapshot.config.alwaysAskTools,
     };
   };
 
-  ipcMain.handle(IPC.APP_INFO, (): AppInfo => {
+  handle(IPC.APP_INFO, (): AppInfo => {
     const payload: AppInfo = {
       name: '俱佳Agent',
       version: app.getVersion(),
@@ -181,17 +222,21 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     return appInfoSchema.parse(payload);
   });
 
-  ipcMain.handle(IPC.CONFIG_GET, async (): Promise<ConfigSnapshot> => {
+  handle(IPC.CONFIG_GET, async (): Promise<ConfigSnapshot> => {
     return configSnapshotSchema.parse(await readConfigSnapshot());
   });
 
-  ipcMain.handle(IPC.CONFIG_SET, async (_e, patch: unknown): Promise<ConfigSnapshot> => {
+  handle(IPC.CONFIG_SET, async (_e, patch: unknown): Promise<ConfigSnapshot> => {
     // 只接受已知字段，防止渲染层塞任意键污染配置；
     // 显式剔除 undefined 以配合 exactOptionalPropertyTypes
     const parsed = appConfigSchema.partial().parse(patch);
     const clean: Partial<AppConfig> = {};
     if (parsed.theme !== undefined) clean.theme = parsed.theme;
-    if (parsed.workspace !== undefined) clean.workspace = parsed.workspace;
+    // **不接受渲染层写 workspace**（2026-09-23 修）：
+    // workspace 决定工具能碰哪些路径，属于权限边界的一部分；它只能由用户通过
+    // 目录选择器（WORKSPACE_PICK，走主进程对话框）设置。让渲染层能改，
+    // 等于把"工具可达范围"交给一段可能被注入的脚本。
+    // 另外两个安全相关字段（permissionMode / alwaysAskTools）同样不在白名单里，理由相同。
     if (parsed.appearance !== undefined) {
       // 外观必须过一遍受控字段校验才允许落盘：
       // 样式包将来会喂给 CSS 变量，非法内容等于把注入面写进配置（见卡片 013 的 RCE 事件）。
@@ -228,7 +273,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     terminal.disposeAll();
   });
 
-  ipcMain.handle(IPC.TERMINAL_START, async (_e, payload: unknown): Promise<unknown> => {
+  handle(IPC.TERMINAL_START, async (_e, payload: unknown): Promise<unknown> => {
     const parsed = terminalStartSchema.safeParse(payload);
     if (!parsed.success) return { ok: false, error: '终端参数不合法' };
     // 只允许在工作区内开终端：工作区不合法时直接拒绝，不静默改成别的目录
@@ -240,19 +285,19 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     return terminal.start({ workspaceRoot: ws.root, ...(parsed.data.cols !== undefined ? { cols: parsed.data.cols } : {}), ...(parsed.data.rows !== undefined ? { rows: parsed.data.rows } : {}) });
   });
 
-  ipcMain.handle(IPC.TERMINAL_INPUT, async (_e, payload: unknown): Promise<boolean> => {
+  handle(IPC.TERMINAL_INPUT, async (_e, payload: unknown): Promise<boolean> => {
     const parsed = terminalInputSchema.safeParse(payload);
     if (!parsed.success) return false;
     return terminal.write(parsed.data.sessionId, parsed.data.data);
   });
 
-  ipcMain.handle(IPC.TERMINAL_RESIZE, async (_e, payload: unknown): Promise<boolean> => {
+  handle(IPC.TERMINAL_RESIZE, async (_e, payload: unknown): Promise<boolean> => {
     const parsed = terminalResizeSchema.safeParse(payload);
     if (!parsed.success) return false;
     return terminal.resize(parsed.data.sessionId, { cols: parsed.data.cols, rows: parsed.data.rows });
   });
 
-  ipcMain.handle(IPC.TERMINAL_KILL, async (_e, payload: unknown): Promise<boolean> => {
+  handle(IPC.TERMINAL_KILL, async (_e, payload: unknown): Promise<boolean> => {
     const parsed = terminalKillSchema.safeParse(payload);
     if (!parsed.success) return false;
     return terminal.kill(parsed.data.sessionId);
@@ -260,26 +305,26 @@ export function registerIpcHandlers(deps: IpcDeps): void {
 
   /* ---------------------------- 连接管理 ---------------------------- */
 
-  ipcMain.handle(IPC.CONNECTION_LIST, async (): Promise<ConnectionView[]> => {
+  handle(IPC.CONNECTION_LIST, async (): Promise<ConnectionView[]> => {
     return listConnectionViews();
   });
 
-  ipcMain.handle(IPC.CONNECTION_CREATE, async (_e, input: unknown): Promise<ConnectionView> => {
+  handle(IPC.CONNECTION_CREATE, async (_e, input: unknown): Promise<ConnectionView> => {
     return createConnection(connectionInputSchema.parse(input));
   });
 
-  ipcMain.handle(IPC.CONNECTION_UPDATE, async (_e, payload: unknown): Promise<ConnectionView> => {
+  handle(IPC.CONNECTION_UPDATE, async (_e, payload: unknown): Promise<ConnectionView> => {
     const { id, patch } = (payload ?? {}) as { id?: unknown; patch?: unknown };
     if (typeof id !== 'string' || id === '') throw new Error('缺少连接 id');
     return updateConnection(id, patch);
   });
 
-  ipcMain.handle(IPC.CONNECTION_DELETE, async (_e, id: unknown): Promise<boolean> => {
+  handle(IPC.CONNECTION_DELETE, async (_e, id: unknown): Promise<boolean> => {
     if (typeof id !== 'string' || id === '') throw new Error('缺少连接 id');
     return deleteConnection(id);
   });
 
-  ipcMain.handle(IPC.CONNECTION_TEST, async (_e, id: unknown): Promise<TestResult> => {
+  handle(IPC.CONNECTION_TEST, async (_e, id: unknown): Promise<TestResult> => {
     if (typeof id !== 'string' || id === '') throw new Error('缺少连接 id');
     const started = Date.now();
     try {
@@ -306,7 +351,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
 
   /* ------------------------------ 对话 ------------------------------ */
 
-  ipcMain.handle(IPC.CHAT_SEND, async (_e, payload: unknown): Promise<ChatSendResult> => {
+  handle(IPC.CHAT_SEND, async (_e, payload: unknown): Promise<ChatSendResult> => {
     const { connectionId, text, sessionId } = (payload ?? {}) as {
       connectionId?: unknown;
       text?: unknown;
@@ -337,6 +382,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         registry,
         mode: policy.mode,
         rules: policy.rules,
+        alwaysAsk: policy.alwaysAsk,
         hooks: hookRunner,
         skillCatalogText: skills.catalogText(),
       },
@@ -344,29 +390,29 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     return chatSendResultSchema.parse({ ...result, accepted: true });
   });
 
-  ipcMain.handle(IPC.CHAT_STOP, async (_e, sessionId: unknown): Promise<boolean> => {
+  handle(IPC.CHAT_STOP, async (_e, sessionId: unknown): Promise<boolean> => {
     if (typeof sessionId !== 'string' || sessionId === '') return false;
     return stopMessage(sessionId);
   });
 
-  ipcMain.handle(IPC.CHAT_HISTORY, async (_e, sessionId: unknown) => {
+  handle(IPC.CHAT_HISTORY, async (_e, sessionId: unknown) => {
     if (typeof sessionId !== 'string' || sessionId === '') return [];
     return getHistory(sessionId);
   });
 
   /* ---------------------- W3：工作区与工具执行 ---------------------- */
 
-  ipcMain.handle(IPC.WORKSPACE_GET, async () => workspaceInfoSchema.parse(await getWorkspaceInfo()));
+  handle(IPC.WORKSPACE_GET, async () => workspaceInfoSchema.parse(await getWorkspaceInfo()));
 
-  ipcMain.handle(IPC.WORKSPACE_PICK, async () =>
+  handle(IPC.WORKSPACE_PICK, async () =>
     workspaceInfoSchema.parse(await pickWorkspace(deps.getWindow?.())),
   );
 
-  ipcMain.handle(IPC.WORKSPACE_CLEAR, async () =>
+  handle(IPC.WORKSPACE_CLEAR, async () =>
     workspaceInfoSchema.parse(await clearWorkspace()),
   );
 
-  ipcMain.handle(IPC.PERMISSION_RESOLVE, async (_e, payload: unknown): Promise<boolean> => {
+  handle(IPC.PERMISSION_RESOLVE, async (_e, payload: unknown): Promise<boolean> => {
     const { id, decision, updatedArgs } = (payload ?? {}) as {
       id?: unknown;
       decision?: unknown;
@@ -378,7 +424,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     return deps.permission.settle(id, parsed.data, updatedArgs);
   });
 
-  ipcMain.handle(IPC.TOOL_RUN, async (_e, payload: unknown): Promise<ToolRunResult> => {
+  handle(IPC.TOOL_RUN, async (_e, payload: unknown): Promise<ToolRunResult> => {
     const { toolName, args } = (payload ?? {}) as { toolName?: unknown; args?: unknown };
     if (typeof toolName !== 'string' || toolName === '') {
       throw new Error('缺少工具名');
@@ -410,6 +456,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     const res = await runTool(tool, args ?? {}, { workspaceRoot }, deps.permission.resolve, {
       mode: policy.mode,
       rules: policy.rules,
+      alwaysAsk: policy.alwaysAsk,
       hooks: hookRunner,
       sessionId: 'manual',
     });
@@ -427,41 +474,41 @@ export function registerIpcHandlers(deps: IpcDeps): void {
 
   /* ------------------------------ MCP（W10e） ------------------------------ */
 
-  ipcMain.handle(IPC.MCP_SERVER_LIST, async () => {
+  handle(IPC.MCP_SERVER_LIST, async () => {
     // 先刷新插件：新装插件的贡献要立刻出现在列表里，不能等一次对话
     const wsInfo = await getWorkspaceInfo();
     await plugins.refresh(wsInfo.valid ? wsInfo.root : null);
     return z.array(mcpServerViewSchema).parse(await mcp.views());
   });
 
-  ipcMain.handle(IPC.MCP_SERVER_SAVE, async (_e, input: unknown) => {
+  handle(IPC.MCP_SERVER_SAVE, async (_e, input: unknown) => {
     return mcpServerViewSchema.parse(await mcp.save(input));
   });
 
-  ipcMain.handle(IPC.MCP_SERVER_DELETE, async (_e, id: unknown): Promise<boolean> => {
+  handle(IPC.MCP_SERVER_DELETE, async (_e, id: unknown): Promise<boolean> => {
     if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
     return mcp.remove(id);
   });
 
-  ipcMain.handle(IPC.MCP_CONNECT, async (_e, id: unknown): Promise<McpConnectResult> => {
+  handle(IPC.MCP_CONNECT, async (_e, id: unknown): Promise<McpConnectResult> => {
     if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
     return mcpConnectResultSchema.parse(await mcp.connect(id));
   });
 
-  ipcMain.handle(IPC.MCP_APPROVE, async (_e, payload: unknown) => {
+  handle(IPC.MCP_APPROVE, async (_e, payload: unknown) => {
     const { id, choice } = (payload ?? {}) as { id?: unknown; choice?: unknown };
     if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
     return mcpApproveResultSchema.parse(await mcp.approve(id, choice));
   });
 
-  ipcMain.handle(IPC.MCP_DISCONNECT, async (_e, id: unknown): Promise<boolean> => {
+  handle(IPC.MCP_DISCONNECT, async (_e, id: unknown): Promise<boolean> => {
     if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
     return mcp.disconnect(id);
   });
 
   /* ------------------------------ 插件（W11b） ------------------------------ */
 
-  ipcMain.handle(IPC.PLUGINS_GET, async () => {
+  handle(IPC.PLUGINS_GET, async () => {
     const ws = await getWorkspaceInfo();
     const result = await plugins.refresh(ws.valid ? ws.root : null);
     return pluginsStateSchema.parse({
@@ -483,31 +530,31 @@ export function registerIpcHandlers(deps: IpcDeps): void {
 
   /* --------------------------- 生命周期钩子（W5d） --------------------------- */
 
-  ipcMain.handle(IPC.HOOKS_GET, async () => await hooksState());
+  handle(IPC.HOOKS_GET, async () => await hooksState());
 
-  ipcMain.handle(IPC.HOOKS_SET, async (_e, input: unknown) => {
+  handle(IPC.HOOKS_SET, async (_e, input: unknown) => {
     const saved = await hooksService.save(input);
     return hooksSaveResultSchema.parse({ ok: saved.ok, errors: saved.errors, state: await hooksState() });
   });
 
   /* --------------------------- 权限规则表（W5c） --------------------------- */
 
-  ipcMain.handle(IPC.PERMISSION_RULES_LIST, async () => {
+  handle(IPC.PERMISSION_RULES_LIST, async () => {
     return z.array(permissionRuleViewSchema).parse(await permissionRules.list());
   });
 
-  ipcMain.handle(IPC.PERMISSION_RULES_ADD, async (_e, input: unknown) => {
+  handle(IPC.PERMISSION_RULES_ADD, async (_e, input: unknown) => {
     const parsed = permissionRuleInputSchema.parse(input);
     const record = await permissionRules.add(parsed);
     return permissionRuleViewSchema.parse(record);
   });
 
-  ipcMain.handle(IPC.PERMISSION_RULES_REMOVE, async (_e, id: unknown): Promise<boolean> => {
+  handle(IPC.PERMISSION_RULES_REMOVE, async (_e, id: unknown): Promise<boolean> => {
     if (typeof id !== 'string' || id === '') throw new Error('缺少规则 id');
     return permissionRules.remove(id);
   });
 
-  ipcMain.handle(IPC.PERMISSION_RULES_TOGGLE, async (_e, payload: unknown) => {
+  handle(IPC.PERMISSION_RULES_TOGGLE, async (_e, payload: unknown) => {
     const { id, enabled } = (payload ?? {}) as { id?: unknown; enabled?: unknown };
     if (typeof id !== 'string' || id === '') throw new Error('缺少规则 id');
     if (typeof enabled !== 'boolean') throw new Error('缺少 enabled');

@@ -64,6 +64,15 @@ export interface RunToolOptions {
   mode?: PermissionMode;
   /** 用户自定义规则（allow/deny/ask，按工具名 glob）。deny / ask 优先于模式 */
   rules?: ReadonlyArray<PermissionRule>;
+  /**
+   * 高危清单：命中即**硬 ask**（任何「总是允许」都压不掉）。
+   *
+   * 2026-09-23 接通：此前策略层读 `alwaysAsk`，但**没有任何调用方传它** ——
+   * 那条分支在运行时是死代码（只有策略层自己的测试在喂它）。
+   * 面向用户的"永远问我"其实走 `ask` 规则（同样是硬 ask）；这里是**引擎级兜底**：
+   * 内置高危工具即使被某条 `allow` 规则漏掉，也仍然要过人手。
+   */
+  alwaysAsk?: ReadonlyArray<string>;
   /** 生命周期钩子运行器（不传 = 没有钩子，行为与从前完全一致） */
   hooks?: HookRunner;
   /** 会话 id：钩子需要在输入里知道自己在哪个会话；手动执行工具时没有会话 */
@@ -117,6 +126,7 @@ export async function runTool(
     kind: tool.kind,
     args: args as Record<string, unknown>,
     ...(opts.rules ? { rules: opts.rules } : {}),
+    ...(opts.alwaysAsk ? { alwaysAsk: opts.alwaysAsk } : {}),
   });
 
   if (gate.action === 'deny') {
@@ -131,7 +141,15 @@ export async function runTool(
     };
   }
 
-  const alwaysAllowed = opts.alwaysAllow?.has(tool.name) ?? false;
+  /**
+   * 「本次会话总是允许」只对**软 ask** 生效（`gate.bypassable`）。
+   *
+   * 硬 ask（高危清单 / 用户 ask 规则 / 敏感路径 / 执行类命令）**任何总是允许都压不掉**：
+   * 于是下一段的 PermissionRequest 钩子与弹窗对这些情况照常执行 ——
+   * 界面上的一个按钮不能把用户自己写的审批钩子连带废掉。
+   */
+  const alwaysAllowed =
+    gate.action === 'ask' && gate.bypassable && (opts.alwaysAllow?.has(tool.name) ?? false);
   let asked = false;
   let decision: PermissionDecision | undefined;
 
@@ -263,7 +281,10 @@ export async function runTool(
       };
     }
     if (decision === 'allow_always') {
-      opts.alwaysAllow?.add(tool.name);
+      // 只在软 ask 上记录：用户对硬 ask 点「总是允许」，不该顺带把同一工具的普通操作也永久放行
+      if (gate.action === 'ask' && gate.bypassable) {
+        opts.alwaysAllow?.add(tool.name);
+      }
     }
   }
 

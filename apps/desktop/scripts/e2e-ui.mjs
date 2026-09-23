@@ -25,12 +25,19 @@ const here = dirname(fileURLToPath(import.meta.url));
 const MAIN_ENTRY = join(here, '..', 'out', 'main', 'index.js');
 
 /**
- * 测试数据落在**项目内** `.tmp/e2e/`，不写系统盘（用户明确要求"测试不要占 C 盘"）。
+ * 测试数据落在**项目内** `.tmp/e2e-<运行标识>/`，不写系统盘（用户明确要求"测试不要占 C 盘"）。
  * 两处都要挪才叫真隔离：
  * - `JUJIA_DATA_BASE_DIR` 管应用自己的数据根；
  * - `--user-data-dir` 管 Electron 的配置与缓存（Windows 上默认在 %APPDATA%，也就是 C 盘）。
+ *
+ * **每次用新的运行目录，启动时不做整目录删除**（2026-09-23 改）：
+ * 原先是在固定目录上先 `rmSync` 清空，但沙箱对"同一轮删除次数"有配额，
+ * 跑过几轮测试后这一步会把 e2e 自己卡死（实测报 SAFE_DELETE_BULK_CONFIRM_REQUIRED）。
+ * 用唯一目录则**不需要任何启动删除**；收尾清理是尽力而为，失败也只是一条提示，不影响结论。
+ * 残留的旧目录由 `scripts/cleanup.py` 统一收拾。
  */
-const TMP_ROOT = join(here, '..', '..', '..', '.tmp', 'e2e');
+const RUN_ID = `${Date.now().toString(36)}-${process.pid}`;
+const TMP_ROOT = join(here, '..', '..', '..', '.tmp', `e2e-${RUN_ID}`);
 
 const STEPS = [];
 const log = (text) => console.log(text);
@@ -47,8 +54,7 @@ const step = (text) => {
 };
 
 // ---------- 准备隔离环境 ----------
-// 每次从干净目录开始（固定路径，便于排查；跑完会整体清掉）
-rmSync(TMP_ROOT, { recursive: true, force: true });
+// 目录本身是新的（RUN_ID 唯一），因此这里只需要创建，不需要删除
 const dataDir = join(TMP_ROOT, 'data');
 const wsDir = join(TMP_ROOT, 'ws');
 const profileDir = join(TMP_ROOT, 'profile');
@@ -149,13 +155,29 @@ try {
   if (!plugins.includes('贡献：技能目录 1 个')) fail('插件页没有显示"贡献：技能目录 1 个"', plugins.slice(0, 800));
   ok('插件被识别，且贡献物可见');
 
-  step('设置工作区（通过配置接口，等价于「概览」页选择目录）');
-  const wsSet = await win.evaluate(async (dir) => {
-    const r = await window.jujia.configSet({ workspace: dir });
-    return r.config.workspace;
-  }, wsDir);
-  if (wsSet !== wsDir) fail(`工作区设置失败，返回：${String(wsSet)}`);
-  ok('工作区已设为临时目录');
+  step('渲染层**不能**改工作区（工作区是权限边界的一部分）');
+  const denied = await win.evaluate(async () => {
+    // 试图把工作区改到别处：应当被忽略（渲染层无权写这个字段）
+    await window.jujia.configSet({ workspace: 'D:\\evil' });
+    const after = await window.jujia.configGet();
+    return after.config.workspace;
+  });
+  if (denied !== null) fail(`渲染层竟然改动了工作区：${String(denied)}`);
+
+  step('设置工作区（**只走配置文件** —— 界面上的目录选择器需要真人操作，自动化改配置）');
+  const configPath = join(dataDir, 'config.json');
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      data: { theme: 'dark', workspace: wsDir, appearance: { packId: 'default-dark', pack: null } },
+    }),
+    'utf8',
+  );
+  const wsNow = await win.evaluate(async () => (await window.jujia.configGet()).config.workspace);
+  if (wsNow !== wsDir) fail(`写配置文件后应用没有读到新工作区，读到：${String(wsNow)}`);
+  ok('工作区已设为临时目录（应用确实从磁盘重读了配置）');
 
   step('技能端到端：经真实 IPC → 主进程 → 注册表 → 权限门 加载插件贡献的技能');
   const skill = await win.evaluate(async () => {
@@ -235,12 +257,12 @@ try {
   fail('执行过程中抛异常', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
 } finally {
   if (app !== undefined) await app.close().catch(() => undefined);
-  for (const dir of [TMP_ROOT]) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // 临时目录清理失败不影响结论
-    }
+  try {
+    rmSync(TMP_ROOT, { recursive: true, force: true });
+  } catch {
+    // 尽力而为：沙箱可能有删除配额、Windows 也可能还占着句柄。
+    // 这里**必须说出来**，否则每跑一次都留一堆目录没人知道（旧目录由 cleanup.py 收拾）。
+    console.log(`（提示）本轮临时目录未能自动清理：${TMP_ROOT} —— 交给 scripts/cleanup.py 处理`);
   }
 }
 

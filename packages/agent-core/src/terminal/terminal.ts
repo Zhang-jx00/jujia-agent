@@ -10,6 +10,8 @@
  * - 终端是 **exec 类高副作用能力**，启动前必须走权限门（在本模块只声明语义，不自行放行）。
  */
 
+import { join } from 'node:path';
+
 export interface ShellSpec {
   file: string;
   args: string[];
@@ -28,7 +30,11 @@ export const TERMINAL_LIMITS = {
 /**
  * 选择 shell。
  * Windows 优先用 `ComSpec`（等价于用户环境里的 cmd），**不写死路径**；
- * 类 Unix 用 `SHELL`，都取不到时给保守默认。
+ * 类 Unix 用 `SHELL`。
+ *
+ * 回退**必须是绝对路径**（2026-09-23 修）：此前回退到裸 `'cmd.exe'`，
+ * 那会走 PATH 查找 —— 只要 PATH 里靠前的位置有一个同名文件，被执行的就不是系统 cmd。
+ * 现在回退到 `%SystemRoot%\System32\cmd.exe`（再退到 `C:\Windows\System32\cmd.exe`）。
  */
 export function pickShell(
   platform: NodeJS.Platform,
@@ -36,20 +42,48 @@ export function pickShell(
 ): ShellSpec {
   if (platform === 'win32') {
     const shell = env['ComSpec']?.trim();
-    return { file: shell && shell !== '' ? shell : 'cmd.exe', args: [] };
+    if (shell !== undefined && shell !== '') return { file: shell, args: [] };
+    const root = env['SystemRoot']?.trim() ?? env['windir']?.trim();
+    const base = root !== undefined && root !== '' ? root : 'C:\\Windows';
+    return { file: join(base, 'System32', 'cmd.exe'), args: [] };
   }
   const shell = env['SHELL']?.trim();
-  return { file: shell && shell !== '' ? shell : '/bin/bash', args: [] };
+  return { file: shell !== undefined && shell !== '' ? shell : '/bin/bash', args: [] };
+}
+
+/**
+ * 敏感环境变量的特征（2026-09-23 新增）。
+ *
+ * 为什么必须剔除：Agent **能在终端里执行命令**，于是"终端子进程的环境变量"等于
+ * 一份随时可被读取的密钥清单 —— 模型只要跑一句 `env` 就能把宿主环境里的密钥带走。
+ * 这些变量对终端里的日常命令也没有用处，剔掉是净收益。
+ */
+const SENSITIVE_ENV_RE = /(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)/i;
+
+/** 代理类变量：**保留**（否则终端里的网络会坏），但要脱掉 URL 里内嵌的用户名口令 */
+const PROXY_ENV_RE = /PROXY/i;
+
+/** 去掉代理 URL 里的 `user:pass@` 部分 */
+export function stripUrlCredentials(value: string): string {
+  return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]+@/i, '$1');
+}
+
+/** 当前会被剔除的敏感变量名（按名排序，便于测试与界面展示） */
+export function sensitiveEnvKeys(base: Record<string, string | undefined>): string[] {
+  return Object.keys(base)
+    .filter((k) => SENSITIVE_ENV_RE.test(k))
+    .sort();
 }
 
 /**
  * 装配终端环境变量。
  *
- * 三个关键点（缺一个就会有"看起来能用但不对"的问题）：
+ * 关键点（缺一个就会有"看起来能用但不对"的问题）：
  * - `TERM=xterm-256color`：告诉子进程它面对的是什么终端 → 解锁 256 色；
  * - `COLORTERM=truecolor`：解锁 24 位真彩色；
  * - 清掉 `ELECTRON_RUN_AS_NODE`：本机这个变量会把 Electron 退化成纯 Node
- *   （项目里已踩过多次），绝不能传给终端里的子进程。
+ *   （项目里已踩过多次），绝不能传给终端里的子进程；
+ * - **剔除敏感变量**（见 SENSITIVE_ENV_RE），代理变量只脱敏不剔除。
  */
 export function buildTerminalEnv(
   base: Record<string, string | undefined>,
@@ -59,7 +93,8 @@ export function buildTerminalEnv(
   for (const [k, v] of Object.entries(base)) {
     if (v === undefined) continue;
     if (k === 'ELECTRON_RUN_AS_NODE') continue;
-    env[k] = v;
+    if (SENSITIVE_ENV_RE.test(k)) continue;
+    env[k] = PROXY_ENV_RE.test(k) ? stripUrlCredentials(v) : v;
   }
   env['TERM'] = 'xterm-256color';
   env['COLORTERM'] = 'truecolor';

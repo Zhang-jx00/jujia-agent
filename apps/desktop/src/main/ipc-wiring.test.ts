@@ -127,6 +127,25 @@ describe('工具注册表接线（防止各处各建一个）', () => {
     expect(region).toContain('runTool(');
   });
 
+  it('所有 IPC 通道都经过发送方校验（新通道默认受保护）', () => {
+    // 统一入口必须存在，且校验的是 isTrustedSenderUrl
+    expect(ipcSource).toContain('isTrustedSenderUrl(');
+    expect(ipcSource).toContain('event.senderFrame?.url');
+    // 除统一入口内部那一次，不应再有裸的 ipcMain.handle（否则那个通道没有校验）
+    const bare = ipcSource.match(/ipcMain\.handle\(/g) ?? [];
+    expect(bare.length).toBe(1);
+    expect(ipcSource).toContain('const handle = (channel: string');
+    // 位置也要对：定义必须在使用之前，否则注册阶段就 ReferenceError（实测踩过）
+    expect(ipcSource.indexOf('const handle = (channel: string')).toBeLessThan(
+      ipcSource.indexOf('handle(IPC.'),
+    );
+  });
+
+  it('渲染层写不了工作区与高危清单（工作区是权限边界）', () => {
+    expect(ipcSource).not.toContain('clean.workspace = parsed.workspace');
+    expect(ipcSource).not.toContain('clean.alwaysAskTools');
+    expect(ipcSource).toContain('alwaysAsk: policy.alwaysAsk');
+  });
   it('插件只读接口存在（贡献物与诊断必须能看见）', () => {
     expect(ipcSource).toContain('IPC.PLUGINS_GET');
     expect(ipcSource).toContain('pluginsStateSchema.parse');

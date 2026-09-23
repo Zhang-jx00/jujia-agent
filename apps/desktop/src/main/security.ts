@@ -1,3 +1,5 @@
+import { isAbsolute, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { BrowserWindow, WebPreferences } from 'electron';
 import { shell } from 'electron';
 import { SECURITY_BASELINE } from '@jujia/shared-ipc';
@@ -71,16 +73,50 @@ export function assertSecureWebPreferences(prefs: WebPreferences): void {
   }
 }
 
-/** 允许导航的源：仅应用自身；开发模式额外放行 vite dev server。 */
-export function isAllowedNavigation(targetUrl: string, devServerUrl?: string): boolean {
+/**
+ * 允许导航的源：仅应用自身；开发模式额外放行 vite dev server。
+ *
+ * **`file:` 不再无条件放行**（2026-09-23 修）：
+ * 此前任何 `file:` URL 都被视为"应用自身"，于是 `file:///C:/任意本地.html`
+ * 也能把主窗口导航过去 —— 那等于把渲染层换成一页本地文件，
+ * 而渲染层手里有 preload 桥（能调所有 IPC）。现在只允许**渲染层目录之内**的 file:；
+ * 没给定基线目录时**一律不放行**（fail closed）。
+ */
+export function isAllowedNavigation(
+  targetUrl: string,
+  devServerUrl?: string,
+  rendererDir?: string,
+): boolean {
   try {
     const target = new URL(targetUrl);
-    if (target.protocol === 'file:') return true;
+    if (target.protocol === 'file:') {
+      if (rendererDir === undefined) return false;
+      const base = resolve(rendererDir);
+      const rel = relative(base, resolve(fileURLToPath(target)));
+      return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+    }
     if (devServerUrl && target.origin === new URL(devServerUrl).origin) return true;
     return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * 校验 IPC 调用来自**我们自己的渲染层**（2026-09-23 补）。
+ *
+ * 为什么需要：33 个 `ipcMain.handle` 此前都无条件接受任何发送方。
+ * 渲染层的导航与新窗口已被基线挡住，所以这不是"已经能被利用"，
+ * 而是**纵深防御**：将来一旦引入 WebContentsView（内置浏览器）、扩展页面或任何
+ * 第二个 webContents，没有这道校验就等于给它开了全套 IPC。
+ *
+ * 判定依据是发送方 frame 的 URL：必须是应用自身（file: 且落在渲染层目录内），
+ * 或开发模式下的 dev server 源。拿不到 URL 时**拒绝**（fail closed）。
+ */
+export function isTrustedSenderUrl(senderUrl: string, devServerUrl?: string, rendererDir?: string): boolean {
+  if (senderUrl === '') return false;
+  if (senderUrl.startsWith('devtools://')) return true; // 开发者工具自身的调用
+  return isAllowedNavigation(senderUrl, devServerUrl, rendererDir);
 }
 
 export function safeProtocol(url: string): string {
@@ -103,7 +139,7 @@ export function openExternalIfSafe(url: string): boolean {
 
 export function applySecurityBaseline(
   win: BrowserWindow,
-  opts: { devServerUrl?: string | undefined } = {},
+  opts: { devServerUrl?: string | undefined; rendererDir?: string | undefined } = {},
 ): void {
   const { webContents } = win;
 
@@ -115,7 +151,7 @@ export function applySecurityBaseline(
 
   // 禁止渲染层导航离开应用自身
   webContents.on('will-navigate', (event, url) => {
-    if (!isAllowedNavigation(url, opts.devServerUrl)) {
+    if (!isAllowedNavigation(url, opts.devServerUrl, opts.rendererDir)) {
       event.preventDefault();
       console.warn('[security] 已拦截导航:', url);
     }

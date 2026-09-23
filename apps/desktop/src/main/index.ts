@@ -66,7 +66,7 @@ function createMainWindow(): BrowserWindow {
     webPreferences,
   });
 
-  applySecurityBaseline(win, { devServerUrl });
+  applySecurityBaseline(win, { devServerUrl, rendererDir: join(__dirname, '../renderer') });
   mainWindow = win;
   perfMark('main:window-created');
 
