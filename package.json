@@ -27,7 +27,9 @@
     "license:check": "node apps/desktop/scripts/license-check.mjs",
     "e2e": "npm run e2e --workspace @jujia/desktop",
     "app": "npm run app --workspace @jujia/desktop",
-    "mut": "node scripts/mutation-check.mjs"
+    "mut": "node scripts/mutation-check.mjs",
+    "check:docs": "node scripts/check-docs.mjs",
+    "check:docs:selftest": "node scripts/verify-docs-check.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

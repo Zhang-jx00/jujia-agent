@@ -90,7 +90,7 @@ cd apps\desktop && node -e "const p=require('node-pty');const t=p.spawn(process.
 1. 主进程 PTY 桥（`node-pty` + IPC 流式转发）
 2. 渲染层 `xterm` 终端组件（含 `fit` 自适应）
 3. **接入现有权限门**：终端属于 `exec` 类高副作用能力，**每次执行都要你确认**
-4. 补测试 + 跑五件套 + 提交打标签推送
+4. 补测试 + 跑门禁 + 提交打标签推送
 
 ---
 

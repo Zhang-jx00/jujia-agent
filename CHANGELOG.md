@@ -6,6 +6,55 @@
 
 ---
 
+## [v0.23.0-doccheck] — 2026-09-23 19:00
+
+**阶段**：文档一致性机器检查（把"文档漂移"变成可查）+ 修掉本轮查出的全部漂移
+**范围**：`scripts/check-docs.mjs`（新增）· `scripts/verify-docs-check.mjs`（新增，检查器自检）·
+`README.md` · `CONTRIBUTING.md` · `docs/{PROGRESS,COVERAGE-MATRIX,PRODUCT-GOAL,SETUP-TERMINAL}.md` · `package.json`
+
+**为什么做**：文档漂移**不会让任何测试变红**，却会让读者（包括未来的我）基于错误信息判断。
+此前真踩过：README 写 e2e 12 步而脚本已 13 步；测试数写 520 而实际 533。
+
+**一、`npm run check:docs`（8 项机械可验的检查）**
+
+README 提到的 npm 脚本都存在 · README 相对链接都指向存在的文件 ·
+`docs/` 下的文档都在 README 导航里 · 钩子事件数与文档的"七类"一致 ·
+权限模式数量与实现一致（5 种）· README 的 e2e 步数与脚本一致 ·
+PROGRESS 的门禁清单与真实脚本对齐 · **除 PROGRESS 外没有"N件套"式数量表述**。
+
+它**不能**查什么（如实说明）：语义是否正确、描述是否清楚、实现是否真按文档那样做 —— 那要靠测试与复核。
+
+**二、检查器当场抓到的漂移（这就是它存在的意义）**
+
+| 漂移 | 处置 |
+|------|------|
+| `docs/DEPENDENCY-LICENSES.md` 没挂进 README 导航 | 已挂上 |
+| 门禁数量在 **7 个文档里有三种说法**（四件套 / 五件套 / 七件套，实际已七件套） | **统一改为「门禁全绿」**，数量只保留在 PROGRESS 一处 —— 从根上消除这类漂移 |
+
+**三、检查器自检：证明它真的会咬**（`npm run check:docs:selftest`）
+
+"永远通过的检查等于没有检查"。自检脚本内存备份原文 → 注入 4 处漂移 →
+断言退出码 1 且命中期望的检查项 → 还原 → 断言恢复通过。
+**实测 4/4 全部被拦住**（不存在的脚本 / 失效链接 / 门禁数量写错 / e2e 步数不一致），还原后文档完好。
+
+**四、门禁升级为七件套**
+
+`typecheck / lint / test / smoke / perf / e2e / check:docs` —— `docs/PROGRESS.md` 是唯一权威口径，
+复核规范（`review/REVIEW-LOG.md`）第一遍已加入 `npm run check:docs`。
+
+**验证**
+
+| 项 | 结果 |
+|----|------|
+| typecheck / lint | 0 错误 / 0 警告 |
+| `npm run check:docs` | **8/8 通过** |
+| `npm run check:docs:selftest` | **4/4 注入的漂移全部被拦住**，还原后恢复通过 |
+| README 完整性 | 自检后核对无残留改动（内存备份，不落临时文件） |
+
+**回退点**：`git checkout v0.22.0-secharden`
+
+---
+
 ## [v0.22.0-secharden] — 2026-09-23 16:40
 
 **阶段**：安全加固批次（审批分级 + IPC 边界 + 终端环境）+ 接通一条从没接通的策略分支

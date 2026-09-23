@@ -57,6 +57,7 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 | 安全边界与风险声明 | [SECURITY.md](SECURITY.md) |
 | 做了什么、还差什么 | [docs/PROGRESS.md](docs/PROGRESS.md) · [CHANGELOG.md](CHANGELOG.md) |
 | 每轮复核记录（含未通过项） | [review/REVIEW-LOG.md](review/REVIEW-LOG.md) |
+| 第三方依赖与许可证 | [docs/DEPENDENCY-LICENSES.md](docs/DEPENDENCY-LICENSES.md) |
 
 > **取舍**：本地单机优先（不做云端中转）；不自造插件协议（直接说 MCP）；
 > 不采用激进的对话历史压缩（可解释性优先于省 token）。
@@ -96,6 +97,8 @@ npm run test           # 单元 + 集成测试
 npm run smoke          # 真实启动 Electron，断言 IPC 全链路 + 渲染层无 Node 泄漏
 npm run e2e            # 界面级端到端：真应用 + 真点击，13 步全自动（数据隔离到临时目录）
 npm run mut            # 变异测试：按 review/mutations.json 逐项改坏代码，验证测试真拦得住
+npm run check:docs     # 文档一致性：文档里的命令/链接/步数/事件数必须与代码一致
+npm run check:docs:selftest  # 检查器自检：注入 4 处漂移，证明它真的会失败（而不是永远绿）
 npm run perf           # 启动性能预算判定（首帧 < 1000ms）
 
 npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/）
@@ -171,7 +174,7 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 ## 参与贡献
 
 提交前请读 [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 里面写了这个项目对质量的具体要求
-（五件套门禁、复核两遍与变异测试、来源宁缺勿滥、绝不假称完成等），它们都来自实际踩过的坑。
+（门禁全绿、复核两遍与变异测试、来源宁缺勿滥、绝不假称完成等），它们都来自实际踩过的坑。
 
 ## 目录
 
