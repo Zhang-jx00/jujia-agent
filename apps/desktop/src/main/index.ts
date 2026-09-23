@@ -72,6 +72,14 @@ function createMainWindow(): BrowserWindow {
 
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = undefined;
+    /**
+     * 窗口销毁后，**把所有挂起的审批请求立即收尾**（轨道回归计划 1 修 M2/E5）。
+     *
+     * 此前 `PermissionBridge.cancelAll` 定义了却**从未被调用**：注释承诺"窗口销毁立即收尾"，
+     * 实际只能等满 120 秒超时 —— 工具调用链路会悬在那里，用户重开窗口也看不到任何反馈。
+     * 这类"注释即承诺、代码没兑现"的问题，正是排查报告点名的一类。
+     */
+    permissionBridge.cancelAll('窗口已关闭');
   });
 
   win.once('ready-to-show', () => {

@@ -57,6 +57,8 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 | 安全边界与风险声明 | [SECURITY.md](SECURITY.md) |
 | 做了什么、还差什么 | [docs/PROGRESS.md](docs/PROGRESS.md) · [CHANGELOG.md](CHANGELOG.md) |
 | 每轮复核记录（含未通过项） | [review/REVIEW-LOG.md](review/REVIEW-LOG.md) |
+| 工作怎么分类与记录（轨道计划） | [docs/TRACK-PLANS.md](docs/TRACK-PLANS.md) |
+| 全项目排查记录 | [review/TRACK-SWEEP-1.md](review/TRACK-SWEEP-1.md) |
 | 第三方依赖与许可证 | [docs/DEPENDENCY-LICENSES.md](docs/DEPENDENCY-LICENSES.md) |
 
 > **取舍**：本地单机优先（不做云端中转）；不自造插件协议（直接说 MCP）；
@@ -95,7 +97,7 @@ npm run typecheck      # 类型检查
 npm run lint           # 静态检查
 npm run test           # 单元 + 集成测试
 npm run smoke          # 真实启动 Electron，断言 IPC 全链路 + 渲染层无 Node 泄漏
-npm run e2e            # 界面级端到端：真应用 + 真点击，13 步全自动（数据隔离到临时目录）
+npm run e2e            # 界面级端到端：真应用 + 真点击，14 步全自动（数据隔离到临时目录）
 npm run mut            # 变异测试：按 review/mutations.json 逐项改坏代码，验证测试真拦得住
 npm run check:docs     # 文档一致性：文档里的命令/链接/步数/事件数必须与代码一致
 npm run check:docs:selftest  # 检查器自检：注入 4 处漂移，证明它真的会失败（而不是永远绿）
@@ -115,7 +117,10 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 | 打包版窗口打不开 | 环境里可能设了 `ELECTRON_RUN_AS_NODE=1`（Electron 会退化成纯 Node）。启动前清掉它：`set ELECTRON_RUN_AS_NODE=`（cmd）或 `$env:ELECTRON_RUN_AS_NODE=$null`（PowerShell） |
 | 想用一份**独立的**数据目录试东西 | 设 `JUJIA_DATA_BASE_DIR` 指向一个目录，数据就落在那里（自动化测试就是靠它隔离的） |
 
-## 当前能力（v0.10 阶段）
+## 当前能力
+
+> 状态口径：**本表只列"能不能用"**，精确状态以 [`docs/PROGRESS.md`](docs/PROGRESS.md) 为唯一权威；
+> 工作如何分类与记录见 [`docs/TRACK-PLANS.md`](docs/TRACK-PLANS.md)。
 
 | 能力 | 状态 |
 |------|------|
@@ -123,15 +128,20 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 | 流式对话（可随时停止、超时有界、断流不丢已产出内容） | ✅ |
 | **Agent Loop**（三分支：最终答复 / 继续调工具 / 移交）+ 熔断 | ✅ |
 | 内置文件工具（读 / 写 / 列目录）+ **路径沙箱** | ✅ |
-| **权限门**（5 种模式 + 按参数分级 + 敏感路径强制询问） | ✅ |
+| **权限门**（5 种模式 + 按参数分级 + 敏感路径强制询问 + **硬/软 ask 两级**） | ✅ |
 | 审批决策 **edit**（允许但先改参数再执行） | ✅ |
-| **内置终端**（xterm + 真伪终端，每次启动需审批） | ✅ |
+| **内置终端**（xterm + 真伪终端，每次启动需审批；子进程环境不含敏感变量） | ✅ |
 | **git 队列与 diff 审阅**（关键行摘录、噪音文件识别） | ✅ |
 | 工作区 **AGENTS.md** 项目指令 + `.jujia/NOTES.md` 长期记忆 | ✅ |
 | 外观定制（样式包 / 背景：纯色·渐变·图片·毛玻璃 / 对比度守护） | ✅ |
 | 工具卡 L0–L2（一行 → 卡片 → 抽屉看完整输出） | ✅ |
-| 启动性能预算与实测（`npm run perf`，首帧约 0.9s / 预算 1s） | 🔶 有回归待修 |
-| **MCP Host** / 技能管理 / 定时任务 | ⏳ 未开始 |
+| **MCP Host**（stdio 传输 · 连接同意 · 逐工具批准 · 断开摘工具） | ✅ |
+| **技能（Skills）**（`SKILL.md` 渐进披露 + `load_skill` 按需加载） | ✅ |
+| **插件**（一个清单打包技能 / 命令 / MCP 服务端 / 选项；贡献物经同一套批准流程） | ✅ |
+| **生命周期钩子**（七类事件 · 默认关闭 · 可拒绝 · 有超时与输出上限） | ✅ |
+| **界面级自动化验证**（`npm run e2e` 14 步 · 变异测试 · 文档一致性检查） | ✅ |
+| 启动性能（`npm run perf`；历史采样与预算见 [`docs/PERF-BUDGET.md`](docs/PERF-BUDGET.md)） | 🔶 见该文档的"采样铁律" |
+| 定时任务（RRULE + 补跑） | ⏳ 未开始 |
 | **无限画布** / **内置浏览器** / 多模态门控 | ⏳ 未开始 |
 | **轻量 IDE** / 远程接入 / 云端 worker 调度 | ⏳ 未开始 |
 

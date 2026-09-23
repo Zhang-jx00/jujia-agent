@@ -17,6 +17,7 @@ import {
 } from '@jujia/agent-core';
 import type { StreamEvent } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
+import { needsEviction, pickEvictionCandidate } from './session-lru';
 
 /**
  * 基础人格。**注意**：项目指令与长期记忆不写死在这里，而是每次发送时按工作区动态装配
@@ -50,16 +51,47 @@ interface Session {
   running: boolean;
   /** 会话级「总是允许」白名单（工具名） */
   alwaysAllow: Set<string>;
+  /** 最近一次使用时间（用于淘汰最久未用的会话） */
+  lastUsedAt: number;
 }
 
 const sessions = new Map<string, Session>();
+
+/**
+ * 会话上限（轨道回归计划 1 修 M1）。
+ *
+ * 此前 `sessions` **只增不删**：每开一个新会话就往 Map 里塞一份完整消息历史，
+ * 长时间使用（或反复新建会话）内存单调上涨。现在给一个硬上限，
+ * 超出时淘汰**最久未使用**的那个 —— 并把它说清楚，而不是悄悄丢。
+ */
+const MAX_SESSIONS = 20;
+
+/** 淘汰最久未使用的会话；正在运行的不动（避免把用户正在等的对话删掉） */
+function evictOldSessions(): void {
+  // 一次可能清掉多个（例如把上限调小之后），循环直到不需要淘汰为止
+  for (let guard = 0; guard < 1_000; guard += 1) {
+    if (!needsEviction(sessions.size, MAX_SESSIONS)) return;
+    const victim = pickEvictionCandidate([...sessions.values()], MAX_SESSIONS);
+    if (victim === null) return; // 全都在运行 → 暂不淘汰
+    sessions.delete(victim);
+    console.warn(
+      `[chat] 会话数达到上限 ${MAX_SESSIONS}，已释放最久未使用的会话（会话历史在内存中，属既定设计，见 README）`,
+    );
+  }
+}
 
 /** 仅用于测试 */
 export function __resetSessions(): void {
   sessions.clear();
 }
 
+/** 仅用于测试/诊断：当前驻留的会话数 */
+export function __sessionCount(): number {
+  return sessions.size;
+}
+
 function buildSession(connectionId: string): Session {
+  evictOldSessions();
   const session: Session = {
     id: randomUUID(),
     connectionId,
@@ -68,6 +100,7 @@ function buildSession(connectionId: string): Session {
     controller: null,
     running: false,
     alwaysAllow: new Set<string>(),
+    lastUsedAt: Date.now(),
   };
   sessions.set(session.id, session);
   return session;
@@ -116,6 +149,9 @@ export function sendMessage(
   const session = params.sessionId
     ? (sessions.get(params.sessionId) ?? buildSession(connectionId))
     : buildSession(connectionId);
+
+  // 记录使用时间：会话上限靠它淘汰"最久未用"的那个（轨道回归计划 1 修 M1）
+  session.lastUsedAt = Date.now();
 
   if (session.running) {
     throw new Error('该会话正在生成中，请先停止或等待完成');

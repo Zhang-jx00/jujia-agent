@@ -157,12 +157,35 @@ try {
 
   step('渲染层**不能**改工作区（工作区是权限边界的一部分）');
   const denied = await win.evaluate(async () => {
-    // 试图把工作区改到别处：应当被忽略（渲染层无权写这个字段）
-    await window.jujia.configSet({ workspace: 'D:\\evil' });
-    const after = await window.jujia.configGet();
-    return after.config.workspace;
+    // 试图把工作区改到别处：现在应当是**明确报错**（此前是静默丢弃 —— 轨道回归计划1 修 S1）
+    try {
+      await window.jujia.configSet({ workspace: 'D:\\evil' });
+      const after = await window.jujia.configGet();
+      return { threw: false, workspace: after.config.workspace, message: '' };
+    } catch (err) {
+      return { threw: true, workspace: null, message: err instanceof Error ? err.message : String(err) };
+    }
   });
-  if (denied !== null) fail(`渲染层竟然改动了工作区：${String(denied)}`);
+  if (denied.threw !== true) {
+    fail(`渲染层写工作区没有报错（说明仍被静默丢弃）：${JSON.stringify(denied)}`);
+  }
+  if (!String(denied.message).includes('不允许由界面写入')) {
+    fail(`报错文案没有说清原因：${String(denied.message)}`);
+  }
+  ok('渲染层写工作区被**明确拒绝**（不再是"看起来成功、其实没改"）');
+
+  step('权限模式切换**真的生效**（此前 UI 提示成功但配置被静默丢弃）');
+  const modeSwitched = await win.evaluate(async () => {
+    const before = (await window.jujia.configGet()).config.permissionMode;
+    await window.jujia.configSet({ permissionMode: 'plan' });
+    const after = (await window.jujia.configGet()).config.permissionMode;
+    await window.jujia.configSet({ permissionMode: before });
+    return { before, after };
+  });
+  if (modeSwitched.after !== 'plan') {
+    fail(`权限模式切换没有落盘：切换前 ${String(modeSwitched.before)}，切换后 ${String(modeSwitched.after)}`);
+  }
+  ok(`权限模式切换已落盘（${String(modeSwitched.before)} → plan → 已还原）`);
 
   step('设置工作区（**只走配置文件** —— 界面上的目录选择器需要真人操作，自动化改配置）');
   const configPath = join(dataDir, 'config.json');

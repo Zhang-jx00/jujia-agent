@@ -114,14 +114,19 @@ export function ChatPanel({ connections }: Props): ReactElement {
       }
       // done
       if (event.reason === 'tool_calls') {
-        // 模型想调工具，但对话页还没接工具执行（W5）：必须说明，不能静默当作结束
+        /**
+         * 说明（轨道回归计划 1 修 M7）：这里**曾经**写着"对话页尚未启用工具执行（W5 起支持）"，
+         * 而 W5b 起工具执行早已打通 —— 那句话变成了对用户的能力误导。
+         * 现在按事实写：正常流程下 Agent Loop 会自己执行工具并继续，
+         * 走到这里说明循环**没有继续**（例如预算/上限到达），于是如实告知"还可以继续"。
+         */
         setBubbles((prev) =>
           prev.map((b) =>
             b.streaming
               ? {
                   ...b,
                   streaming: false,
-                  error: '模型请求调用工具；当前对话页尚未启用工具执行（W5 起支持）。',
+                  error: '本轮在工具调用处结束了（工具已执行）；你可以继续说"继续"让它接着往下做。',
                 }
               : b,
           ),

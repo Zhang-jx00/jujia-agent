@@ -80,7 +80,7 @@ Electron 工程、性能与流畅、UI/UX/动效/组件卡片、模型适配（�
 
 | 决策 | 选择 | 依据 |
 |------|------|------|
-| Agent 执行位置 | utilityProcess（main 只路由） | Electron 官方性能/安全（S4 §7–8） |
+| Agent 执行位置 | **计划：utilityProcess（main 只路由）** —— ⚠️ **尚未实现**（现状：Agent Loop / 工具执行 / SSE / MCP 都在 main 进程） | Electron 官方性能/安全（S4 §7–8） |
 | 控制流 | 三分支 loop + maxTurns | OpenAI/Claude Agent SDK（S1 §2/§10） |
 | 工具路径 | **绝对路径** + 工作区校验 | Anthropic ACI 经验 + Yan 教训（S1 §5） |
 | 写并发 | 写盘/Shell 串行，只读可并行 | Claude Agent SDK（S1 §4） |
@@ -200,8 +200,8 @@ jujia/
 | M1 | 桌面壳与工程底座 | 窗口/主题/托盘/安全基线/monorepo | `createWindow`、`window.jujia` 白名单 | Electron | S4 §1–6, S5 §2–4 | 安全 checklist 全绿；冷启动 <3s |
 | M2 | 连接与模型适配 | 多 Connection、preset、apiFormat 两档、模型目录 | `testConnection`、`listModels` | M12 | S7 §1–6 | DeepSeek/GLM/OpenAI/Anthropic 各连一次成功 |
 | M3 | 聊天与流式 UI | 会话列表、消息、thinking 折叠、rAF 合批 | `sendMessage`、`stop` | M2/M12 | S6 §3, S5 §5/§7 | 流式时可输入；断流可重试 |
-| M4 | 工具执行与权限 | 内置工具（read/write/ls/run_command/git）、权限队列 | `runTool`、permission request/resolve | M5/M12 | S1 §4–8, S6 §5 | 权限面板不闪退不自动拒；危险命令强制确认 |
-| M5 | Agent Loop（agent-core） | 三分支循环、maxTurns、失败恢复、只读子代理 | `runAgentTurn` | M2/M4/M6 | S1 §1–10, S2 §11–18 | 循环有界；工具错误回模型可恢复 |
+| M4 | 工具执行与权限 | 内置工具（read/write/ls/run_command/git）、权限队列 | `runTool`、permission request/resolve | M1/M12 | S1 §4–8, S6 §5 | 权限面板不闪退不自动拒；危险命令强制确认 |
+| M5 | Agent Loop（agent-core） | 三分支循环、maxTurns、失败恢复、只读子代理 | `runAgentTurn` | M2/**M4**/M6 | S1 §1–10, S2 §11–18 | 循环有界；工具错误回模型可恢复 |
 | M6 | 记忆与上下文 | core blocks、notes、压缩 handoff、评估脚本 | `assembleContext`、`compact` | M12 | S3 §1–10 | 重启后能回忆偏好；压缩后有 UI 提示 |
 | M7 | 扩展生态 | MCP Host、Skills、Hooks、定时任务 | `mcp.list/call`、`skills.install`、`schedule.*` | M5 | S2 §1–12 | 挂 filesystem server；装 1 个 Skill；跑 1 个定时 |
 | M8 | 终端与 Git | xterm 终端、git status/diff/commit 队列 | `pty.write/resize`、`git.*` | M1/M4 | S4 §9, F6 | 终端可交互；diff 懒加载 |
@@ -222,7 +222,7 @@ jujia/
 | P3 | W10–W12 | 扩展生态与发布 | M4（W11 末） | MCP/Skills/定时可用；portable 可发布 |
 | P4 | W13–W15 | **画布与浏览器** | M5a（W15 末） | §6 P4 验收全绿 |
 | P5 | W5c | **自定义权限规则表**（allow/deny/ask + 参数 glob + 即时生效） | 规则表 | 写一条 deny 后立刻被拦 |
-| W5d | **钩子四类齐备**（PreToolUse/PostToolUse/Stop/SessionStart） | 钩子注册表 | 四类均可挂载且拒绝生效 |
+| W5d | **钩子七类齐备**（SessionStart / UserPromptSubmit / PreToolUse / PermissionRequest / PostToolUse / PostToolUseFailure / Stop） | 钩子注册表 | 七类均可挂载且拒绝生效 |
 | W17 | **主题与背景自定义**（背景图/纯色/毛玻璃/透明度 + 持久化） | ui-tokens + 设置页 | 立即生效且重启保留 |
 | W19 | **轻量 IDE MVP**：文件树 + CodeMirror 6 编辑器 + diff 视图（与 Agent 共用工作区句柄） | `features/ide` | 能开文件/编辑/看 diff/保存 |
 | W20 | **远程主机接入**：SSH 或出站隧道 + **首次指纹确认** + 凭据保管（密钥不出本机） | `packages/remote` | 连上真实主机并列目录；匿名连接一律拒绝 |
@@ -359,7 +359,7 @@ jujia/
 | 7 | 内置浏览器引入安全面（恶意网页） | 中 | `setWindowOpenHandler` 一律拒绝或转系统浏览器；will-navigate 白名单；权限请求默认拒绝；scheme 白名单（S10 §96） |
 | 8 | 能力门控误判（声明说有、实际没有） | 中 | 声明 + 探测双保险；探测失败走兜底提示而非崩溃；厂商 preset JSON 化便于热修 |
 | 9 | 配置/会话损坏 | 中 | json-store 单测模拟半截写入；.bak 自愈 |
-| 10 | 单文件巨石回潮 | 中 | ESLint 行数上限（main ≤300 行、单文件 ≤800 行）+ CI |
+| 10 | 单文件巨石回潮 | 中 | ESLint 行数上限（单文件 ≤800 行）+ CI。**⚠️ 原计划的"main ≤300 行"尚未落地**（现状：`ipc.ts` 565 行、`mcp-service.ts` 511 行）；收敛方式与优先级见 `review/TRACK-SWEEP-1.md` |
 | 11 | 学习时间与课业冲突 | 中 | 周表允许 ±1 周滑动；里程碑验收不减配 |
 | 12 | 厂商 SDK/文档链接失效 | 低 | 知识库已有 URL 校验脚本；每阶段开工前跑一遍当簇来源链接 |
 

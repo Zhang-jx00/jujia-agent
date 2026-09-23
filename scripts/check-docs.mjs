@@ -120,6 +120,49 @@ const allScripts = new Set([
 }
 
 /* ------------------------------------------------------------------ *
+ * 4b. PROGRESS 里的数量也必须与实测一致（轨道回归计划 1 修 S7：此前这块是盲区）
+ * ------------------------------------------------------------------ */
+
+{
+  // 测试文件数：直接数真实文件，而不是引 vitest（快、且不需要跑测试）
+  const countTests = (dir) => {
+    let n = 0;
+    const walk = (p) => {
+      let entries;
+      try {
+        entries = readdirSync(p, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (e.name === 'node_modules' || e.name === '.tmp' || e.name === '.trash') continue;
+        const full = join(p, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name.endsWith('.test.ts')) n += 1;
+      }
+    };
+    walk(join(repoRoot, dir));
+    return n;
+  };
+  const testFiles = countTests('packages') + countTests('apps');
+  const statedFiles = /(\d+)\s*个测试文件/.exec(progress)?.[1];
+  report(
+    'PROGRESS 里的测试文件数与实际一致',
+    statedFiles !== undefined && Number(statedFiles) === testFiles,
+    `实际 ${testFiles} 个 .test.ts；PROGRESS 写 ${statedFiles ?? '(未写)'}`,
+  );
+
+  const e2eSource = read('apps/desktop/scripts/e2e-ui.mjs');
+  const e2eSteps = [...e2eSource.matchAll(/^\s*step\(/gm)].length;
+  const statedSteps = /e2e[^\n]*?(\d+)\s*步/.exec(progress)?.[1];
+  report(
+    'PROGRESS 里的 e2e 步数与脚本一致',
+    statedSteps !== undefined && Number(statedSteps) === e2eSteps,
+    `脚本 ${e2eSteps} 步；PROGRESS 写 ${statedSteps ?? '(未写)'} 步`,
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 5. 门禁清单：命令必须真实存在；**"N件套"这类数字只允许出现在 PROGRESS 一处**
  * ------------------------------------------------------------------ */
 

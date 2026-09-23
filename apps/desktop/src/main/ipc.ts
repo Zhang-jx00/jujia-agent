@@ -226,17 +226,48 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     return configSnapshotSchema.parse(await readConfigSnapshot());
   });
 
+  /**
+   * 允许**渲染层**写入的配置键（白名单）。
+   *
+   * 关键改动（轨道回归计划 1 修 S1）：**白名单之外的键一律报错，不再静默丢弃**。
+   * 此前是"照单收下、只挑几个写进去"，于是：
+   * - 权限面板调 `configSet({ permissionMode })` 会**成功返回但什么都没改** ——
+   *   界面提示"已切换为只读模式"，实际仍是默认模式，刷新还回弹（安全相关的静默失败）；
+   * - `workspace` 同理。**静默丢弃是这一类缺陷的共同根因**，所以改成显式拒绝。
+   *
+   * 为什么 `permissionMode` 可以写：它是**用户自己的选择**，界面本来就要提供这个开关。
+   * 至于"渲染层被注入后可以自己切模式"——那种情况下它同样能自动点掉审批弹窗，
+   * 所以在 IPC 层禁止写入**不带来真实安全收益**，却会让功能不可用（取舍已写进 SECURITY.md）。
+   *
+   * 为什么 `workspace` 仍然不可写：它决定**工具能碰哪些路径**，属于权限边界，
+   * 只能由用户在主进程的目录选择器里指定（那是一个真实的人手动作）。
+   */
+  const WRITABLE_CONFIG_KEYS: ReadonlyArray<keyof AppConfig> = ['theme', 'appearance', 'permissionMode'];
+
   handle(IPC.CONFIG_SET, async (_e, patch: unknown): Promise<ConfigSnapshot> => {
     // 只接受已知字段，防止渲染层塞任意键污染配置；
     // 显式剔除 undefined 以配合 exactOptionalPropertyTypes
     const parsed = appConfigSchema.partial().parse(patch);
+
+    const notWritable = (Object.keys(parsed) as (keyof AppConfig)[]).filter(
+      (key) => !WRITABLE_CONFIG_KEYS.includes(key),
+    );
+    if (notWritable.length > 0) {
+      throw new Error(
+        `这些配置项不允许由界面写入：${notWritable.join('、')}。` +
+          '工作区请用「选择目录」按钮（主进程对话框）设置；高危清单请直接改配置文件。',
+      );
+    }
+
     const clean: Partial<AppConfig> = {};
     if (parsed.theme !== undefined) clean.theme = parsed.theme;
-    // **不接受渲染层写 workspace**（2026-09-23 修）：
-    // workspace 决定工具能碰哪些路径，属于权限边界的一部分；它只能由用户通过
-    // 目录选择器（WORKSPACE_PICK，走主进程对话框）设置。让渲染层能改，
-    // 等于把"工具可达范围"交给一段可能被注入的脚本。
-    // 另外两个安全相关字段（permissionMode / alwaysAskTools）同样不在白名单里，理由相同。
+    if (parsed.permissionMode !== undefined) {
+      clean.permissionMode = parsed.permissionMode;
+      // bypassPermissions = 全部放行，值得在日志里留痕（会话之外可回溯"谁在什么时候放开了它"）
+      if (parsed.permissionMode === 'bypassPermissions') {
+        console.warn('[security] 权限模式已切到 bypassPermissions（全部放行）—— 请确认你在可信环境中');
+      }
+    }
     if (parsed.appearance !== undefined) {
       // 外观必须过一遍受控字段校验才允许落盘：
       // 样式包将来会喂给 CSS 变量，非法内容等于把注入面写进配置（见卡片 013 的 RCE 事件）。
