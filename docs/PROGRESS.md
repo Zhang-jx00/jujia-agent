@@ -31,6 +31,7 @@
 | W23a/b | **外观系统**：样式包契约 + 对比度守护 + 设置页（M13/M23） | `v0.8.2-w23a` / `v0.9.3-w23b` | 拒绝任意 CSS/JS；4 个内置包 |
 | W12 | 打包（NSIS + portable）+ Release 发布 | `v0.9.1-pack` / `v0.9.2-release` | Release `v0.9.0-w9a`；`npmRebuild=false` 后打包成功 |
 | — | 开源就绪（LICENSE / SECURITY / CONTRIBUTING / 三方声明 / LOGO） | `v0.11.0-oss` 等 | 作者提供的 LOGO；`assets/icon/README.md` |
+| — | **文档一致性机器检查**（8 项）+ 检查器自检（证明它会咬） | `v0.23.0-doccheck` | check:docs 8/8；自检 4/4 拦住注入漂移；修掉 7 个文档的数量漂移 |
 | W11c | **插件贡献的 MCP 服务端接入**（来源标注 / 不可编辑删除 / 禁用可见） | `v0.21.0-w11c` | 变异 5/5 被拦；真服务端端到端通过 |
 | W11a | **技能（Skills）**：目录 + SKILL.md + 渐进披露 + 前缀稳定 | `v0.17.0-w11a` | 变异 10/10 被拦；558 项测试 |
 | — | **零人工测试基建**：界面级端到端（Playwright + 真 Electron，12 步） | `v0.19.0-e2e` | e2e 12/12；变异 5/5 被拦；抓到 2 处集成缺陷并修复 |
