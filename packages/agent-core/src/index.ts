@@ -9,6 +9,7 @@ export * from './tools/builtin/file-tools';
 export * from './providers/tool-call-accumulator';
 export * from './loop/agent-loop';
 export * from './commands/argv';
+export * from './browser/policy';
 export * from './plugins/types';
 export * from './plugins/loader';
 export * from './skills/types';
