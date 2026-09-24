@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { decideNavigation, decideWindowOpen, isLoopbackHost, normalizeInputUrl } from './policy';
+import {
+  decideNavigation,
+  decideProgrammaticNavigation,
+  decideUserNavigation,
+  decideWindowOpen,
+  isLoopbackHost,
+  normalizeInputUrl,
+} from './policy';
 
 /**
  * 内置浏览器的导航策略（轨道扩容计划 1 · M10）。
@@ -100,5 +107,72 @@ describe('isLoopbackHost（界面标注"本地服务"用）', () => {
     // 陷阱：127.0.0.1.evil.com 不是本机（前缀相似而已）
     expect(isLoopbackHost('127.0.0.1.evil.com')).toBe(false);
     expect(isLoopbackHost('localhost.evil.com')).toBe(false);
+  });
+});
+
+describe('decideUserNavigation（用户主动导航：只过协议策略）', () => {
+  it('放行 http/https 并回传规范化后的地址', () => {
+    const r = decideUserNavigation('https://example.com/a');
+    expect(r.allow).toBe(true);
+    if (r.allow) expect(r.url).toBe('https://example.com/a');
+  });
+
+  it('只输域名时补 https（复用 normalizeInputUrl，不是另写一套）', () => {
+    const r = decideUserNavigation('example.com');
+    expect(r.allow).toBe(true);
+    // 断言写死字面量真值，不用 normalizeInputUrl 自己证明自己（自引用断言踩过多次）
+    if (r.allow) expect(r.url).toBe('https://example.com/');
+  });
+
+  it('危险协议一律拒绝并给出理由（不是空返回）', () => {
+    const r = decideUserNavigation('file:///C:/Windows/win.ini');
+    expect(r.allow).toBe(false);
+    if (!r.allow) expect(r.reason).toContain('file');
+  });
+
+  it('带空白的输入被拒（用户粘贴时常见的看不见的坑）', () => {
+    const r = decideUserNavigation('https://exa mple.com');
+    expect(r.allow).toBe(false);
+  });
+});
+
+describe('decideProgrammaticNavigation（页面自己跳：协议 + 不得越站）', () => {
+  it('同站跳转放行', () => {
+    expect(decideProgrammaticNavigation('https://example.com', 'https://example.com/next').allow).toBe(true);
+  });
+
+  it('跨站跳转被拒，且理由里写明两侧 origin（用户看得懂为什么没跳过去）', () => {
+    const r = decideProgrammaticNavigation('https://example.com', 'https://evil.test/');
+    expect(r.allow).toBe(false);
+    if (!r.allow) {
+      expect(r.reason).toContain('example.com');
+      expect(r.reason).toContain('evil.test');
+    }
+  });
+
+  it('userOrigin 为 null 时一律拒绝：还没有用户意志可言', () => {
+    expect(decideProgrammaticNavigation(null, 'https://example.com/').allow).toBe(false);
+  });
+
+  it('协议策略先于 origin 判定：同站的 file: 也照样拒', () => {
+    const r = decideProgrammaticNavigation('https://example.com', 'file:///C:/x');
+    expect(r.allow).toBe(false);
+    if (!r.allow) expect(r.reason).toContain('页面跳转被拒');
+  });
+
+  it('大小写与默认端口不算跨站（URL.origin 已规范化）', () => {
+    // 用户打开 https://Example.com，页面跳 https://example.com/x —— 这是同站，不该误拦
+    expect(decideProgrammaticNavigation('https://example.com', 'https://EXAMPLE.com/x').allow).toBe(true);
+    // 而显式带 443 端口同样视为同源（origin 会去掉默认端口）
+    expect(decideProgrammaticNavigation('https://example.com', 'https://example.com:443/x').allow).toBe(true);
+  });
+
+  it('子域不是同站（example.com 的页面不能跳到 intranet.example.com）', () => {
+    expect(decideProgrammaticNavigation('https://example.com', 'https://intranet.example.com/').allow).toBe(false);
+  });
+
+  it('跳到本机地址一律要单独授权（防"网页拿来打本机服务"）', () => {
+    // 用户打开公网页 → 页面跳 127.0.0.1:随机端口，这是内网探测的经典路径
+    expect(decideProgrammaticNavigation('https://example.com', 'http://127.0.0.1:9999/').allow).toBe(false);
   });
 });

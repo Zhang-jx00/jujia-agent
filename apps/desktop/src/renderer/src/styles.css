@@ -894,6 +894,45 @@ html[data-jj-bg-kind='glass'] .app-shell {
   height: 100%;
 }
 
+/* ------------------------------ 内置浏览器（M10） ------------------------------ */
+
+/* 全部走设计令牌（不硬编码颜色/间距）—— 与终端区同一套约定 */
+.jj-browser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-lg) var(--space-xl);
+  min-height: 0;
+  height: 100%;
+}
+
+.jj-browser-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+/* 地址栏吃掉剩余宽度：按钮多，但输入框永远是第一优先 */
+.jj-browser-head .jj-field {
+  flex: 1 1 260px;
+  min-width: 200px;
+}
+
+/*
+ * 这块是**占位区**：真正的网页由主进程的 WebContentsView 浮在这里之上，
+ * CSS 画不出它的内容 —— 它只需要把自己的位置与尺寸报上去。
+ * 所以这里给的是一个明确的空区（含最小高度），别让页面看起来像坏了。
+ */
+.jj-browser-host {
+  flex: 1 1 auto;
+  min-height: 240px;
+  background: var(--c-bg-input);
+  border: 1px dashed var(--c-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
 /* ------------------------------ MCP（W10e） ------------------------------ */
 
 .jj-mcp-list {

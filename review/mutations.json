@@ -56,6 +56,22 @@
       "find": "    permissionBridge.cancelAll('窗口已关闭');",
       "replace": "    // 变异：不收尾",
       "test": "apps/desktop/src/main/ipc-wiring.test.ts"
+    },
+    {
+      "id": "M8",
+      "desc": "跨站跳转的 origin 守卫被绕过（页面可任意跳出用户所开的站点，等于冒用用户的授权）",
+      "file": "packages/agent-core/src/browser/policy.ts",
+      "find": "  if (targetOrigin !== userOrigin) {",
+      "replace": "  if (userOrigin === '\\u0000never') {",
+      "test": "packages/agent-core/src/browser/policy.test.ts"
+    },
+    {
+      "id": "M9",
+      "desc": "给浏览器视图配上 preload 桥（第三方网页拿到整套 IPC 能力 —— 本功能最不该有的一步）",
+      "file": "apps/desktop/src/main/security.ts",
+      "find": "    webviewTag: SECURITY_BASELINE.webviewTag,\n    // **不设 preload**：第三方网页拿不到应用的能力桥\n  };",
+      "replace": "    webviewTag: SECURITY_BASELINE.webviewTag,\n    // 变异：给网页配能力桥\n    preload: 'C:/somewhere/preload.js',\n  };",
+      "test": "apps/desktop/src/main/browser-wiring.test.ts"
     }
   ]
 }

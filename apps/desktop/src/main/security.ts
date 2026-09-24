@@ -74,6 +74,45 @@ export function assertSecureWebPreferences(prefs: WebPreferences): void {
 }
 
 /**
+ * 内置浏览器（`WebContentsView`）的 webPreferences —— **刻意不复用 `secureWebPreferences`**。
+ *
+ * 为什么必须另开一份：`secureWebPreferences(preload)` 要求传 preload 桥，
+ * 而 preload 桥 = `window.jujia` = 整套 IPC 能力。**把 preload 给第三方网页，
+ * 等于把网页变成一个能调所有通道的调用方** —— 那正是这个项目最不想要的一次授权。
+ * 所以浏览器视图的底线是：**安全开关同样全开，但没有 preload**。
+ *
+ * 第二道防线在 `ipc.ts` 的统一入口：`isTrustedSenderUrl` 只认"渲染层目录之内的 file: 或 dev server 源"，
+ * 第三方网页两者都不是，即使它拿到某个桥也调不动 IPC。但**我们仍然不给桥**（纵深防御，不依赖单点）。
+ */
+export function browserViewPreferences(): WebPreferences {
+  return {
+    contextIsolation: SECURITY_BASELINE.contextIsolation,
+    sandbox: SECURITY_BASELINE.sandbox,
+    nodeIntegration: SECURITY_BASELINE.nodeIntegration,
+    webSecurity: SECURITY_BASELINE.webSecurity,
+    webviewTag: SECURITY_BASELINE.webviewTag,
+    // **不设 preload**：第三方网页拿不到应用的能力桥
+  };
+}
+
+/**
+ * 浏览器视图的配置自检：安全开关全开，**且必须没有 preload**。
+ *
+ * 为什么单独写一条断言而不是复用 `assertSecureWebPreferences`：后者要求"必须有 preload"，
+ * 复用它等于强迫我给网页配桥（或者把它改松 —— 那更糟，主窗口的自检就废了）。
+ * 这条与那条各自严格，改任何一边都不会让另一边悄悄松掉。
+ */
+export function assertBrowserViewPreferences(prefs: WebPreferences): void {
+  assertBaselineConstantIntact();
+  if (prefs.contextIsolation !== true) throw new Error('[browser] contextIsolation 必须为 true');
+  if (prefs.sandbox !== true) throw new Error('[browser] sandbox 必须为 true');
+  if (prefs.nodeIntegration === true) throw new Error('[browser] nodeIntegration 必须为 false');
+  if (prefs.webSecurity === false) throw new Error('[browser] webSecurity 不得关闭');
+  if (prefs.webviewTag === true) throw new Error('[browser] webviewTag 必须关闭');
+  if (prefs.preload !== undefined) throw new Error('[browser] 第三方网页绝不能拿到 preload 能力桥');
+}
+
+/**
  * 允许导航的源：仅应用自身；开发模式额外放行 vite dev server。
  *
  * **`file:` 不再无条件放行**（2026-09-23 修）：

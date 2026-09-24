@@ -130,3 +130,59 @@ export function decideWindowOpen(rawUrl: string): { action: 'deny'; forwardToSys
       : `连外部打开都不做：${decision.reason}`,
   };
 }
+
+/**
+ * **用户主动**导航的判定：只过协议策略，并回传规范化后的地址。
+ *
+ * 单独成一个函数，是为了让"用户点的"与"页面自己跳的"是两条**明确不同**的路径 ——
+ * 前者是用户意志（地址是他敲的），后者不是。把两者混成一个判断，等于让页面冒用用户的授权。
+ *
+ * 规范化**复用本文件的 `normalizeInputUrl`**：调用方不要自己再补一遍协议。
+ * 两处各写一次，早晚会漂成两套规则。
+ */
+export function decideUserNavigation(
+  rawUrl: string,
+): { allow: true; url: string } | { allow: false; reason: string } {
+  const decision = decideNavigation(rawUrl);
+  if (!decision.allow) return { allow: false, reason: decision.reason };
+  const normalized = normalizeInputUrl(rawUrl);
+  if (normalized === null) return { allow: false, reason: '网址无法规范化' };
+  return { allow: true, url: normalized };
+}
+
+/**
+ * **页面发起**的导航（重定向 / meta refresh / 脚本改 `location`）：
+ * 除协议策略外，还必须**留在用户所打开的那个站点（origin）内**。
+ *
+ * 为什么需要这一层：`decideNavigation` 只回答"这是不是合法的 http(s) 网址"，
+ * 它不知道**用户本意要看的是哪儿**。放任页面任意跳，等于把"用户点了 example.com"
+ * 这张通行证发给整个网络 —— 跳到钓鱼页、跳到 `127.0.0.1:<随机端口>` 打本机服务，
+ * 都排在这个口子后面。
+ *
+ * `userOrigin === null` 时**一律拒绝**：那时还没有任何用户意志可言。
+ */
+export function decideProgrammaticNavigation(
+  userOrigin: string | null,
+  targetUrl: string,
+): { allow: true } | { allow: false; reason: string } {
+  const decision = decideNavigation(targetUrl);
+  if (!decision.allow) return { allow: false, reason: `页面跳转被拒：${decision.reason}` };
+
+  if (userOrigin === null) {
+    return { allow: false, reason: '页面在没有用户打开任何地址时试图导航，已拒绝' };
+  }
+  let targetOrigin: string;
+  try {
+    // `URL.origin` 自带规范化（主机小写、去默认端口），所以比较不会被输入形态糊弄
+    targetOrigin = new URL(targetUrl).origin;
+  } catch {
+    return { allow: false, reason: '页面跳转的目标不是合法网址，已拒绝' };
+  }
+  if (targetOrigin !== userOrigin) {
+    return {
+      allow: false,
+      reason: `页面试图跳出用户打开的站点（${userOrigin} → ${targetOrigin}），已拒绝`,
+    };
+  }
+  return { allow: true };
+}

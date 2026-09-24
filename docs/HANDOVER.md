@@ -51,7 +51,7 @@
 │  │                             session-lru.ts（会话淘汰）、secret.ts、paths.ts、connections-store.ts
 │  ├─ src/preload/               contextBridge 白名单暴露
 │  ├─ src/renderer/              React 界面（features/{chat,permissions,hooks,plugins,mcp,appearance,...}）
-│  ├─ scripts/e2e-ui.mjs         界面级端到端（真 Electron，14 步，数据隔离到临时目录）
+│  ├─ scripts/e2e-ui.mjs         界面级端到端（真 Electron，步数以脚本为准，数据隔离到临时目录）
 │  └─ scripts/run-electron.mjs   Electron 启动器（必须经它启动，见 §5.2）
 ├─ packages/
 │  ├─ shared/                    json-store 原子存储（基础设施）
@@ -170,10 +170,30 @@
 - 配置：`config-store.ts` + **白名单写入**（`config-write.ts` 纯函数：白名单外字段**显式报错**，绝不静默丢弃；`permissionMode` 可写、`workspace` 只能由主进程目录选择器写）。
 - **日志与自动更新未做**。
 
-### 2.11 内置浏览器（M10）🔶 第 1 步完成
+### 2.11 内置浏览器（M10）🔶 第 1、2 步已交付（能开网页、能读正文，危险导航被拦且理由可见）
 
-- 已做：**导航策略层** `packages/agent-core/src/browser/policy.ts`（纯函数 + 20 例测试，见 §3.3）。
-- 未做：服务层 / IPC / 界面 / e2e —— **这就是当前中断位置**（§3.2）。
+- **策略层** `packages/agent-core/src/browser/policy.ts`：`decideNavigation` / `decideWindowOpen` /
+  `normalizeInputUrl` / `isLoopbackHost`，本步又加了 `decideUserNavigation` 与
+  `decideProgrammaticNavigation`（用例数以测试文件为准）。**新逻辑也放这一层**，不放服务层 ——
+  纯函数才单测得动、才做得了变异。
+- **服务层** `apps/desktop/src/main/browser-service.ts`：`WebContentsView` 挂到主窗口。
+  **视图配置刻意不带 preload**（第三方网页绝不能拿到 `window.jujia` 这套能力）；
+  为此单独写了 `assertBrowserViewPreferences`，它**反过来要求"必须没有 preload"** ——
+  没有复用主窗口那个断言，避免为了共用而把主窗口的检查改松。
+- **两条导航路径是分开的**：用户主动 → `decideUserNavigation`（只过协议白名单）；
+  页面自己跳（重定向 / meta refresh / 脚本改 location）→ `decideProgrammaticNavigation`，
+  除协议白名单外**还不许跳出用户所打开的那个 origin**。
+  为什么：`decideNavigation` 只知道"这是不是合法网址"，不知道用户本意要看哪儿；
+  放任页面乱跳等于把用户的授权发给整个网络（含跳去 `127.0.0.1:随机端口` 打本机服务）。
+- **IPC**：`BROWSER_OPEN / NAVIGATE / BACK / FORWARD / RELOAD / CLOSE / GET_TEXT / SET_BOUNDS / STATE`
+  ＋ `BROWSER_STATE_CHANGED`，入参出参全过 zod，且全部经统一入口（默认受发送方校验保护）。
+- **界面**：`features/browser/BrowserPanel.tsx`（地址栏 + 后退/前进/重载/关闭 + 读正文 + **被拒理由展示**）。
+  注意 `WebContentsView` 是**浮在渲染层之上的原生视图**，CSS 管不到它 ——
+  渲染层只能把占位区坐标报给主进程去摆（`BROWSER_SET_BOUNDS`）。
+- **e2e**：起**本地** HTTP 服务（127.0.0.1 随机端口，不依赖外网）做真实加载与正文提取；
+  另断言"跨站跳转被拦"与"`file://` 被拒且理由里点出协议与风险"。
+- **仍未做**：PDF / Markdown 应用内查看；「三档打开方式」（内置 / 系统默认 / 自选浏览器）；
+  目前**离开页签即关闭视图**（视图浮在最上层，不收掉会盖住别的页面；代价是切回来要重新加载）。
 
 ### 2.12 质量基建（这是本项目最值钱的部分之一，请务必沿用）
 
@@ -200,7 +220,7 @@
 
 | 里程碑 | 内容 | 状态 |
 |--------|------|------|
-| **M10 内置浏览器** | WebContentsView + 三档打开方式 + 读正文给模型 | **🔶 第 1 步已完成（策略层），第 2 步起未做 ← 中断位置** |
+| **M10 内置浏览器** | WebContentsView + 三档打开方式 + 读正文给模型 | 🔶 **第 1、2 步已交付**（策略 + 服务 + IPC + 界面 + e2e）；**剩余：三档打开方式、PDF/Markdown 查看** ← 本里程碑未完部分 |
 | M9 无限画布 | 节点/连线/DAG 校验/执行/持久化 | ⏳ 未开始 |
 | M11 多模态 | capability registry、视频生成任务 | ⏳ 未开始 |
 | M14 / M17 | 多子 agent 编排 / 长任务断点续跑 | ⏳ 未开始 |
@@ -211,28 +231,33 @@
 | **内置 exec 工具** | 让模型能自主执行命令（`run_command`），**一律硬 ask** | ⏳ 未做（当前命令执行只有"用户手驱终端 + 批准的 MCP 工具"两条路） |
 | M12 日志/自动更新 | 结构化日志、更新通道 | ⏳ 未做 |
 
-### 3.2 中断位置与原因（接手方从这里继续）
+### 3.2 中断位置与原因（从这里继续）
 
-**轨道扩容计划 1 第 2 步（M10 内置浏览器）**，具体待办：
+**轨道扩容计划 1（M10 内置浏览器）第 1、2 步已交付**（策略层 + 服务层 + IPC + 界面 + e2e，见 §2.11）。
+本里程碑**未完的剩余部分**：
 
-1. **服务层**：`apps/desktop/src/main/browser-service.ts`（建议名）—— 挂 `WebContentsView` 到主窗口；
-   **导航一律先过 `decideNavigation`**（`packages/agent-core/src/browser/policy.ts`，已就绪）；
-   `setWindowOpenHandler` 用 `decideWindowOpen`（一律 deny，合法链接标记可交系统浏览器）；
-   复用安全基线（无 node 集成、contextIsolation）；**读正文**用 `executeJavaScript('document.body.innerText')` 之类，注意只读。
-2. **IPC 通道**：`BROWSER_OPEN / NAVIGATE / BACK / FORWARD / CLOSE / GET_TEXT / STATE` + `BROWSER_STATE_CHANGED` 推送
-   （加进 `packages/shared-ipc/src/channels.ts` 与 `contracts.ts`，**入参出参过 zod**）。
-3. **界面**：渲染层新增浏览器页签（地址栏 + 后退/前进/关闭 + 「读正文」按钮）；表单里展示策略拒绝理由。
-4. **e2e**：**起本地 HTTP 服务**（Node `http`，127.0.0.1 随机端口）验证真实加载与正文提取 —— **不依赖外网**；
-   另加一条"输入 `file://` 被拒绝并显示理由"的界面级断言。
-5. **文档与记录**：PROGRESS 行、CHANGELOG（`[vX.Y.Z-扩容1]`）、REVIEW-LOG 复核。
+1. **三档打开方式**：内置（默认）/ 系统默认浏览器（`shell.openExternal`，已过 http/https 白名单）/
+   自选本机浏览器 exe（设置页选路径、以 URL 参数启动），并记住默认档；
+2. **PDF / Markdown 应用内查看**（PLAN §8.4 的文档查看部分；PDF 选型是 pdfjs-dist）；
+3. **视图生命周期的体验取舍**：现在"离开页签即关闭"，要不要改成"隐藏但保留"（需给视图加 hide 能力，
+   并想清楚隐藏期间网页继续跑算不算副作用）。
 
-**中断原因**：按路线图分步交付 —— 策略层（安全核心）先行并充分测试后，再做服务与界面；
-上一轮完成策略层并验证（20/20）后到达此处。
+**下一轮的候选（按 `docs/TRACK-ROADMAP.md` §二/§三 的队列）**：R-12 `ipc.ts` 拆分（≤300 行）、
+M6 记忆写入侧接线、M8 git 模块接线、M4 内置 exec 工具 —— **其中 git 与 exec 都是"能力边界"级的缺口**，
+比 M10 的收尾更影响"这个项目到底能干什么"。
+
+**中断原因**：按路线图分步交付 —— 策略层先行并充分测试，再做服务与界面（已完成）；
+剩下的三档打开方式与文档查看是独立增量，不必挡在下一个里程碑前面。
 
 ### 3.3 已就绪、可直接使用的半成品
 
-- `packages/agent-core/src/browser/policy.ts`：`decideNavigation / decideWindowOpen / normalizeInputUrl / isLoopbackHost`，
-  **20 例测试**（含 9 种危险协议、大小写/空白绕过、畸形输入 fail-closed、本机前缀陷阱）。**接手方请直接复用，不要重写。**
+- `packages/agent-core/src/browser/policy.ts`：`decideNavigation / decideWindowOpen / normalizeInputUrl /
+  isLoopbackHost / decideUserNavigation / decideProgrammaticNavigation`，
+  用例覆盖 9 种危险协议、大小写与空白绕过、畸形输入 fail-closed、本机前缀陷阱、跨站跳转、子域与本机探测
+  （**用例数以 `policy.test.ts` 为准，别在文档里写死数字**）。**接手方请直接复用，不要重写。**
+- `apps/desktop/src/main/browser-wiring.test.ts`：**接线锁**（策略真的挂在 `will-navigate` 上、
+  视图拿不到 preload、通道都在统一入口后面、没有"执行任意 JS"的通道）。
+  改浏览器相关的任何东西先看这个文件，它红就是真的破坏了底线。
 
 ### 3.4 已"降级处理"的能力（不要当成 bug，也不要悄悄恢复）
 
@@ -248,7 +273,8 @@
 
 | 优先级 | 任务 | 步骤摘要 | 预期目标（DoD） |
 |--------|------|----------|-----------------|
-| **P0** | **M10 第 2 步**（服务/IPC/界面/e2e） | 见 §3.2 的 5 步 | 浏览器能开网页、能读正文；危险导航被拒且理由可读；e2e 含本地 HTTP 真加载 |
+| **P0（已完成）** | ~~M10 第 2 步（服务/IPC/界面/e2e）~~ → **`v0.31.0-扩容1` 已交付** | 见 §2.11 | 能开网页、能读正文；危险导航被拒且理由可读；e2e 含本地 HTTP 真加载 ✅ 全部达成 |
+| **P1** | M10 剩余：三档打开方式 + PDF/Markdown 查看 | 见 §3.2 | 各自可独立验收，不挡下面的项 |
 | **P1** | **R-12：`ipc.ts` 拆分**（596 行 → ≤300） | 按块抽成 `ipc/handlers/{terminal,connections,chat,mcp,hooks,permission-rules}.ts`，共享上下文对象传 `handle`；**同步改 `ipc-wiring.test.ts` 扫描全部 ipc 文件** | 每文件 ≤300 行；全部接线锁保持绿色；e2e 全绿 |
 | **P1** | **M6 写入侧 + M8 git 模块接线（读侧与写侧）+ M4 内置 exec 工具** | 过权限门（读=放行、写=软 ask、执行/`commit`=硬 ask）；接线后**补变异测试与接线锁**（防"抽了纯函数却没接上"） | 用户能通过界面/对话真实使用；台账记录 |
 | **P2** | **M9 无限画布** | 先写 `docs/LINKAGE-1.md`（画布↔编码引擎的对接契约）再动工 | 3 节点流程能跑、图可存可读 |
@@ -382,7 +408,13 @@ README 的"无服务器中转"存在**表述冲突**（SECURITY 的出站表也�
 9. **必须持续接触新技术**：选型要说明"为什么用现在这个做法"并记录被替代的旧做法；新技术要落到**代码或文档**。
 10. **收尾清理**：任务结束跑 `python scripts/cleanup.py` 预览 → `--apply`（移入 `.trash/`，30 天可反悔，绝不直接删）。
 11. **知识统一进 `knowledge/`**，规划进 `docs/`，复盘/排查进 `review/`；不另起散乱目录。
-12. **版本控制流程**：每完成一个阶段 **先写 CHANGELOG 条目**，再把 CHANGELOG 与代码一起 `git add`、提交、打标签（`vX.Y.Z-轨道N`）、汇报（当前进度/本次范围/验证方式）。
+12. **版本控制流程**：每完成一个阶段 **先写 CHANGELOG 条目**（并把 `apps/desktop/package.json` 的版本号一并改到位 ——
+    **必须在跑图形类门禁之前改**，见 §5.11 与复核 025 的教训），再把 CHANGELOG 与代码一起 `git add`、提交；
+    **接着在"已提交的干净基线"上补跑 `npm run mut`**（变异测试的禁忌要求基线已提交，见 §5.5）；
+    **全绿之后才打标签（`vX.Y.Z-轨道N`）并 push**，推送后用 `git ls-remote` 核对远端 SHA；最后汇报（当前进度/本次范围/验证方式）。
+    > **顺序为什么是这样（2026-09-24 更正）**：此前这条写的是"提交 → 打标签 → 推送 → 再补跑变异"，
+    > 那会把标签打在变异验证**之前** —— 与 §5.10 第 2 条"全绿才允许打标签"自相矛盾。
+    > 标签一旦推上去就撤不回（"绝不改写已推送的历史与标签"），所以正确顺序只能是**先验证、后打标签**。
 13. **十条轨道**（命名规则，定义见 `docs/TRACK-PLANS.md`）：**回归**（用户发起的整体审查+大修复）· **铺设**（agent 核心能力）· **扩容**（画布/IDE/浏览器/远程等新形态）· **拓展**（技能/钩子/插件/外观）· **加固**（安全/边界/存储）· **升级**（依赖与做法替换）· **优化**（性能与资源）· **规整**（结构/规范/记录）· **排查**（系统找问题，产出 `review/TRACK-SWEEP-N.md`）· **接驳**（功能间对接，产出 `docs/LINKAGE-N.md`）。
 
 ### 5.11 历史问题速查表（项目执行中出现过的问题 → 原因 / 处理 / 现状）

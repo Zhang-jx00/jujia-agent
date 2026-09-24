@@ -10,6 +10,94 @@
 > 轨道分类见 `docs/TRACK-PLANS.md`；排期与修复队列见 `docs/TRACK-ROADMAP.md`。
 ---
 
+## [v0.31.0-扩容1] — 2026-09-24 13:40
+
+**轨道**：**轨道扩容计划 1**（内置浏览器 M10）—— **第 2 步：服务层 + IPC + 界面 + e2e**，把上一步交付的策略层接成用户真能用的功能
+
+**范围**：`packages/agent-core/src/browser/policy.ts`（+2 个纯判定）· `apps/desktop/src/main/browser-service.ts`（新增）·
+`packages/shared-ipc/{channels,contracts}.ts`（+9 通道）· `apps/desktop/src/main/{ipc,security}.ts` ·
+`src/preload/index.ts` · `src/renderer/src/features/browser/BrowserPanel.tsx`（新增）+ `App.tsx` + `styles.css` ·
+`apps/desktop/src/main/browser-wiring.test.ts`（新增）· `policy.test.ts`（扩充）· `scripts/e2e-ui.mjs`（+3 步）·
+`review/mutations.json`（+2 条）。
+
+**为什么这一轮把攻击面最大的功能接完了还敢上**：安全核心（策略层）上一轮已经做完并被测试钉住，
+这一轮是**把它接上运行路径**，并且每一步都可验证：策略在不在真实路径上被调用（接线锁）、
+网页拿不拿得到能力桥（视图配置断言）、危险导航与跨站跳转是否真被拦（界面级 e2e）。
+
+**三条底线（每条都有对应用例，其中两条有变异测试兜）**
+
+1. **第三方网页拿不到能力桥。** 视图配置**刻意不复用**主窗口的 `secureWebPreferences(preload)` ——
+   那个模板要求传 preload，而 preload = `window.jujia` = 整套 IPC。
+   新增 `browserViewPreferences()`（不带 preload）与**方向相反**的 `assertBrowserViewPreferences()`
+   （要求"必须没有 preload"）。**没有去改松主窗口那条断言来共用**，两条各自严格。
+   → 变异 M9 就是"给视图配上 preload"，必须被拦住。
+2. **用户主动导航与页面自发导航是两条路径。**
+   `decideUserNavigation`（只过协议白名单）vs `decideProgrammaticNavigation`（协议白名单 +
+   **不得越出用户所打开的 origin**）。为什么必须分开：`decideNavigation` 只知道"这是不是合法网址"，
+   不知道用户本意要看哪儿；放任页面任意跳等于把用户那点授权发给整个网络，
+   包括跳去 `127.0.0.1:随机端口` 打本机服务。**子域也算跨站**（`example.com` 的页面不能跳 `intranet.example.com`）。
+   → 变异 M8 就是"绕过 origin 守卫"，必须被拦住。
+3. **拒绝必须可见。** 地址栏被拒时界面显示协议与风险（不是"打开失败"）；
+   页面被拦的跳转单独列出 url + 理由；读正文被截断时明说"非全文"。
+
+**一处刻意的取舍（不是漏做）**：浏览器视图**不另设审批弹窗** —— 地址是用户自己敲的，
+那次输入就是本次导航的授权，再弹一次是重复索求、会催生"随手点允许"（审批疲劳）。
+真正要拦的是页面自己发起的跳转，那由第 2 条底线负责。**若所有者认为开浏览器本身就该过一次审批，说一声，改法很小。**
+
+**e2e 用本地 HTTP 服务而不是公网页面**：`createServer` 绑 `127.0.0.1` 随机端口，
+顺带也验证了策略里"本机地址允许"这条（用例本身就靠它才跑得起来）。
+三步断言：真实加载 + 正文真读到（断言来源与"非 0 字"）、meta-refresh 跨站跳转被拦且当前页没被换掉、
+`file://` 被拒且理由里点出协议与风险。**不依赖外网，断网也不会红。**
+
+**新逻辑放在策略层而不是服务层**：`decideUserNavigation` / `decideProgrammaticNavigation`
+都进 `agent-core/browser/policy.ts` —— 纯函数才单测得动、才做得了变异；服务层只留 Electron 胶水，
+这样"改胶水悄悄改掉规则"这件事不可能发生。规范化复用同一层的 `normalizeInputUrl`，没有重抄一遍补协议的逻辑。
+
+**顺手修掉自己刚写出来的一个坑**：第一版把两个判定写在服务层里，且
+`decideProgrammaticNavigation` 里出现了 `new URL(a ? x : x)` 这种**两分支字面相同**的三元 ——
+正是上一轮刚在 F-12 标注过的模式。已删本地副本改为导入策略层，并顺手清掉 4 处 `no-useless-assignment`。
+
+**测试规模**：41 个测试文件 · 687 个测试全绿（+1 网络用例默认跳过）· 界面级 e2e 17 步。
+
+**版本号先改到位再跑图形门禁**：`apps/desktop/package.json` 0.30.0 → **0.31.0** 在 smoke/perf/e2e **之前**完成
+（复核 025 的教训：版本号会进 `APP_INFO`，先跑再改等于门禁跑的不是最终状态）。
+
+**验证**
+
+| 项 | 结果 |
+|----|------|
+| 策略 + 接线用例 | ✅ 42 passed（policy 31 · browser-wiring 11） |
+| `npm run typecheck` | ✅ 5 个 workspace 全部 0 错误 |
+| `npm run lint` | ✅ 0 错误 0 警告 |
+| `npm test` | ✅ **687 通过 / 1 跳过**（41 个文件） |
+| `npm run check:docs` | ✅ 18 项全绿（含"能力表交叉断言"：M10 标的是 🔶 并写明剩余部分，没有虚报） |
+| `npm run check:docs:selftest` | ✅ 8 处注入漂移全部被拦住，还原后检查器恢复通过 |
+| `npm run smoke` | ✅ 主进程 + 预加载桥 + 渲染层 + IPC 全链路；渲染层无 Node 泄漏；`BrowserPanel` 已进入构建产物（7.12 kB 独立 chunk） |
+| `npm run perf` | 835ms 过预算（冷启动 <1500ms / 可交互 <1000ms）—— **非规范样本**，紧跟构建之后取的单点，不能当回归基线（欠账仍在 `docs/PERF-BUDGET.md` §五） |
+| `npm run e2e` | ✅ **17/17 通过**（含浏览器三步）—— 但**第一次跑是红的**，见下面"两轮修复" |
+| `npm run mut` | 见"在干净基线上补跑"的记录（新增 M8 / M9 两条） |
+
+**e2e 第一次跑红了两处 —— 都是断言自己的问题，不是浏览器功能的问题**（这正是"界面操作必须自动化"的价值：
+写的时候以为对，跑一遍才知道取不到）：
+
+1. **锚点取的是 placeholder**：等"只支持 http/https"来判断页签渲染，但这句话在 `<input placeholder=…>` 里，
+   `innerText` **永远取不到** → 改成等空态正文"尚未打开"。
+2. **等待被上一步的旧文本秒过**：`file://` 那一步等的是"已拒绝"，而跨站拦截的理由末尾就叫"…已拒绝"，
+   于是断言在**新结果还没回来时**已被满足，快照拿到的是旧状态 → 改成等本步独有的"本地文件协议"。
+
+> 第 2 条是一类**通用陷阱**：`waitForText` 的锚点必须在**这一步之前不存在**。已在复核 026 里记成可复用的检查项。
+
+**功能侧结论未受影响**：跨站跳转确实被拦（当前地址仍是 `/jump`、理由点出了目标 origin）、
+`file://` 确实被拒且理由含协议与风险、正文确实从本地页面读到（非 0 字、origin 对得上）。
+
+
+**M10 未完（如实记录，不算本步欠账）**：三档打开方式（内置 / 系统默认 / 自选浏览器）、
+PDF 与 Markdown 应用内查看；另外"离开页签即关闭视图"是当前的体验取舍，切回来要重新加载。
+
+**回退点**：`git checkout v0.30.0-回归4`
+
+---
+
 ## [v0.30.0-回归4] — 2026-09-24 12:40
 
 **轨道**：**轨道回归计划 4**（由**接手方（QoderCN）的交接验收报告**触发：复查既有成果、修正已存在的偏移与矛盾，不新增功能）

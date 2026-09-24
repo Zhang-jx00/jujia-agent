@@ -92,6 +92,31 @@ export const IPC = {
 
   /** 读取插件加载结果（含诊断）；界面用它展示装了什么、贡献了什么、哪里有问题 */
   PLUGINS_GET: 'plugins:get',
+
+  /* ---------------------------- 内置浏览器（M10） ---------------------------- */
+
+  /**
+   * 用户从地址栏主动打开/跳转。
+   *
+   * 为什么 OPEN 与 NAVIGATE 分两条：OPEN 负责"创建受控视图 + 首次加载"，
+   * NAVIGATE 负责"视图已存在时按用户意图换页"。两者走**同一条策略判定**
+   * （`agent-core` 的 `decideNavigation`），分开只是让界面的意图与主进程的生命周期对齐。
+   */
+  BROWSER_OPEN: 'browser:open',
+  BROWSER_NAVIGATE: 'browser:navigate',
+  BROWSER_BACK: 'browser:back',
+  BROWSER_FORWARD: 'browser:forward',
+  BROWSER_RELOAD: 'browser:reload',
+  /** 关闭视图并销毁 webContents（不留后台） */
+  BROWSER_CLOSE: 'browser:close',
+  /** 读取正文交给模型（**只读**：拿不到 DOM 之外的任何能力） */
+  BROWSER_GET_TEXT: 'browser:get-text',
+  /** 渲染层上报占位区位置；主进程据此摆放视图（视图浮在渲染层之上，只能由主进程定位） */
+  BROWSER_SET_BOUNDS: 'browser:set-bounds',
+  /** 查询当前状态 */
+  BROWSER_STATE: 'browser:state',
+  /** main → renderer：状态变化广播（含"某次导航被策略拒绝"） */
+  BROWSER_STATE_CHANGED: 'browser:state-changed',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

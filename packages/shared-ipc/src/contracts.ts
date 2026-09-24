@@ -494,3 +494,55 @@ export const pluginsStateSchema = z.object({
   diagnostics: z.array(pluginDiagnosticSchema),
 });
 export type PluginsState = z.infer<typeof pluginsStateSchema>;
+
+/* ------------------------------------------------------------------ *
+ * 内置浏览器（M10 · 轨道扩容计划 1）
+ *
+ * 与 MCP 同样的理由在这里**独立定义形状**，不从 @jujia/agent-core 引类型：
+ * 渲染层绝不引 agent-core（它带 node 内置依赖，进了浏览器包会直接让构建失败）。
+ * 策略本体（`decideNavigation` / `decideWindowOpen`）是 agent-core 里的纯函数，
+ * 由主进程调用；契约层只描述跨进程的数据形状与"拒绝理由"的载体。
+ * ------------------------------------------------------------------ */
+
+/** 网址输入：长度设上限 —— 网址不该被拿来搬运大数据 */
+export const browserUrlSchema = z.object({
+  url: z.string().min(1).max(2048),
+});
+export type BrowserUrlPayload = z.infer<typeof browserUrlSchema>;
+
+/** 占位区位置（CSS 像素、相对渲染层视口）；上限是为了挡住畸形输入而不是限制功能 */
+export const browserBoundsSchema = z.object({
+  x: z.number().int().min(0).max(20000),
+  y: z.number().int().min(0).max(20000),
+  width: z.number().int().min(0).max(20000),
+  height: z.number().int().min(0).max(20000),
+});
+export type BrowserBoundsPayload = z.infer<typeof browserBoundsSchema>;
+
+export const browserStateSchema = z.object({
+  /** 是否已有受控视图 */
+  open: z.boolean(),
+  url: z.string(),
+  title: z.string(),
+  canGoBack: z.boolean(),
+  canGoForward: z.boolean(),
+  /** 是否本机地址（界面据此标"本地服务"） */
+  loopback: z.boolean(),
+  /** 最近一次被策略拒绝的导航与被拒理由；null = 没有。拒绝必须可见 */
+  blocked: z.object({ url: z.string(), reason: z.string() }).nullable(),
+});
+export type BrowserState = z.infer<typeof browserStateSchema>;
+
+/** 打开 / 导航的结果：**被拒时一定带可读理由**（同时回一份最新状态，界面不用二次查询） */
+export const browserNavResultSchema = z.union([
+  z.object({ ok: z.literal(true), state: browserStateSchema }),
+  z.object({ ok: z.literal(false), reason: z.string(), state: browserStateSchema }),
+]);
+export type BrowserNavResult = z.infer<typeof browserNavResultSchema>;
+
+/** 读正文的结果：超限截断并如实标注，绝不静默截断 */
+export const browserTextResultSchema = z.union([
+  z.object({ ok: z.literal(true), origin: z.string(), text: z.string(), truncated: z.boolean() }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type BrowserTextResult = z.infer<typeof browserTextResultSchema>;

@@ -55,6 +55,15 @@ import {
   type TerminalEventPayload,
   type TerminalStartPayload,
   type TerminalStartResultPayload,
+  browserBoundsSchema,
+  browserNavResultSchema,
+  browserStateSchema,
+  browserTextResultSchema,
+  browserUrlSchema,
+  type BrowserBoundsPayload,
+  type BrowserNavResult,
+  type BrowserState,
+  type BrowserTextResult,
 } from '@jujia/shared-ipc';
 
 /**
@@ -308,6 +317,72 @@ const api = {
     return permissionRuleViewSchema.parse(
       await ipcRenderer.invoke(IPC.PERMISSION_RULES_TOGGLE, { id, enabled }),
     );
+  },
+
+  /* ---------------------------- 内置浏览器（M10） ---------------------------- */
+
+  /**
+   * 用户主动打开/跳转。被拒时**一定带可读理由**（拒绝要看得见，不是静默失败）。
+   * 策略判定全在主进程，这里只负责传参和校验返回。
+   */
+  async browserOpen(url: string): Promise<BrowserNavResult> {
+    return browserNavResultSchema.parse(
+      await ipcRenderer.invoke(IPC.BROWSER_OPEN, browserUrlSchema.parse({ url })),
+    );
+  },
+
+  async browserNavigate(url: string): Promise<BrowserNavResult> {
+    return browserNavResultSchema.parse(
+      await ipcRenderer.invoke(IPC.BROWSER_NAVIGATE, browserUrlSchema.parse({ url })),
+    );
+  },
+
+  async browserBack(): Promise<BrowserState> {
+    return browserStateSchema.parse(await ipcRenderer.invoke(IPC.BROWSER_BACK));
+  },
+
+  async browserForward(): Promise<BrowserState> {
+    return browserStateSchema.parse(await ipcRenderer.invoke(IPC.BROWSER_FORWARD));
+  },
+
+  async browserReload(): Promise<BrowserState> {
+    return browserStateSchema.parse(await ipcRenderer.invoke(IPC.BROWSER_RELOAD));
+  },
+
+  async browserClose(): Promise<BrowserState> {
+    return browserStateSchema.parse(await ipcRenderer.invoke(IPC.BROWSER_CLOSE));
+  },
+
+  /**
+   * 上报占位区位置。
+   * 为什么必须经渲染层报：`WebContentsView` 是浮在渲染层**之上**的原生视图，
+   * CSS 管不到它，只能由主进程按坐标摆放 —— 而只有渲染层知道自己的那块地方在哪、多大。
+   */
+  async browserSetBounds(bounds: BrowserBoundsPayload): Promise<boolean> {
+    return z.boolean().parse(
+      await ipcRenderer.invoke(IPC.BROWSER_SET_BOUNDS, browserBoundsSchema.parse(bounds)),
+    );
+  },
+
+  /** 读取正文（交给模型用）；主进程只取可见文本且有上限 */
+  async browserGetText(): Promise<BrowserTextResult> {
+    return browserTextResultSchema.parse(await ipcRenderer.invoke(IPC.BROWSER_GET_TEXT));
+  },
+
+  async browserState(): Promise<BrowserState> {
+    return browserStateSchema.parse(await ipcRenderer.invoke(IPC.BROWSER_STATE));
+  },
+
+  /** 订阅浏览器状态变化；返回取消订阅函数 */
+  onBrowserState(handler: (state: BrowserState) => void): () => void {
+    const listener = (_e: unknown, payload: unknown): void => {
+      const parsed = browserStateSchema.safeParse(payload);
+      if (parsed.success) handler(parsed.data);
+      // 解析失败**不静默**：契约不匹配要能被看见（与流式事件同一纪律）
+      else console.error('[preload] 丢弃不符合契约的浏览器状态事件:', parsed.error.message);
+    };
+    ipcRenderer.on(IPC.BROWSER_STATE_CHANGED, listener);
+    return () => ipcRenderer.removeListener(IPC.BROWSER_STATE_CHANGED, listener);
   },
 };
 

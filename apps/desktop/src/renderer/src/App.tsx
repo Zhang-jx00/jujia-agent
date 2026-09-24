@@ -37,6 +37,9 @@ const PermissionRulesPanel = lazy(() =>
     default: m.PermissionRulesPanel,
   })),
 );
+const BrowserPanel = lazy(() =>
+  import('./features/browser/BrowserPanel').then((m) => ({ default: m.BrowserPanel })),
+);
 
 /** 兜底样式包改为在启动时从动态导入的模块里取，见下方 useEffect（首屏不加载 ui-tokens） */
 
@@ -55,6 +58,7 @@ type Tab =
   | 'connections'
   | 'chat'
   | 'terminal'
+  | 'browser'
   | 'mcp'
   | 'permissions'
   | 'hooks'
@@ -72,6 +76,7 @@ const TAB_LABEL: Record<Tab, string> = {
   connections: '连接',
   chat: '对话',
   terminal: '终端',
+  browser: '浏览器',
   mcp: 'MCP',
   permissions: '权限',
   hooks: '钩子',
@@ -202,6 +207,7 @@ export function App(): ReactElement {
           {state.phase === 'ready' && tab === 'terminal' && (
             <TerminalPanel workspaceRoot={state.loaded.config.config.workspace} />
           )}
+          {state.phase === 'ready' && tab === 'browser' && <BrowserPanel />}
           {state.phase === 'ready' && tab === 'mcp' && <McpPanel />}
           {state.phase === 'ready' && tab === 'permissions' && <PermissionRulesPanel />}
           {state.phase === 'ready' && tab === 'hooks' && <HooksPanel />}

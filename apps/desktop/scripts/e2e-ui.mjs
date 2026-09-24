@@ -15,6 +15,7 @@
  */
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electronPath from 'electron';
@@ -272,6 +273,79 @@ try {
   if (!mcp.includes('不能在这里编辑或删除')) fail('插件服务端没有标注不可编辑/删除', mcp.slice(0, 900));
   ok('MCP 页就绪');
 
+  /* ---------------------------- 内置浏览器（M10） ----------------------------
+   *
+   * 为什么起**本地** HTTP 服务而不是打开某个公网页面：
+   * 拿公网做端到端等于把测试交给网络和第三方 —— 断网、改版、限流都会红，
+   * 而红的原因与被测代码毫无关系。127.0.0.1 随机端口顺带验证了策略里
+   * "本机地址允许"这一条（本用例本身就靠它才跑得起来）。
+   */
+  step('内置浏览器：真实加载本地页面并读出正文（不依赖外网）');
+  const MARKER = 'JUJIA_E2E_BODY_MARKER';
+  // 端口在 listen 之后才知道；请求处理函数是**之后**才被调用的，所以这里先声明再赋值是安全的
+  let portAddr = 0;
+  const server = createServer((req, res) => {
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    if (req.url === '/jump') {
+      // 页面自己跳去 localhost —— 与用户打开的 127.0.0.1 **不是同一个 origin**，必须被拦
+      res.end(
+        `<html><head><meta http-equiv="refresh" content="0;url=http://localhost:${String(portAddr)}/x">` +
+          `</head><body>waiting-jump</body></html>`,
+      );
+      return;
+    }
+    res.end(`<html><head><title>e2e</title></head><body><p>${MARKER}</p><p>第二行正文</p></body></html>`);
+  });
+  await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+  const bound = server.address();
+  if (bound === null || typeof bound === 'string') fail('本地测试服务没拿到端口', String(bound));
+  portAddr = bound.port;
+  const baseUrl = `http://127.0.0.1:${String(portAddr)}`;
+
+  await tabButton('浏览器').click();
+  const browserReady = await waitForText('尚未打开');
+  if (browserReady !== true) fail('浏览器页签没有渲染出来', String(browserReady).slice(0, 600));
+
+  const addressBox = win.locator('input[aria-label="地址栏"]');
+  await addressBox.fill(`${baseUrl}/hello`);
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const opened = await waitForText('已打开');
+  if (opened !== true) fail('打开本地页面没有成功', String(opened).slice(0, 800));
+
+  // 读正文：证明 executeJavaScript 真的在**已加载的那个页面**上跑过（长度非 0、来源对得上）
+  await win.locator('button', { hasText: '读正文' }).first().click();
+  const readDone = await waitForText('已读取');
+  if (readDone !== true) fail('读正文没有返回结果', String(readDone).slice(0, 800));
+  const readOut = await bodyText();
+  if (!readOut.includes(baseUrl)) fail('读正文返回的来源不是本地页面', readOut.slice(0, 600));
+  if (readOut.includes('：0 字')) fail('读正文拿到 0 字（正文提取实际没生效）', readOut.slice(0, 600));
+  ok('本地页面真加载、正文真读到');
+
+  step('内置浏览器：页面自己跨站跳转被拦（用户点开的站点不能被页面冒用）');
+  await addressBox.fill(`${baseUrl}/jump`);
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const jumped = await waitForText('跳出用户打开的站点');
+  if (jumped !== true) fail('跨站跳转没有被拦下（策略可能没挂在 will-navigate 上）', String(jumped).slice(0, 800));
+  const afterJump = await bodyText();
+  if (!afterJump.includes(`${baseUrl}/jump`)) {
+    fail('被拦之后当前地址已经不是原页面（说明跳转实际发生了）', afterJump.slice(0, 600));
+  }
+  if (afterJump.includes('localhost')) ok('理由里点出了目标站点，且当前页没被换掉');
+  else fail('被拦理由里没有目标 origin', afterJump.slice(0, 600));
+
+  step('内置浏览器：file:// 被拒且理由可读（界面级断言）');
+  await addressBox.fill('file:///C:/Windows/win.ini');
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const blockedFile = await waitForText('本地文件协议');
+  if (blockedFile !== true) fail('file:// 没有被拒绝', String(blockedFile).slice(0, 800));
+  const fileOut = await bodyText();
+  // 只说"不行"不够：必须说清是**哪个协议、为什么**，否则用户会以为是软件坏了
+  if (!fileOut.toLowerCase().includes('file')) fail('拒绝理由里没有点出 file 协议', fileOut.slice(0, 600));
+  if (!fileOut.includes('本地文件')) fail('拒绝理由没有说明风险（读磁盘任意文件）', fileOut.slice(0, 600));
+  ok('危险协议被拒且理由可见');
+
+  server.close();
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -289,5 +363,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 技能真加载 → 权限规则增删生效 → 钩子/MCP 页就绪 → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 技能真加载 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → 干净退出');
 process.exit(0);
