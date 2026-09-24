@@ -41,6 +41,37 @@ if (base.code !== 0) {
   fail('基线状态下检查器就已经失败 —— 请先修好文档再跑这个验证');
 }
 
+/**
+ * 「能力表声称了不存在的内建工具」这条注入用例的**保留哨兵名**。
+ *
+ * 为什么要专门设计它（而不是随手挑个工具名）：这类用例的靶子会被**成功**腐蚀 ——
+ * M4 把 `run_command` 做出来之后，上一轮拿它当假工具的用例立刻失效（复核 028 的 K-3），
+ * 再往前 M8 也冲掉过一次（复核 027 的 H-4）。每次都靠人记得换靶，就一定会再犯。
+ *
+ * 所以这里用一个**结构上不会被占用的名字**：以 `__selftest` 结尾。
+ * 真实工具名一律是 `read_file` 这种小写下划线风格，谁也不会给产品能力起这种名字；
+ * 下面还有一道前置断言：万一真被占用，直接报错说明原因，而不是让用例"没被拦住"再让人猜。
+ */
+const TOOL_SENTINEL = 'no_such_tool__selftest';
+
+{
+  const TOOL_SOURCES = [
+    'packages/agent-core/src/tools/builtin/file-tools.ts',
+    'packages/agent-core/src/tools/builtin/exec-tool.ts',
+    'packages/agent-core/src/skills/tool.ts',
+    'packages/agent-core/src/loop/agent-loop.ts',
+  ];
+  const taken = TOOL_SOURCES.filter((f) =>
+    readFileSync(join(repoRoot, f), 'utf8').includes(TOOL_SENTINEL),
+  );
+  if (taken.length > 0) {
+    fail(
+      `保留哨兵名「${TOOL_SENTINEL}」已被 ${taken.join('、')} 占用 —— ` +
+      '自检靶子会静默失效。请换一个仍以 __selftest 结尾的名字，并同步下面那条用例。',
+    );
+  }
+}
+
 /** 每个用例：文件、要替换的片段、替换成什么、期望命中的检查项名 */
 const cases = [
   {
@@ -88,14 +119,12 @@ const cases = [
   },
   {
     // 断言源自交接验收抓到的真实漂移：能力表标 ✅ 却没有运行期通路。
-    // **靶子必须始终"仍然假"**：M4 把 `run_command` 做出来之后，拿它当假工具就失效了 ——
-    // 这是复核 027 的 H-4（"接线成功会让证明会咬的用例失去靶子"）第二次上演。
-    // 现在换成确实不存在的 `delete_file`，并把锚点从"e2e 步数那一行"挪到一个不随步数变动的行：
-    // 锚点文字本身也会被一次成功冲掉，两处都要跟着换，否则自检直接崩而不是"抓住漂移"。
+    // 靶子用上面的**保留哨兵名**（以 __selftest 结尾，结构上不会被真实工具占用），
+    // 锚点取不随步数/交付变动的行 —— 这两处都是被 H-4 / K-3 那两次"成功腐蚀靶子"教出来的。
     name: '能力表声称了不存在的内建工具',
     file: 'README.md',
     from: '| 审批决策 **edit**（允许但先改参数再执行） | ✅ |',
-    to: '| 审批决策 **edit**（允许但先改参数再执行） | ✅ |\n| 删除文件 | ✅ 由 `delete_file` 承担 |',
+    to: `| 审批决策 **edit**（允许但先改参数再执行） | ✅ |\n| 删除文件 | ✅ 由 \`${TOOL_SENTINEL}\` 承担 |`,
     expect: '真实运行期通路',
   },
   {

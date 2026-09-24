@@ -1,5 +1,5 @@
 {
-  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）。基线：本轮主提交",
+  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）。基线：本轮主提交",
   "mutations": [
     {
       "id": "M1",
@@ -120,6 +120,14 @@
       "find": "    const env = buildTerminalEnv(deps.baseEnv, { workspaceRoot: cwd });",
       "replace": "    const env = { ...deps.baseEnv } as Record<string, string>; // 变异：不脱敏",
       "test": "packages/agent-core/src/tools/builtin/exec-tool.test.ts"
+    },
+    {
+      "id": "M16",
+      "desc": "拆分后漏装配一个模块（git 的 handler 存在但从未被注册 = 运行期不可达，正是 F-1 那一类缺陷的形状）",
+      "file": "apps/desktop/src/main/ipc.ts",
+      "find": "  registerGitIpc(ctx);",
+      "replace": "  // 变异：忘记装配 git 模块",
+      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
     }
   ]
 }

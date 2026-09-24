@@ -1,183 +1,222 @@
 /**
- * 接线行为锁（复核 009）。
+ * 接线行为锁（复核 009 建立，R-12 拆分后扩到全部 ipc 文件）。
  *
  * 为什么用"扫源码"这种形式：D2 是一个**接线缺陷**，不是函数逻辑缺陷 ——
- * 它表现为「两个调用点各自 `createDefaultRegistry()`，于是 MCP 批准后的工具注册到 A 表、
+ * 它表现为「两个调用点各自 createDefaultRegistry()，于是 MCP 批准后的工具注册到 A 表、
  * 执行时去 B 表里查，永远查不到」。这类缺陷用普通单测抓不到（要起 Electron + 真 IPC），
  * 但它有一个非常明确的**不变量**：全进程只允许存在一个注册表创建点，
  * 且这个实例必须同时供给「工具执行」与「对话链路」。
  *
- * 这正是"行为锁"的用法：把边界固定成清单，边界一动测试就失败。
- * 修改 ipc.ts 时若不小心又写了一个创建点，这里会立刻红。
+ * **R-12 的关键一条**：拆分之后，只看 ipc.ts 就等于什么都没锁 ——
+ * 装配根只剩几行 import 与调用，真正的 handler 分散在 ipc/ 下十个模块里。
+ * 所以扫描范围 = 装配根 + 全部 ipc 模块，且新增两条只有拆分后才需要的锁：
+ *   ① 每一条通道都必须被注册（漏注册 = 能力表标 ✅ 但运行期不可达，就是 F-1/F-2 那一类）；
+ *   ② 每个 register*Ipc 模块都必须被装配根调用（写了模块忘了挂 = 静默死代码）。
  */
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { IPC } from '@jujia/shared-ipc';
 import { describe, expect, it } from 'vitest';
 
-const ipcRaw = readFileSync(fileURLToPath(new URL('./ipc.ts', import.meta.url)), 'utf8');
+const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
-/**
- * 剥掉注释再做源码扫描。
- *
- * **必须剥**：本文件第一版没剥，结果计数把注释里出现的 `createDefaultRegistry()` 也算进去，
- * 断言在干净基线上直接失败（幸好是"失败"而不是"永真"）。
- * 这与复核 007 里"注释是否计入条目数"的变异是同一类教训 ——
- * 凡是"数某段代码出现几次"的断言，都要先说清楚注释算不算。
- *
- * 只剥块注释与**整行**行注释：不处理字符串里的 `//`（例如 URL），
- * 那种情况用正则剥会误伤代码。这里要数的标识符不会出现在字符串里。
- */
+/** 装配根 + 全部 ipc 模块（顺序 = 注册顺序，区域切片断言依赖它） */
+const IPC_FILES = [
+  './ipc.ts',
+  './ipc/context.ts',
+  './ipc/handle.ts',
+  './ipc/core.ts',
+  './ipc/chat.ts',
+  './ipc/tools.ts',
+  './ipc/terminal.ts',
+  './ipc/browser.ts',
+  './ipc/git.ts',
+  './ipc/mcp.ts',
+  './ipc/extensions.ts',
+  './ipc/permissions.ts',
+] as const;
+
 function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 }
 
-const ipcSource = stripComments(ipcRaw);
+const rawOf = (rel: string): string => read(rel);
+const strippedOf = (rel: string): string => stripComments(read(rel));
+const unionRaw = IPC_FILES.map(rawOf).join('\n');
+const union = IPC_FILES.map(strippedOf).join('\n');
+const context = strippedOf('./ipc/context.ts');
+const tools = strippedOf('./ipc/tools.ts');
+const chat = strippedOf('./ipc/chat.ts');
+const core = strippedOf('./ipc/core.ts');
 
-/**
- * 窗口关闭必须收尾挂起的审批（轨道回归计划 2 · R-03）。
- *
- * 背景：`PermissionBridge.cancelAll` 定义了却**从未被调用**（注释承诺"窗口销毁立即收尾"，
- * 实际只能等满 120 秒超时）。这条锁住"确实有人在窗口 closed 时调它"。
- */
-const indexRaw = readFileSync(fileURLToPath(new URL('./index.ts', import.meta.url)), 'utf8');
-const indexSource = stripComments(indexRaw);
+/** 窗口关闭必须收尾挂起的审批（轨道回归计划 2 · R-03） */
+const indexSource = stripComments(read('./index.ts'));
+
+describe('拆分本身：装配范围不许失焦', () => {
+  it('ipc/ 下每个模块都被装配根调用（写了模块忘了挂 = 静默死代码）', () => {
+    const registrars = IPC_FILES.filter((f) => f !== './ipc.ts')
+      .flatMap((f) => [...read(f).matchAll(/export function (register\w+Ipc)\b/g)].map((m) => m[1] ?? ''))
+      .filter((n) => n !== '');
+    expect(registrars.length).toBeGreaterThanOrEqual(9);
+    for (const name of registrars) {
+      expect(unionRaw).toContain(`${name}(ctx)`);
+    }
+  });
+
+  it('全仓只有一处裸 ipcMain.handle（除 index.ts 里那条 perf 打点通道，它不走业务面）', () => {
+    const bare = union.match(/ipcMain\.handle\(/g) ?? [];
+    expect(bare.length).toBe(1);
+    expect(strippedOf('./ipc/handle.ts')).toContain('ipcMain.handle(');
+    for (const f of IPC_FILES.filter((x) => x !== './ipc/handle.ts')) {
+      expect(strippedOf(f)).not.toContain('ipcMain.handle(');
+    }
+    // 发送方校验只能存在于 handle.ts —— 别的地方各写一遍就会开始漏
+    expect(strippedOf('./ipc/handle.ts')).toContain('isTrustedSenderUrl(');
+    expect(strippedOf('./ipc/handle.ts')).toContain('event.senderFrame?.url');
+  });
+
+  it('每一条 IPC 通道都被注册（推送型通道除外，它们由主进程单向发出）', () => {
+    const pushOnly = new Set([
+      'PERMISSION_REQUEST',
+      'CHAT_STREAM',
+      'TERMINAL_STREAM',
+      'MCP_STATE_CHANGED',
+      'BROWSER_STATE_CHANGED',
+    ]);
+    // 覆盖检查把 index.ts 也算进来：PERF_FIRST_PAINT 是**启动打点**通道，
+    // 必须在 handler 装配之前就绑上（晚绑会把首帧漏掉），所以它不在 ipc/ 模块里。
+    const coverage = `${union}\n${indexSource}`;
+    const missing = Object.keys(IPC)
+      .filter((k) => !pushOnly.has(k))
+      .filter((k) => !coverage.includes(`IPC.${k},`) && !coverage.includes(`IPC.${k})`));
+    expect(missing).toEqual([]);
+    // 反向：清单确实来自 IPC 常量表，不是我们手写的名字
+    expect(union).toContain('handle(IPC.GIT_COMMIT,');
+    expect(union).toContain('handle(IPC.TOOL_RUN,');
+  });
+});
 
 describe('工具注册表接线（防止各处各建一个）', () => {
   it('全进程只有一个注册表创建点', () => {
-    const hits = ipcSource.split('createDefaultRegistry()').length - 1;
-    // 允许出现 1 次：`const registry = deps.registry ?? createDefaultRegistry()`
-    expect(hits).toBe(1);
+    expect(context.split('createDefaultRegistry()').length - 1).toBe(1);
   });
 
   it('注释里提到旧写法也不会让上面那条断言失效（即注释已被剥掉）', () => {
     // 反向锁：确保 stripComments 真的生效 —— 否则上面那条会被注释淹没
-    expect(ipcRaw).toContain('createDefaultRegistry()');
-    expect(ipcRaw.split('createDefaultRegistry()').length - 1).toBeGreaterThan(1);
-    expect(ipcSource.split('createDefaultRegistry()').length - 1).toBe(1);
+    const raw = rawOf('./ipc/context.ts');
+    expect(raw.split('createDefaultRegistry()').length - 1).toBeGreaterThan(1);
+    expect(context.split('createDefaultRegistry()').length - 1).toBe(1);
   });
 
   it('唯一实例被声明为共享常量（不是在使用处现场创建）', () => {
-    expect(ipcSource).toContain('const registry: ToolRegistry = deps.registry ?? createDefaultRegistry();');
+    expect(context).toContain('const registry: ToolRegistry = deps.registry ?? createDefaultRegistry();');
+    // 全仓不得有第二个创建点
+    expect(union.split('createDefaultRegistry()').length - 1).toBe(1);
   });
 
   it('工具执行链路用的是共享实例', () => {
-    expect(ipcSource).toContain('const tool = registry.get(toolName);');
-    // 不能再出现第二个局部注册表
-    expect(ipcSource).not.toContain('const registryUsed');
+    expect(tools).toContain('const tool = registry.get(toolName);');
+    expect(tools).not.toContain('createDefaultRegistry()');
   });
 
   it('对话链路也用同一个实例（否则模型看不到 MCP 工具）', () => {
     // 在 sendMessage(...) 的调用体内查找，而不是死盯某几行文本 ——
     // 参数会随功能增加（例如 W5c 加了 mode/rules），但"传的是共享实例"这个不变量不能变
-    const from = ipcSource.indexOf('sendMessage(');
+    const from = chat.indexOf('sendMessage(');
     expect(from).toBeGreaterThan(-1);
-    const callBody = ipcSource.slice(from, from + 1200).split(');')[0] ?? '';
-    expect(callBody).toContain('registry,');
-    expect(callBody).not.toContain('createDefaultRegistry()');
+    const body = chat.slice(from, from + 1200).split(');')[0] ?? '';
+    expect(body).toContain('registry,');
+    expect(body).not.toContain('createDefaultRegistry()');
   });
 
   it('对话链路带上权限模式与规则（否则规则表只对 TOOL_RUN 生效）', () => {
-    const from = ipcSource.indexOf('sendMessage(');
-    const callBody = ipcSource.slice(from, from + 1200).split(');')[0] ?? '';
-    expect(callBody).toContain('mode: policy.mode');
-    expect(callBody).toContain('rules: policy.rules');
+    const body = chat.slice(chat.indexOf('sendMessage('), chat.indexOf('sendMessage(') + 1200).split(');')[0] ?? '';
+    expect(body).toContain('mode: policy.mode');
+    expect(body).toContain('rules: policy.rules');
+    expect(body).toContain('alwaysAsk: policy.alwaysAsk');
   });
 
   it('工具执行链路也带上权限模式与规则（否则规则表只对对话生效）', () => {
-    const from = ipcSource.indexOf('runTool(');
-    expect(from).toBeGreaterThan(-1);
-    const callBody = ipcSource.slice(from, from + 900).split(');')[0] ?? '';
-    expect(callBody).toContain('mode: policy.mode');
-    expect(callBody).toContain('rules: policy.rules');
-    expect(callBody).not.toContain('createDefaultRegistry()');
+    const body = tools.slice(tools.indexOf('runTool('), tools.indexOf('runTool(') + 900).split(');')[0] ?? '';
+    expect(body).toContain('mode: policy.mode');
+    expect(body).toContain('rules: policy.rules');
+    expect(body).toContain('alwaysAsk: policy.alwaysAsk');
+    expect(body).toContain('hooks: hookRunner');
+    expect(body).not.toContain('createDefaultRegistry()');
   });
 
   it('MCP 服务拿到的是同一个实例', () => {
-    expect(ipcSource).toContain('const mcp = new McpService({\n    registry,');
+    expect(context).toContain('const mcp = new McpService({\n    registry,');
   });
 
   it('技能服务被接进对话链路，且清单走同一条系统提示', () => {
-    // 断言共享注册表仍是第一个参数，而不是死盯整行文本 —— 参数会随功能增加
-    expect(ipcSource).toContain('createSkillsService(registry');
-    expect(ipcSource).toContain('await skills.refresh(');
-    const chat = ipcSource.slice(ipcSource.indexOf('sendMessage('), ipcSource.indexOf('sendMessage(') + 1400).split(');')[0] ?? '';
-    expect(chat).toContain('skillCatalogText: skills.catalogText()');
+    expect(context).toContain('createSkillsService(registry');
+    const body = chat.slice(chat.indexOf('sendMessage('), chat.indexOf('sendMessage(') + 1400).split(');')[0] ?? '';
+    expect(body).toContain('skillCatalogText: skills.catalogText()');
   });
 
   it('钩子运行器被接进工具执行与对话链路（否则钩子配置等于摆设）', () => {
-    const toolCall = ipcSource.slice(ipcSource.indexOf('runTool('), ipcSource.indexOf('runTool(') + 900).split(');')[0] ?? '';
-    expect(toolCall).toContain('hooks: hookRunner');
-    const chat = ipcSource.slice(ipcSource.indexOf('sendMessage('), ipcSource.indexOf('sendMessage(') + 1200).split(');')[0] ?? '';
+    expect(tools).toContain('hooks: hookRunner');
     expect(chat).toContain('hooks: hookRunner');
   });
 
   it('钩子配置在启动时被加载，且走同一个运行器实例', () => {
-    expect(ipcSource).toContain('hooksService.load()');
-    expect(ipcSource.split('createProcessHookRunner(').length - 1).toBe(1);
-    expect(ipcSource).toContain('getConfig: () => hooksService.getConfig()');
+    expect(context).toContain('hooks.load()');
+    expect(union.split('createProcessHookRunner(').length - 1).toBe(1);
+    expect(context).toContain('getConfig: () => hooks.getConfig()');
   });
 
   it('插件贡献的技能目录被接进技能来源，且刷新顺序在对话链路里', () => {
-    expect(ipcSource).toContain('createPluginsService()');
-    expect(ipcSource).toContain('plugins.skillSources(workspaceRoot)');
-    // 先刷新插件、再刷新技能（否则插件贡献的目录这一轮看不到）
-    const refresh = ipcSource.slice(ipcSource.indexOf('await plugins.refresh('), ipcSource.indexOf('await plugins.refresh(') + 220);
-    expect(refresh).toContain('await skills.refresh(');
+    expect(context).toContain('createPluginsService()');
+    expect(context).toContain('plugins.skillSources(workspaceRoot)');
+    const refresh = chat.slice(chat.indexOf('await plugins.refresh('), chat.indexOf('await plugins.refresh(') + 220);
+    expect(refresh).toContain('skills.refresh(');
   });
 
   it('手动执行工具前也刷新插件与技能（界面显示的状态必须与真实一致）', () => {
-    // 按通道切出 TOOL_RUN 的整段处理逻辑（刷新发生在 runTool 之前，不能只从 runTool( 开始切）
-    const from = ipcSource.indexOf('IPC.TOOL_RUN');
-    const to = ipcSource.indexOf('IPC.MCP_SERVER_LIST');
-    const region = ipcSource.slice(from, to);
-    expect(region).toContain('await plugins.refresh(');
-    expect(region).toContain('await skills.refresh(');
-    expect(region).toContain('runTool(');
-  });
-
-  it('所有 IPC 通道都经过发送方校验（新通道默认受保护）', () => {
-    // 统一入口必须存在，且校验的是 isTrustedSenderUrl
-    expect(ipcSource).toContain('isTrustedSenderUrl(');
-    expect(ipcSource).toContain('event.senderFrame?.url');
-    // 除统一入口内部那一次，不应再有裸的 ipcMain.handle（否则那个通道没有校验）
-    const bare = ipcSource.match(/ipcMain\.handle\(/g) ?? [];
-    expect(bare.length).toBe(1);
-    expect(ipcSource).toContain('const handle = (channel: string');
-    // 位置也要对：定义必须在使用之前，否则注册阶段就 ReferenceError（实测踩过）
-    expect(ipcSource.indexOf('const handle = (channel: string')).toBeLessThan(
-      ipcSource.indexOf('handle(IPC.'),
-    );
+    expect(tools).toContain('await plugins.refresh(');
+    expect(tools).toContain('await skills.refresh(');
+    // 刷新必须发生在 runTool 之前，否则模型看到的工具清单是旧的
+    expect(tools.indexOf('await skills.refresh(')).toBeLessThan(tools.indexOf('runTool('));
   });
 
   it('渲染层写不了工作区与高危清单（工作区是权限边界）', () => {
-    expect(ipcSource).not.toContain('clean.workspace = parsed.workspace');
-    expect(ipcSource).not.toContain('clean.alwaysAskTools');
-    expect(ipcSource).toContain('alwaysAsk: policy.alwaysAsk');
-  });
-  it('插件只读接口存在（贡献物与诊断必须能看见）', () => {
-    expect(ipcSource).toContain('IPC.PLUGINS_GET');
-    expect(ipcSource).toContain('pluginsStateSchema.parse');
+    expect(union).not.toContain('clean.workspace = parsed.workspace');
+    expect(union).not.toContain('clean.alwaysAskTools');
+    expect(tools).toContain('alwaysAsk: policy.alwaysAsk');
   });
 
-  it('MCP 服务在应用退出时被释放（不留孤儿进程）', () => {
-    expect(ipcSource).toContain('mcp.disposeAll();');
+  it('插件只读接口存在（贡献物与诊断必须能看见）', () => {
+    expect(strippedOf('./ipc/extensions.ts')).toContain('IPC.PLUGINS_GET');
+    expect(strippedOf('./ipc/extensions.ts')).toContain('pluginsStateSchema.parse');
+  });
+
+  it('MCP / 终端 / 浏览器实例都在退出时释放（不留孤儿进程与 webContents）', () => {
+    expect(context).toContain('mcp.disposeAll();');
+    expect(strippedOf('./ipc/terminal.ts')).toContain('terminal.disposeAll();');
+    expect(strippedOf('./ipc/browser.ts')).toContain('browser.dispose();');
   });
 });
 
-describe('轨道回归计划 1 的修复有接线锁', () => {
-  it('ipc.ts **真的调用** pickWritableConfig（而不是自己再写一遍白名单）', () => {
+describe('R-12 之前的修复仍然有锁', () => {
+  it('config 写入**真的调用** pickWritableConfig（而不是自己再写一遍白名单）', () => {
     // 否则 config-write 的单测测的是死代码（双份真相）
-    expect(ipcSource).toContain('pickWritableConfig(parsed)');
-    expect(ipcSource).not.toContain('const WRITABLE_CONFIG_KEYS');
+    expect(core).toContain('pickWritableConfig(parsed)');
+    expect(union).not.toContain('const WRITABLE_CONFIG_KEYS');
   });
 
   it('窗口 closed 时收尾挂起的审批请求', () => {
     expect(indexSource).toContain('permissionBridge.cancelAll(');
-    // 必须挂在窗口关闭事件里，不能只是"某处出现了这行"
     const closedIdx = indexSource.indexOf("win.on('closed'");
     const callIdx = indexSource.indexOf('permissionBridge.cancelAll(');
     expect(closedIdx).toBeGreaterThanOrEqual(0);
     expect(callIdx).toBeGreaterThan(closedIdx);
+  });
+});
+
+describe('文件规模（R-12 的验收线：每文件 ≤300 行）', () => {
+  it('ipc.ts 与 ipc/ 下每个模块都不超过 300 行', () => {
+    const over = IPC_FILES.filter((f) => rawOf(f).split('\n').length > 300);
+    expect(over).toEqual([]);
   });
 });

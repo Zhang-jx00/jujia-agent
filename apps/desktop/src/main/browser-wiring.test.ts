@@ -26,7 +26,8 @@ const stripComments = (source: string): string =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 const browserSource = stripComments(readFileSync(join(here, 'browser-service.ts'), 'utf8'));
-const ipcSource = stripComments(readFileSync(join(here, 'ipc.ts'), 'utf8'));
+// R-12 拆分后：浏览器通道的注册在 ipc/browser.ts；跨文件的「全仓只有一处裸入口」由 ipc-wiring.test.ts 统一锁
+const ipcSource = stripComments(readFileSync(join(here, 'ipc', 'browser.ts'), 'utf8'));
 
 describe('浏览器视图的安全底线（视图配置 ≠ 主窗口配置）', () => {
   it('视图配置拿不到 preload 桥：第三方网页绝不能有应用的能力', () => {
@@ -102,9 +103,9 @@ describe('接线锁：策略确实在运行路径上（不是只活在单测里�
       // 必须是 `handle(IPC.X` 开头 —— 直接写 ipcMain.handle 会绕开发送方校验
       expect(ipcSource).toContain(`handle(IPC.${name},`);
     }
-    // 反向锁：浏览器通道绝不能出现裸 ipcMain.handle（绕过统一入口 = 绕过安全默认值）
+    // 反向锁：本模块绝不能出现裸 ipcMain.handle（绕过统一入口 = 绕过安全默认值）
     const bare = ipcSource.match(/ipcMain\.handle\(/g) ?? [];
-    expect(bare.length).toBe(1); // 只允许统一入口里那一次
+    expect(bare.length).toBe(0); // 唯一的裸入口在 ipc/handle.ts，由 ipc-wiring.test.ts 锁
   });
 });
 

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readFileTool, writeFileTool } from './builtin/file-tools';
+import { listDirTool, readFileTool, writeFileTool } from './builtin/file-tools';
 import {
   runTool,
   type PermissionAnswer,
@@ -206,6 +206,39 @@ describe('内置文件工具', () => {
       allow.resolver,
     );
     expect(list.outcome.content).toContain('sub/');
+  });
+
+  /**
+   * K-1 的同类修复：三个文件工具的 JSON Schema 都声明了 `additionalProperties: false`，
+   * 但 zod 默认**静默丢弃**多余字段 —— 声明与执行两套口径就是长期存在的注入面。
+   * 这条测试的职责就是"声明说了不许，parse 就得真的拒绝"。
+   */
+  it('多余字段一律拒绝（声明与执行必须同一套口径）', () => {
+    expect(() => readFileTool.parse({ path: 'a.txt', extra: 1 })).toThrow();
+    expect(() => writeFileTool.parse({ path: 'a.txt', content: 'x', mode: 'overwrite' })).toThrow();
+    expect(() => listDirTool.parse({ path: '.', depth: 9 })).toThrow();
+    // 合法入参照旧通过（不能把"严格"写成"用不了"）
+    expect(readFileTool.parse({ path: 'a.txt' })).toEqual({ path: 'a.txt' });
+    expect(listDirTool.parse(undefined)).toEqual({});
+  });
+
+  it('多余字段在**权限门之前**就被拒，且不弹窗、不落盘', async () => {
+    const allow = fixedResolver('allow_once');
+    const res = await runTool(
+      writeFileTool as never,
+      { path: 'evil.txt', content: 'x', overwrite: true },
+      ctx(),
+      allow.resolver,
+    );
+    expect(res.outcome.ok).toBe(false);
+    expect(res.outcome.content).toContain('参数不合法');
+    expect(res.asked).toBe(false);
+    expect(allow.asked).toHaveLength(0);
+    const exists = await stat(join(root, 'evil.txt')).then(
+      () => true,
+      () => false,
+    );
+    expect(exists).toBe(false);
   });
 
   it('超长文件被截断并如实标注（不得假装完整）', async () => {

@@ -25,8 +25,13 @@ export const readFileTool: ToolDefinition<{ path: string; maxBytes?: number | un
     required: ['path'],
     additionalProperties: false,
   },
+  // .strict()：JSON Schema 声明了 additionalProperties:false，parse 就必须真的拒绝（K-1 的同类隐患，
+  // 与 exec-tool 一起补齐 —— 声明与执行两套口径 = 每天都在的注入面）
   parse: (raw) =>
-    z.object({ path: z.string().min(1), maxBytes: z.number().int().positive().optional() }).parse(raw),
+    z
+      .object({ path: z.string().min(1), maxBytes: z.number().int().positive().optional() })
+      .strict()
+      .parse(raw),
   async run(args, ctx): Promise<ToolOutcome> {
     const abs = await guardPath(ctx.workspaceRoot, args.path);
     const limit = Math.min(args.maxBytes ?? MAX_READ_BYTES, MAX_READ_BYTES);
@@ -68,7 +73,7 @@ export const writeFileTool: ToolDefinition<{ path: string; content: string }> = 
     required: ['path', 'content'],
     additionalProperties: false,
   },
-  parse: (raw) => z.object({ path: z.string().min(1), content: z.string() }).parse(raw),
+  parse: (raw) => z.object({ path: z.string().min(1), content: z.string() }).strict().parse(raw),
   async run(args, ctx): Promise<ToolOutcome> {
     const abs = await guardPath(ctx.workspaceRoot, args.path, { forWrite: true });
     const bytes = Buffer.byteLength(args.content, 'utf8');
@@ -102,7 +107,7 @@ export const listDirTool: ToolDefinition<{ path?: string | undefined }> = {
     required: [],
     additionalProperties: false,
   },
-  parse: (raw) => z.object({ path: z.string().optional() }).parse(raw ?? {}),
+  parse: (raw) => z.object({ path: z.string().optional() }).strict().parse(raw ?? {}),
   async run(args, ctx): Promise<ToolOutcome> {
     const abs = await guardPath(ctx.workspaceRoot, args.path ?? '.');
     const info = await stat(abs).catch(() => null);

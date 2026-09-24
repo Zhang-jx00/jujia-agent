@@ -23,7 +23,8 @@ import {
 const here = resolve(fileURLToPath(import.meta.url), '..');
 const stripComments = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-const ipcSource = stripComments(readFileSync(join(here, 'ipc.ts'), 'utf8'));
+// R-12 拆分后：git 通道的注册在 ipc/git.ts；跨文件的「全仓只有一处裸入口」由 ipc-wiring.test.ts 统一锁
+const ipcSource = stripComments(readFileSync(join(here, 'ipc', 'git.ts'), 'utf8'));
 const serviceSource = stripComments(readFileSync(join(here, 'git-service.ts'), 'utf8'));
 const preloadSource = stripComments(readFileSync(join(here, '../preload/index.ts'), 'utf8'));
 
@@ -41,18 +42,18 @@ describe('通道登记与命名', () => {
     expect(names).not.toMatch(/GIT_RUN|GIT_EXEC|GIT_RAW|GIT_SHELL/);
   });
 
-  it('每条通道都在 ipc.ts 里经统一入口注册（自带发送方校验）', () => {
+  it('每条通道都经统一入口注册（自带发送方校验）', () => {
     for (const name of GIT_CHANNELS) {
       expect(ipcSource).toContain(`handle(IPC.${name},`);
     }
-    // 统一入口之外不许再有裸 ipcMain.handle
+    // 本模块不许出现裸 ipcMain.handle（唯一入口在 ipc/handle.ts）
     const bare = ipcSource.match(/ipcMain\.handle\(/g) ?? [];
-    expect(bare.length).toBe(1);
+    expect(bare.length).toBe(0);
   });
 });
 
 describe('判档只在一个地方', () => {
-  it('ipc.ts 里不出现 bypassable / decideGate —— 判档没被抄进胶水层', () => {
+  it('注册模块里不出现 bypassable / decideGate —— 判档没被抄进胶水层', () => {
     expect(ipcSource).not.toContain('bypassable');
     expect(ipcSource).not.toContain('decideGate');
     expect(ipcSource).toContain('createGitService(');

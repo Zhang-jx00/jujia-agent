@@ -36,9 +36,6 @@ export const IPC = {
   /** renderer → main：在工作区内执行一个已注册的工具（经权限门） */
   TOOL_RUN: 'tool:run',
 
-  /** main → renderer：应用状态变化广播（预留） */
-  APP_STATE_CHANGED: 'app:state-changed',
-
   /* ---------------------------- 内置终端（W9b） ---------------------------- */
 
   /** 新建终端会话（**会先弹权限审批**） */
