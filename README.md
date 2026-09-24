@@ -60,6 +60,7 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 | 做了什么、还差什么 | [docs/PROGRESS.md](docs/PROGRESS.md) · [CHANGELOG.md](CHANGELOG.md) |
 | 每轮复核记录（含未通过项） | [review/REVIEW-LOG.md](review/REVIEW-LOG.md) |
 | 工作怎么分类与记录（轨道计划） | [docs/TRACK-PLANS.md](docs/TRACK-PLANS.md) |
+| 开发必须遵守的工作协议（28 条，逐条有出处） | [docs/WORK-PROTOCOL.md](docs/WORK-PROTOCOL.md) |
 | 排期、里程碑编号与修复队列（路线图） | [docs/TRACK-ROADMAP.md](docs/TRACK-ROADMAP.md) |
 | 全项目排查记录 | [review/TRACK-SWEEP-1.md](review/TRACK-SWEEP-1.md) |
 | 第三方依赖与许可证 | [docs/DEPENDENCY-LICENSES.md](docs/DEPENDENCY-LICENSES.md) |

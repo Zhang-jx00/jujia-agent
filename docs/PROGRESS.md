@@ -149,7 +149,7 @@
 | `CONTRIBUTING.md` | ✅ | 环境、七件套门禁、六条硬规矩（含「绝不假称完成」「来源宁缺勿滥」）、代码约定 |
 | README 面向他人 | ✅ | 新增「快速开始」（安装包 / 源码两条路径）、支持平台、安全提示、贡献入口 |
 | `package.json` 元信息 | ✅ | 补 repository / homepage / bugs / author |
-| 源码无本机绝对路径 | ✅ **已修，并由机器看住**（2026-09-24） | `apps/`、`packages/`、`.github/` 一直干净；`scripts/` 曾有 **6 处**写死 checkout 路径（`count_coverage.py`、`gen_matrix.py`、`fix_paths.py`、`fix_source_urls.py`、`fix_links_round2.py`），另在 `make-logo-mono.mjs` 发现一处**连 Windows 用户名一起泄漏**的默认值 —— 已全部改为按 `__file__` / `import.meta.url` 解析或必传参数。`check:docs` 新增一条断言（运行时算出仓库根与用户主目录再比对，脚本自身不含任何本机路径字面量），自检注入一条本机路径证明它会咬 |
+| 无本机绝对路径（**声明与实际范围对齐**） | ✅ **已修，并由两条机器断言看住**（2026-09-24） | `apps/`、`packages/`、`.github/` 一直干净；`scripts/` 曾有 **6 处**写死 checkout 路径（`count_coverage.py`、`gen_matrix.py`、`fix_paths.py`、`fix_source_urls.py`、`fix_links_round2.py`），另在 `make-logo-mono.mjs` 发现一处**连 Windows 用户名一起泄漏**的默认值 —— 已全部改为按 `__file__` / `import.meta.url` 解析或必传参数。**现在的真实范围**：`check:docs` 第 **9** 条扫**代码与配置**（禁仓库根路径与用户主目录两种字面量）；第 **9b** 条扫**活文档 `.md`**，只禁**用户主目录**（隐私那一层），**允许台账把仓库路径当证据引用** —— 所以 `CHANGELOG` / `REVIEW-LOG` 里的路径引述不算违规，判据边界写清楚而不是含糊说"全仓无绝对路径"。两条各配一条注入自检（**证明会咬**，共 **9 处**注入全部拦住） |
 | 依赖显式声明 | ✅ | node-pty / @xterm/xterm / @xterm/addon-fit 均在 `apps/desktop/package.json` |
 | 可复现构建 | ✅ | `package-lock.json` 已入库 |
 | **应用图标** | ✅ 可用（临时） | 深色圆角底 + 盾牌宝石图形；来源与许可见 `assets/icon/README.md`（含 AI 生成图像版权说明） |

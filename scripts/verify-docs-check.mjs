@@ -14,6 +14,7 @@
 
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -101,6 +102,15 @@ const cases = [
     from: 'export interface Envelope<T> {',
     to: `// 把本机路径写进代码 = 别人 clone 下来跑不了：${repoRoot}\nexport interface Envelope<T> {`,
     expect: '本机绝对路径',
+  },
+  {
+    // 第 9 条只扫代码与配置；这条扫活文档里的**家目录全路径**（隐私类，含用户名那一层）。
+    // 注入用运行时算出的 homedir()，本脚本自身同样不含任何本机路径字面量。
+    name: '文档里写死本机用户主目录',
+    file: 'README.md',
+    from: '## 核心理念与独特之处',
+    to: `## 核心理念与独特之处\n\n（临时证据：我的电脑在 ${homedir().split('\\').join('/')}）\n`,
+    expect: '本机用户主目录',
   },
 ];
 

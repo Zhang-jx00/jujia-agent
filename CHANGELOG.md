@@ -70,8 +70,8 @@
 | `npm run typecheck` | ✅ 5 个 workspace 全部 0 错误 |
 | `npm run lint` | ✅ 0 错误 0 警告 |
 | `npm test` | ✅ **687 通过 / 1 跳过**（41 个文件） |
-| `npm run check:docs` | ✅ 18 项全绿（含"能力表交叉断言"：M10 标的是 🔶 并写明剩余部分，没有虚报） |
-| `npm run check:docs:selftest` | ✅ 8 处注入漂移全部被拦住，还原后检查器恢复通过 |
+| `npm run check:docs` | ✅ 全绿，**19 项**（含"能力表交叉断言"：M10 标的是 🔶 并写明剩余部分，没有虚报；**项数以它自己的输出为准**） |
+| `npm run check:docs:selftest` | ✅ **9 处**注入漂移全部被拦住，还原后检查器恢复通过 |
 | `npm run smoke` | ✅ 主进程 + 预加载桥 + 渲染层 + IPC 全链路；渲染层无 Node 泄漏；`BrowserPanel` 已进入构建产物（7.12 kB 独立 chunk） |
 | `npm run perf` | 835ms 过预算（冷启动 <1500ms / 可交互 <1000ms）—— **非规范样本**，紧跟构建之后取的单点，不能当回归基线（欠账仍在 `docs/PERF-BUDGET.md` §五） |
 | `npm run e2e` | ✅ **17/17 通过**（含浏览器三步）—— 但**第一次跑是红的**，见下面"两轮修复" |
