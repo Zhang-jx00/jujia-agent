@@ -16,10 +16,14 @@
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { execFile } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import electronPath from 'electron';
 import { _electron as electron } from 'playwright-core';
+
+const runGit = promisify(execFile);
 
 // 入口用**脚本自身位置**解析，而不是 cwd —— 否则从仓库根跑时路径就错了（本轮实测踩过）
 const here = dirname(fileURLToPath(import.meta.url));
@@ -414,6 +418,114 @@ try {
   }
   ok('危险协议被拒、理由可见，且 guest 确实还停在原页面');
 
+  /* ---------------------------- git 接线（M8） ----------------------------
+   *
+   * 断言一律问**真值**：不看界面有没有"成功"两个字，而是回到磁盘上查 git log。
+   * （复核 026 的 G-8 教训：只看界面文案的断言可以把拦截整个删掉还全绿。）
+   * 工作区是第 6 步设进来的临时目录，本步骤在它里面就地 `git init` 一个真仓库。
+   */
+  const g_in = (args) => runGit('git', args, { cwd: wsDir, windowsHide: true });
+  const commitCount = async () => {
+    const r = await g_in(['rev-list', '--count', 'HEAD']);
+    return Number.parseInt(r.stdout.trim(), 10);
+  };
+
+  step('内置 Git：暂存 → 确认 → 提交，磁盘上真的多出一次提交（权限门每次都过）');
+  await g_in(['init', '-q']);
+  await g_in(['config', 'user.email', 'e2e@example.invalid']);
+  await g_in(['config', 'user.name', 'e2e']);
+  writeFileSync(join(wsDir, 'README-e2e-seed.md'), 'seed\n', 'utf8');
+  await g_in(['add', '--', 'README-e2e-seed.md']);
+  await g_in(['commit', '-qm', 'seed']);
+  const seededCount = await commitCount();
+
+  const gitFile = `改动-${String(Date.now()).slice(-6)}.txt`;
+  writeFileSync(join(wsDir, gitFile), '第一轮改动\n', 'utf8');
+
+  await tabButton('Git').click();
+  const gitReady = await waitForText('Git 变更');
+  if (gitReady !== true) fail('Git 页签没有渲染出来', String(gitReady).slice(0, 600));
+
+  // 只读动作**不该弹窗**：先确认状态能读到且没有出现确认框
+  const shown = await waitForText(gitFile);
+  if (shown !== true) fail('Git 页签没有列出未跟踪的文件', String(shown).slice(0, 600));
+  if ((await win.locator('[role="dialog"][aria-label="权限请求"]').count()) > 0) {
+    fail('只读的 status 查询竟然弹了确认框（应该不问）');
+  }
+  ok('只读查询不打扰：状态列表直接显示了新文件');
+
+  // 暂存 = 软 ask：应当弹窗，且摘要写明"暂存 1 个文件"
+  await win.locator(`input[aria-label="选择 ${gitFile}"]`).check();
+  await win.locator('button', { hasText: '暂存所选' }).first().click();
+  const stageDialog = await waitForText('需要你确认：暂存 1 个文件');
+  if (stageDialog !== true) fail('暂存没有弹出确认框（或摘要不对）', String(stageDialog).slice(0, 600));
+  await win.locator('button', { hasText: '允许一次' }).first().click();
+  const stagedShown = await waitForText('已暂存（1）');
+  if (stagedShown !== true) fail('允许之后文件没有进入暂存区', String(stagedShown).slice(0, 600));
+  ok('暂存走了软确认，允许后确实生效');
+
+  // 提交 = 硬 ask：弹窗必须写明"会写入仓库历史"
+  await win.locator('textarea[aria-label="提交信息"]').fill('e2e：接上了 git');
+  await win.locator('button', { hasText: '提交（会写入仓库历史）' }).first().click();
+  const commitDialog = await waitForText('需要你确认：会写入仓库历史');
+  if (commitDialog !== true) fail('提交没有弹出硬确认框，或提示文案没写明会写入历史', String(commitDialog).slice(0, 600));
+  await win.locator('button', { hasText: '允许一次' }).first().click();
+  // 先等弹窗消失，否则"这条提交"的文本可能来自弹窗里的摘要本身（假通过）
+  await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
+  // 锚点必须"这一步之前不存在"（TEST-POLICY §六 第 3 条）：等我们自己写的那条提交主题
+  const committed = await waitForText('e2e：接上了 git');
+  if (committed !== true) fail('提交后界面里没有这条提交', String(committed).slice(0, 600));
+  // 真值：磁盘上的 git log 里真的有这条
+  const afterCommit = await commitCount();
+  if (afterCommit !== seededCount + 1) {
+    const dump = await bodyText();
+    fail(
+      `提交没有真的落到仓库里（提交数 ${String(seededCount)} → ${String(afterCommit)}，应为 ${String(seededCount + 1)}`,
+      dump.slice(0, 1200),
+    );
+  }
+  const subject = (await g_in(['log', '-1', '--pretty=%s'])).stdout.trim();
+  if (subject !== 'e2e：接上了 git') fail('仓库最新提交的主题不是我们刚提交的那条', subject);
+  ok('提交过了硬确认，并且真的写进了仓库历史');
+
+  step('内置 Git：拒绝提交 → 仓库里真的没有这次提交（拒绝必须真的不做）');
+  const gitFile2 = `改动B-${String(Date.now()).slice(-6)}.txt`;
+  writeFileSync(join(wsDir, gitFile2), '第二轮改动\n', 'utf8');
+  await win.locator('button', { hasText: '刷新' }).first().click();
+  const shown2 = await waitForText(gitFile2);
+  if (shown2 !== true) fail('刷新后没有看到新文件', String(shown2).slice(0, 600));
+  await win.locator(`input[aria-label="选择 ${gitFile2}"]`).check();
+  await win.locator('button', { hasText: '暂存所选' }).first().click();
+  const d2 = await waitForText('需要你确认：暂存 1 个文件');
+  if (d2 !== true) fail('第二次暂存没弹确认', String(d2).slice(0, 600));
+  await win.locator('button', { hasText: '本次会话总是允许' }).first().click();
+  // 记住之后：第三次暂存不再弹窗（软 ask 的语义），同时证明"总是允许"确实生效了
+  const gitFile3 = `改动C-${String(Date.now()).slice(-6)}.txt`;
+  writeFileSync(join(wsDir, gitFile3), '第三轮改动\n', 'utf8');
+  await win.locator('button', { hasText: '刷新' }).first().click();
+  await waitForText(gitFile3);
+  await win.locator(`input[aria-label="选择 ${gitFile3}"]`).check();
+  await win.locator('button', { hasText: '暂存所选' }).first().click();
+  const remembered = await waitForText('已暂存（2）');
+  if (remembered !== true) fail('「本次会话总是允许」之后仍然弹窗或暂存失败', String(remembered).slice(0, 600));
+  if ((await win.locator('[role="dialog"][aria-label="权限请求"]').count()) > 0) {
+    fail('软 ask 已被记住，却还是弹了确认框');
+  }
+  ok('软 ask 的「总是允许」真的被记住了（第三次暂存没再问）');
+
+  // 但 commit 依然要问 —— 上面那次「总是允许」绝不能连带把提交也放行
+  await win.locator('textarea[aria-label="提交信息"]').fill('不该存在的提交');
+  await win.locator('button', { hasText: '提交（会写入仓库历史）' }).first().click();
+  const d3 = await waitForText('需要你确认：会写入仓库历史');
+  if (d3 !== true) fail('「总是允许」把提交的硬确认也压掉了（这正是最危险的逃逸）', String(d3).slice(0, 600));
+  const beforeDeny = await commitCount();
+  await win.locator('button', { hasText: '拒绝' }).first().click();
+  const denyShown = await waitForText('你拒绝了这次操作');
+  if (denyShown !== true) fail('拒绝之后界面没有给出可读理由', String(denyShown).slice(0, 600));
+  const afterDeny = await commitCount();
+  if (afterDeny !== beforeDeny) fail(`拒绝之后仓库里却多出了提交（${String(beforeDeny)} → ${String(afterDeny)}）`);
+  ok('硬 ask 不被"总是允许"压掉；拒绝后仓库真的没动');
+
   server.close();
   otherSite.close();
 
@@ -434,5 +546,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 技能真加载 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门（含磁盘真值核对）→ 干净退出');
 process.exit(0);

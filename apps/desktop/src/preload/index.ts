@@ -60,10 +60,20 @@ import {
   browserStateSchema,
   browserTextResultSchema,
   browserUrlSchema,
+  gitActionResultSchema,
+  gitCommitSchema,
+  gitDiffResultSchema,
+  gitLogResultSchema,
+  gitPathsSchema,
+  gitStatusResultSchema,
   type BrowserBoundsPayload,
   type BrowserNavResult,
   type BrowserState,
   type BrowserTextResult,
+  type GitActionResultView,
+  type GitDiffResult,
+  type GitLogResult,
+  type GitStatusResult,
 } from '@jujia/shared-ipc';
 
 /**
@@ -383,6 +393,41 @@ const api = {
     };
     ipcRenderer.on(IPC.BROWSER_STATE_CHANGED, listener);
     return () => ipcRenderer.removeListener(IPC.BROWSER_STATE_CHANGED, listener);
+  },
+
+  /* ---------------------------- git（M8 接线） ---------------------------- */
+
+  /**
+   * 三条只读 + 三条写。写操作的**审批不在这里**：主进程经同一条权限桥弹窗，
+   * 渲染层只负责把"做没做、为什么没做"显示出来。
+   * 出参照旧再校验一次 —— 契约漂移要在这里暴露，而不是让界面拿到半截数据。
+   */
+  async gitStatus(): Promise<GitStatusResult> {
+    return gitStatusResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_STATUS));
+  },
+
+  async gitDiff(staged = false): Promise<GitDiffResult> {
+    return gitDiffResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_DIFF, { staged }));
+  },
+
+  async gitLog(count = 20): Promise<GitLogResult> {
+    return gitLogResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_LOG, { count }));
+  },
+
+  async gitStage(paths: string[]): Promise<GitActionResultView> {
+    const parsed = gitPathsSchema.parse({ paths });
+    return gitActionResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_STAGE, parsed));
+  },
+
+  async gitUnstage(paths: string[]): Promise<GitActionResultView> {
+    const parsed = gitPathsSchema.parse({ paths });
+    return gitActionResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_UNSTAGE, parsed));
+  },
+
+  /** 提交：**每次都会弹确认**（硬 ask），界面必须把这条语义显示给用户而不是悄悄失败 */
+  async gitCommit(message: string): Promise<GitActionResultView> {
+    const parsed = gitCommitSchema.parse({ message });
+    return gitActionResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_COMMIT, parsed));
   },
 };
 

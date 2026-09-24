@@ -72,6 +72,30 @@
       "find": "    webviewTag: SECURITY_BASELINE.webviewTag,\n    // **不设 preload**：第三方网页拿不到应用的能力桥\n  };",
       "replace": "    webviewTag: SECURITY_BASELINE.webviewTag,\n    // 变异：给网页配能力桥\n    preload: 'C:/somewhere/preload.js',\n  };",
       "test": "apps/desktop/src/main/browser-wiring.test.ts"
+    },
+    {
+      "id": "M10",
+      "desc": "commit 绕过硬 ask（把强制 bypassable:false 改成 true —— 一次「总是允许」就永久放行写仓库历史）",
+      "file": "apps/desktop/src/main/git-gate.ts",
+      "find": "    return { ...gate, bypassable: false };",
+      "replace": "    return { ...gate, bypassable: true };",
+      "test": "apps/desktop/src/main/git-gate.test.ts"
+    },
+    {
+      "id": "M11",
+      "desc": "acceptEdits 模式被当成「写历史也自动放行」（去掉硬 ask 动作的模式降级）",
+      "file": "apps/desktop/src/main/git-gate.ts",
+      "find": "  if (gitAskClass(action) === 'hard' && mode === 'acceptEdits') return 'default';",
+      "replace": "  // 变异：acceptEdits 下写历史也被自动放行",
+      "test": "apps/desktop/src/main/git-gate.test.ts"
+    },
+    {
+      "id": "M12",
+      "desc": "策略说 deny 却照样执行（权限门的拒绝变成只写日志不拦事）",
+      "file": "apps/desktop/src/main/git-service.ts",
+      "find": "    if (gate.action === 'deny') return refused(`${toolName} 被权限策略拒绝：${gate.reason}`, 'policy:deny');",
+      "replace": "    if (gate.action === 'deny') return finish(await execute(root), false, 'policy:deny');",
+      "test": "apps/desktop/src/main/git-service.test.ts"
     }
   ]
 }

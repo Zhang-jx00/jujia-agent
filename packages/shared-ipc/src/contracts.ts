@@ -546,3 +546,105 @@ export const browserTextResultSchema = z.union([
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type BrowserTextResult = z.infer<typeof browserTextResultSchema>;
+
+/* ------------------------------------------------------------------ *
+ * 7. git 模块（M8 接线）
+ *
+ * 与浏览器同样的理由在这里**独立定义形状**，不从 @jujia/agent-core 引类型
+ * （渲染层引它会把它带进浏览器包里直接构建失败）。
+ * 形状与 `agent-core/src/git/git.ts` 的导出类型一一对应，
+ * 由 `git-wiring.test.ts` 交叉核对：**两边只要有一边漂移，`.parse` 立刻抛**。
+ * ------------------------------------------------------------------ */
+
+/** 一次操作涉及的路径清单。上限 200：批量暂存够用，同时挡住"拿路径数组搬运大数据" */
+export const gitPathsSchema = z.object({
+  paths: z.array(z.string().min(1).max(1000)).min(1).max(200),
+});
+export type GitPathsPayload = z.infer<typeof gitPathsSchema>;
+
+/** 提交信息：非空且不超上限（agent-core 里也是 ≤2000，两边同口径） */
+export const gitCommitSchema = z.object({
+  message: z.string().min(1).max(2000),
+});
+export type GitCommitPayload = z.infer<typeof gitCommitSchema>;
+
+/** diff 看的是暂存区还是工作区 */
+export const gitDiffSchema = z.object({
+  staged: z.boolean().optional(),
+});
+export type GitDiffPayload = z.infer<typeof gitDiffSchema>;
+
+export const gitLogSchema = z.object({
+  count: z.number().int().min(1).max(100).optional(),
+});
+export type GitLogPayload = z.infer<typeof gitLogSchema>;
+
+export const gitStatusEntrySchema = z.object({
+  path: z.string(),
+  /** porcelain 的两列状态码原文（如 `M `、`??`、`A `） */
+  code: z.string(),
+  /** 给人看的中文标记（新增 / 修改 / 删除 / 未跟踪…） */
+  label: z.string(),
+});
+export type GitStatusEntryView = z.infer<typeof gitStatusEntrySchema>;
+
+export const gitStatusSchema = z.object({
+  isRepo: z.boolean(),
+  branch: z.string().nullable(),
+  entries: z.array(gitStatusEntrySchema),
+  /** 超过上限时如实标注，不假装是全部 */
+  truncated: z.boolean(),
+});
+export type GitStatusView = z.infer<typeof gitStatusSchema>;
+
+export const gitDiffFileSchema = z.object({
+  path: z.string(),
+  added: z.number().int().min(0),
+  removed: z.number().int().min(0),
+  /** 锁文件 / 构建产物 / min.js 之类噪音：界面默认折叠，但**不隐藏** */
+  noise: z.boolean(),
+  highlights: z.array(z.string()),
+  truncated: z.boolean(),
+});
+export type GitDiffFileView = z.infer<typeof gitDiffFileSchema>;
+
+export const gitDiffSummarySchema = z.object({
+  files: z.array(gitDiffFileSchema),
+  totalAdded: z.number().int().min(0),
+  totalRemoved: z.number().int().min(0),
+  noiseFiles: z.number().int().min(0),
+  note: z.string().nullable(),
+});
+export type GitDiffSummaryView = z.infer<typeof gitDiffSummarySchema>;
+
+/**
+ * 写操作与"被权限门拦下"的统一结果。
+ * `asked` 说明这次**真的过了人手**（而不是静默放行）；被拒时 `error` 必带可读理由。
+ */
+export const gitActionResultSchema = z.object({
+  ok: z.boolean(),
+  data: z.string().nullable(),
+  error: z.string().nullable(),
+  asked: z.boolean(),
+  decision: z.string().nullable(),
+});
+export type GitActionResultView = z.infer<typeof gitActionResultSchema>;
+
+/** 三条只读查询各自的返回形状：失败也带可读理由，绝不让界面只显示"未知错误" */
+export const gitStatusResultSchema = z.union([
+  z.object({ ok: z.literal(true), data: gitStatusSchema }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type GitStatusResult = z.infer<typeof gitStatusResultSchema>;
+
+export const gitDiffResultSchema = z.union([
+  z.object({ ok: z.literal(true), data: gitDiffSummarySchema }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type GitDiffResult = z.infer<typeof gitDiffResultSchema>;
+
+export const gitLogResultSchema = z.union([
+  z.object({ ok: z.literal(true), data: z.array(z.string().max(400)) }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+export type GitLogResult = z.infer<typeof gitLogResultSchema>;

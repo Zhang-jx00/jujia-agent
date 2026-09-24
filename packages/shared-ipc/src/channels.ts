@@ -117,6 +117,23 @@ export const IPC = {
   BROWSER_STATE: 'browser:state',
   /** main → renderer：状态变化广播（含"某次导航被策略拒绝"） */
   BROWSER_STATE_CHANGED: 'browser:state-changed',
+
+  /* ---------------------------- git 模块（M8 接线） ---------------------------- */
+
+  /**
+   * 三条**只读**通道：status / diff / log —— 权限档"不问"，因为不改任何东西。
+   * 与写侧刻意分成三条而不是"一个 GIT_RUN"：
+   * 一旦开一条能传任意 git 参数的通道，等于把 `git push -f`、`git reset --hard` 全放进来了，
+   * 权限档就没法按动作分级（只读不问 / 暂存软问 / 提交硬问）。
+   */
+  GIT_STATUS: 'git:status',
+  GIT_DIFF: 'git:diff',
+  GIT_LOG: 'git:log',
+  /** 暂存 / 取消暂存：**软 ask**（改的是暂存区，可逆） */
+  GIT_STAGE: 'git:stage',
+  GIT_UNSTAGE: 'git:unstage',
+  /** 提交：**硬 ask**（会写入仓库历史，任何「总是允许」都压不掉） */
+  GIT_COMMIT: 'git:commit',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

@@ -40,6 +40,9 @@ const PermissionRulesPanel = lazy(() =>
 const BrowserPanel = lazy(() =>
   import('./features/browser/BrowserPanel').then((m) => ({ default: m.BrowserPanel })),
 );
+const GitPanel = lazy(() =>
+  import('./features/git/GitPanel').then((m) => ({ default: m.GitPanel })),
+);
 
 /** 兜底样式包改为在启动时从动态导入的模块里取，见下方 useEffect（首屏不加载 ui-tokens） */
 
@@ -59,6 +62,7 @@ type Tab =
   | 'chat'
   | 'terminal'
   | 'browser'
+  | 'git'
   | 'mcp'
   | 'permissions'
   | 'hooks'
@@ -77,6 +81,7 @@ const TAB_LABEL: Record<Tab, string> = {
   chat: '对话',
   terminal: '终端',
   browser: '浏览器',
+  git: 'Git',
   mcp: 'MCP',
   permissions: '权限',
   hooks: '钩子',
@@ -208,6 +213,7 @@ export function App(): ReactElement {
             <TerminalPanel workspaceRoot={state.loaded.config.config.workspace} />
           )}
           {state.phase === 'ready' && tab === 'browser' && <BrowserPanel />}
+          {state.phase === 'ready' && tab === 'git' && <GitPanel />}
           {state.phase === 'ready' && tab === 'mcp' && <McpPanel />}
           {state.phase === 'ready' && tab === 'permissions' && <PermissionRulesPanel />}
           {state.phase === 'ready' && tab === 'hooks' && <HooksPanel />}

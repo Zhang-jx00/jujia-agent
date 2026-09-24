@@ -10,6 +10,71 @@
 > 轨道分类见 `docs/TRACK-PLANS.md`；排期与修复队列见 `docs/TRACK-ROADMAP.md`。
 ---
 
+## [v0.32.0-铺设9] — 2026-09-24 18:30
+
+**轨道**：**轨道铺设计划 9**（M8 git 模块接线）—— 把"代码与测试齐全、运行期零可达"的 git 模块接成用户真能用的功能
+
+**范围**：`apps/desktop/src/main/git-gate.ts`（新增，**唯一判档处**）· `git-service.ts`（新增）·
+`git-gate.test.ts`（32 例）· `git-service.test.ts`（15 例，真仓库）· `git-wiring.test.ts`（10 例接线锁）·
+`packages/shared-ipc/{channels,contracts}.ts`（**+6 通道**）· `apps/desktop/src/main/ipc.ts` ·
+`src/preload/index.ts` · `src/renderer/src/features/git/GitPanel.tsx`（新增）+ `App.tsx` + `styles.css` ·
+`scripts/e2e-ui.mjs`（**+2 步 = 19 步**）· `review/mutations.json`（**+3 条 = 12 条**）·
+README 能力表 git 行 **🔶 → ✅**。
+
+**权限映射按所有者给定的口径落地（不再猜）**
+
+| 动作 | 档位 | 谁守着 |
+|------|------|--------|
+| `status` / `diff` / `log` | **不问**（只读） | e2e 第 17 步**断言弹窗数为 0**（"不打扰"也要能被验证，否则没人知道它是不是偷偷问了） |
+| `stage` / `unstage` | **软 ask**（可"本次会话总是允许"） | 单测 + e2e：记住之后第三次暂存**不再弹**，且界面仍显示"需确认"字样 |
+| `commit` | **硬 ask**（永不可被压掉） | 判档 `git-gate.ts` + 服务层自证 + 变异 M10/M11/M12 |
+| `push` | 尚未实现 | 已在文档写明：将来必须是硬 ask 且不可压 |
+
+**三件结构设计（每件都对应一个具体事故）**
+
+1. **判档抽成纯函数** `git-gate.ts`：如果档位判断散在 `ipc.ts` 的 handler 里，就**既测不动、变异也咬不到**
+   （与 `config-write.ts` 同一个理由）。现在 `decideGitAction` 复用引擎的 `decideGate`，
+   所以用户自己写的 `git_*` allow/deny/ask 规则、plan/dontAsk、bypassPermissions 全部照常生效 —— **不搞第二套权限语义**。
+2. **不开"通用 git 命令"通道**：那等于把 `push -f`、`reset --hard` 一起放进来，档位就按不了动作分。
+   加一个 git 能力 = 加一条通道 + 一行档位 + 一条测试。
+3. **越界路径在弹窗之前就被拦**：先过 `resolveInsideWorkspace` 再问用户。
+   顺序反了的话，用户的"允许"点击会变成**替越界路径背书**。
+
+**硬 ask 有三重保险，且每重都被单独断言**（不是互相掩盖）
+
+- 判档：`decideGitAction` 对硬 ask 动作强制 `bypassable: false`；
+- 模式降级：`acceptEdits` 的字面意思是"编辑文件自动放行"，**不含写仓库历史** → 该模式下 commit 降回 default（照样问）；
+- 自证：`assertHardAskInert` 在弹窗前检查"说是硬 ask 却可被压掉"→ **直接抛，不静默放行**。
+- 变异 **M10**（把 `bypassable:false` 改 true）/ **M11**（删掉 acceptEdits 降级）/ **M12**（策略说 deny 却照样执行）分别咬住这三重。
+
+**验证**
+
+| 项 | 结果 |
+|----|------|
+| `npm test` | ✅ **744 通过 / 1 跳过**（**44 个测试文件**；本轮 +61 例 / +3 文件） |
+| `npm run typecheck` / `lint` | ✅ 5 workspace 0 错误 / 0 错 0 警 |
+| `npm run check:docs` | ✅ 全绿（**README 的 git 行升 ✅ 由"能力表交叉断言"核验** —— 这条检查自建立以来第一次真正立功） |
+| `npm run e2e` | ✅ **19/19**：只读不弹窗 → 暂存软确认 → 提交硬确认（文案含"会写入仓库历史"）→ **"总是允许"压不掉提交确认** → 拒绝后仓库没动 |
+| 真值核对 | 提交后回磁盘跑 `git rev-list --count HEAD` 与 `git log -1 --pretty=%s`；拒绝前后同样对比 —— **不看界面说成功没有** |
+| `npm run mut` | ⏳ **待回填**（12 条，只能在已提交干净基线上跑） |
+
+**如实记录两处过程问题（都不是产品缺陷，但要写下来）**
+
+1. **我自己写错过一条断言**：第 17 步第一次跑报"弹窗确认过了但仓库里没有多出提交"。
+   查明是**我的测量抢在异步 `git commit` 完成之前**读的计数 —— 产品没问题，断言顺序有问题。
+   修法是**先等界面出现这条提交（弹窗已消失）再回磁盘核对**。
+   我一度把它当成"抓到实际缺陷"往外说，那句说早了，在此更正。
+2. **锚点写法违反了自己刚写下的规矩**：原本等的是"最近提交"，而 seed 提交早就让这段文字存在 → 假通过。
+   改成等本步独有的提交主题 `e2e：接上了 git`，并先 `waitForSelector(detached)` 排除弹窗自身贡献的文本
+   （`docs/TEST-POLICY.md` §六 第 3 条的又一次实测）。
+
+**M8 未完的部分（不冒充做完）**：`git push` / 分支切换 / stash / 冲突解决都**没有做**；
+界面也没有"逐行 diff 视图"（只有摘要 + 关键行摘录）。已登记为本里程碑的后续收尾。
+
+**回退点**：`git checkout v0.31.0-扩容1`
+
+---
+
 ## [v0.31.0-扩容1] — 2026-09-24 13:40
 
 **轨道**：**轨道扩容计划 1**（内置浏览器 M10）—— **第 2 步：服务层 + IPC + 界面 + e2e**，把上一步交付的策略层接成用户真能用的功能

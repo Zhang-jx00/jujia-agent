@@ -1214,3 +1214,84 @@ html[data-jj-bg-kind='glass'] .app-shell {
   border-radius: 999px;
   padding: 0 8px;
 }
+
+/* ---------------------------- git 页签（M8 接线） ---------------------------- */
+
+.jj-git-list {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.jj-git-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.jj-git-row code {
+  word-break: break-all;
+}
+
+.jj-git-code {
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 28px;
+}
+
+.jj-git-label {
+  color: var(--text-secondary);
+}
+
+.jj-git-diff {
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.jj-git-lines {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  flex-basis: 100%;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.jj-git-badge {
+  font-size: 11px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+  color: var(--text-secondary);
+}
+
+.jj-git-link {
+  background: none;
+  border: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  margin-left: 6px;
+  font-size: inherit;
+}
+
+.jj-git-message {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
