@@ -294,7 +294,16 @@ try {
       );
       return;
     }
-    res.end(`<html><head><title>e2e</title></head><body><p>${MARKER}</p><p>第二行正文</p></body></html>`);
+    // BRIDGE= / NODE= 这两串**只由页面脚本在运行时写出来**（静态 HTML 里只有 probe-pending）。
+    // 于是这一条探针同时回答两个问题：guest 页面的 JS 到底跑没跑、跑的时候能不能拿到能力桥与 Node。
+    // 若在静态 HTML 里直接写 BRIDGE=undefined，探针就是假的 —— JS 不跑也能"通过"。
+    res.end(
+      `<html><head><title>e2e</title></head><body><p>${MARKER}</p><p>第二行正文</p>` +
+        `<p id="probe">probe-pending</p>` +
+        `<script>document.getElementById('probe').textContent =` +
+        `'BRIDGE=' + (typeof window.jujia) + ' NODE=' + (typeof window.process);</script>` +
+        `</body></html>`,
+    );
   });
   await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
   const bound = server.address();
@@ -320,6 +329,28 @@ try {
   if (!readOut.includes(baseUrl)) fail('读正文返回的来源不是本地页面', readOut.slice(0, 600));
   if (readOut.includes('：0 字')) fail('读正文拿到 0 字（正文提取实际没生效）', readOut.slice(0, 600));
   ok('本地页面真加载、正文真读到');
+
+  /**
+   * **运行时**断言能力桥不可达（源码级守卫之外的第二重保险）。
+   * 为什么不能只靠源码检查：`browserViewPreferences()` 里少写一行 preload、
+   * 或将来有人把视图配置换成主窗口那份模板，源码看起来都"没毛病"，
+   * 但真实 guest 页面里就会多出 window.jujia —— 只有页面自己报告才看得见。
+   * 这里直接调 browserGetText 取回 guest 正文（界面上只显示字数、不显示正文，故走 API）。
+   */
+  const probe = await win.evaluate(async () => {
+    const r = await window.jujia.browserGetText();
+    return r.ok === true ? r.text : `__ERR__${r.error}`;
+  });
+  if (!probe.includes('BRIDGE=undefined')) {
+    fail('guest 页面拿到了能力桥（window.jujia 不为 undefined）—— 视图配置泄漏', String(probe).slice(0, 600));
+  }
+  if (!probe.includes('NODE=undefined')) {
+    fail('guest 页面能访问到 process —— nodeIntegration 或沙箱被打开', String(probe).slice(0, 600));
+  }
+  if (probe.includes('probe-pending')) {
+    fail('页面脚本没执行，这条运行时断言是空的（探针没被改写）', String(probe).slice(0, 600));
+  }
+  ok('运行时确认：guest 页面既拿不到能力桥，也拿不到 process');
 
   step('内置浏览器：页面自己跨站跳转被拦（用户点开的站点不能被页面冒用）');
   await addressBox.fill(`${baseUrl}/jump`);
