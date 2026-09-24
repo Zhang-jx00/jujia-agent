@@ -200,7 +200,7 @@ jujia/
 | M1 | 桌面壳与工程底座 | 窗口/主题/托盘/安全基线/monorepo | `createWindow`、`window.jujia` 白名单 | Electron | S4 §1–6, S5 §2–4 | 安全 checklist 全绿；冷启动 <3s |
 | M2 | 连接与模型适配 | 多 Connection、preset、apiFormat 两档、模型目录 | `testConnection`、`listModels` | M12 | S7 §1–6 | DeepSeek/GLM/OpenAI/Anthropic 各连一次成功 |
 | M3 | 聊天与流式 UI | 会话列表、消息、thinking 折叠、rAF 合批 | `sendMessage`、`stop` | M2/M12 | S6 §3, S5 §5/§7 | 流式时可输入；断流可重试 |
-| M4 | 工具执行与权限 | 内置工具（**现状只有 read/write/ls**；`run_command`、git 工具属后续阶段，按同一契约追加）、权限队列 | `runTool`、permission request/resolve | M1/M12 | S1 §4–8, S6 §5 | 权限面板不闪退不自动拒；危险命令强制确认 |
+| M4 | 工具执行与权限 | 内置工具（**现状：`read_file`/`write_file`/`list_dir` + `run_command`（`v0.33.0`）**；git 工具属后续阶段，按同一契约追加）、权限队列 | `runTool`、permission request/resolve | M1/M12 | S1 §4–8, S6 §5 | 权限面板不闪退不自动拒；危险命令强制确认 |
 | M5 | Agent Loop（agent-core） | 三分支循环、maxTurns、失败恢复、只读子代理 | `runAgentTurn` | M2/**M4**/M6 | S1 §1–10, S2 §11–18 | 循环有界；工具错误回模型可恢复 |
 | M6 | 记忆与上下文 | core blocks、notes、压缩 handoff、评估脚本 | `assembleContext`、`compact` | M12 | S3 §1–10 | 重启后能回忆偏好；压缩后有 UI 提示 |
 | M7 | 扩展生态 | MCP Host、Skills、Hooks、定时任务 | `mcp.list/call`、`skills.install`、`schedule.*` | M5 | S2 §1–12 | 挂 filesystem server；装 1 个 Skill；跑 1 个定时 |

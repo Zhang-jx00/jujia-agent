@@ -14,7 +14,7 @@
 
 **俱佳Agent（JujiaAgent）**：跑在用户自己 Windows 机器上的个人 Agent ——
 **能读文件 / 改代码；命令执行只走用户手驱动的内置终端与逐个批准的 MCP 工具
-（模型当前没有自主执行命令的内置工具）；每个有副作用的动作都必须用户点头，数据默认不出本机**。
+（模型可以自主提出执行命令，但**每一次都要用户点头**）；每个有副作用的动作都必须用户点头，数据默认不出本机**。
 
 三条不可妥协的定位（详见 `docs/PRODUCT-GOAL.md`）：
 
@@ -116,7 +116,7 @@
 
 | 项 | 位置 | 思路 |
 |----|------|------|
-| **内置工具清单（实际）** | `packages/agent-core/src/tools/registry.ts` 的 `createDefaultRegistry()` | **只有 `read_file` / `write_file` / `list_dir` 三个**，外加技能的 `load_skill`、Loop 的 `handoff`、逐个批准的 MCP 工具。**没有 `run_command`、没有 git 工具** —— `file-tools.ts:126` 与 `registry.ts:69` 的注释写明"后续阶段按同一契约追加"。因此"能跑命令"的准确含义是：**用户手驱动的内置终端 + 批准过的 MCP 工具**，模型不能自主执行命令 |
+| **内置工具清单（实际）** | `packages/agent-core/src/tools/registry.ts` 的 `createDefaultRegistry()` | **四个**：`read_file` / `write_file` / `list_dir` + **`run_command`（`v0.33.0-铺设8` 接上）**，外加技能的 `load_skill`、Loop 的 `handoff`、逐个批准的 MCP 工具。`run_command` 声明为执行类 → **每次硬 ask**（"总是允许"压不掉）、工作目录必须在工作区内、子进程环境剔除密钥类变量、默认 30 秒超时、输出超限如实标注、stdin 立即关闭（不支持交互式命令）。因此"能跑命令"的准确含义是：**模型可自主提出、但每一条都要用户逐次确认**；另有用户自己驱动的内置终端与批准过的 MCP 工具 |
 | 路径沙箱 | `packages/agent-core/src/tools/path-guard.ts` | **不做字符串前缀匹配**（Windows 短名/大小写/符号链接都会绕）；按真实路径解析判定 |
 | 权限门 | `packages/agent-core/src/permissions/policy.ts` | 5 种模式（default/acceptEdits/plan/dontAsk/bypassPermissions）；**硬 ask vs 软 ask 两级**：执行类命令/敏感路径/用户自写 ask 规则/高危清单 = **硬 ask**（「总是允许」压不掉），普通写文件 = 软 ask（可被会话白名单压掉） |
 | 高危清单 | 配置 `alwaysAskTools`（引擎级兜底） | 来自配置文件，**不经渲染层写入** |
@@ -241,7 +241,7 @@
 | M6 写入侧 | `memory.ts appendNote` 接线（会话结束时写长期记忆） | ⏳ 未接线 |
 | M7 定时任务 | RRULE + 补跑 | ⏳ 未开始 |
 | **M8 git（整个模块）** | status/diff/log/stage/unstage/commit 已实现且有测试，`v0.32.0-铺设9` **已接线**：6 条 `GIT_*` 通道 + `git-gate.ts` 判档 + `git-service.ts` + Git 页签 | ✅ **已接线**（读侧放行、写侧软 ask、`commit` 硬 ask，三重保险各有变异）；**剩余**：`push` / 分支 / stash / 冲突 / 逐行 diff |
-| **内置 exec 工具** | 让模型能自主执行命令（`run_command`），**一律硬 ask** | ⏳ 未做（当前命令执行只有"用户手驱终端 + 批准的 MCP 工具"两条路） |
+| **内置 exec 工具** | 让模型能自主执行命令（`run_command`），**一律硬 ask** | ✅ **`v0.33.0-铺设8` 已交付**（每次确认 + 工作目录守卫 + 环境脱敏 + 超时与输出上限；变异 M13–M15 各咬一重） |
 | M12 日志/自动更新 | 结构化日志、更新通道 | ⏳ 未做 |
 
 ### 3.2 中断位置与原因（从这里继续）
@@ -270,9 +270,10 @@
 3. **视图生命周期的体验取舍**：现在"离开页签即关闭"，要不要改成"隐藏但保留"（需给视图加 hide 能力，
    并想清楚隐藏期间网页继续跑算不算副作用）。
 
-**下一轮候选（等所有者点单）**：**M4 内置 exec 工具**（`run_command`，一律硬 ask —— 与 `commit` 同一套硬 ask 语义，
-`git-gate.ts` 的形状可以直接照抄）· M6 记忆写入侧接线（`appendNote` 已实现只差调用方）·
-R-12 `ipc.ts` 拆分（**本轮又加了 6 个 handler，行数继续往上走，债更重了**）· M10 收尾。
+**M4 已交付（`v0.33.0-铺设8`）**，所以 WorkBuddy 给的序列现在是：
+**R-12 `ipc.ts` 拆分（756 行 → 每文件 ≤300；M4 没加一行，M8 加了 6 个 handler）** ·
+M10 收尾（三档打开方式 → PDF/Markdown 查看）· M6 记忆写入侧接线（`appendNote` 只差调用方）·
+M8 收尾（`push` → 逐行 diff 视图；编号方案已批准：`push` 归 M8、逐行 diff 并入 M19）。
 
 **中断原因**：按路线图分步交付 —— 策略层先行并充分测试，再做服务与界面（已完成）；
 剩下的三档打开方式与文档查看是独立增量，不必挡在下一个里程碑前面。

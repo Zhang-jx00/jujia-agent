@@ -234,7 +234,7 @@ export async function runTool(
         id: newId(),
         toolName: tool.name,
         kind: tool.kind,
-        summary: `${tool.name} · ${kindLabel(tool.kind)}`,
+        summary: summarizeRequest(tool, rawArgs),
         args: rawArgs,
         paths,
       }),
@@ -379,6 +379,26 @@ function kindLabel(kind: ToolKind): string {
 /** 从原始入参里尽力提取路径，供权限弹窗展示「要动哪些文件」 */
 function collectPaths(rawArgs: unknown): string[] {
   if (typeof rawArgs !== 'object' || rawArgs === null) return [];
-  const p = (rawArgs as { path?: unknown }).path;
-  return typeof p === 'string' ? [p] : [];
+  const o = rawArgs as { path?: unknown; cwd?: unknown };
+  const out: string[] = [];
+  if (typeof o.path === 'string') out.push(o.path);
+  // 执行类工具没有 path，但有 cwd —— 不显示它，用户就看不到命令将在哪个目录落地
+  if (typeof o.cwd === 'string' && !out.includes(o.cwd)) out.push(o.cwd);
+  return out;
+}
+
+/**
+ * 弹窗标题。执行类必须**把命令行本身写进标题**：
+ * 只写"run_command · 执行命令"等于让人不看内容就批准 —— 完整参数虽然在 `<details>` 里，
+ * 但那是折叠的，而审批这一环的全部价值都在于"人真的看见了要做什么"。
+ */
+function summarizeRequest(tool: StoredTool, rawArgs: unknown): string {
+  const base = `${tool.name} · ${kindLabel(tool.kind)}`;
+  if (tool.kind !== 'exec') return base;
+  const command =
+    typeof rawArgs === 'object' && rawArgs !== null ? (rawArgs as { command?: unknown }).command : undefined;
+  if (typeof command !== 'string' || command.trim() === '') return base;
+  // 截断只为排版（弹窗不该被一条 4000 字的命令撑破），完整值仍可在参数里看到
+  const flat = command.replace(/\s+/g, ' ').trim();
+  return flat.length > 200 ? `${base}：${flat.slice(0, 200)}…（完整命令见参数）` : `${base}：${flat}`;
 }

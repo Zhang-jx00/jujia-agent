@@ -1,4 +1,5 @@
 import { FILE_TOOLS } from './builtin/file-tools';
+import { EXEC_TOOLS } from './builtin/exec-tool';
 import type { StoredTool } from './types';
 
 /**
@@ -66,7 +67,13 @@ export class ToolRegistry {
   }
 }
 
-/** 默认注册表：内置文件工具（后续阶段在此追加 run_command / git 等） */
+/**
+ * 默认注册表：内置文件工具 + 内置命令执行工具（M4）。
+ *
+ * `run_command` 的 `kind` 是 `'exec'`，权限引擎对执行类一律**硬 ask** ——
+ * 也就是说"注册进来"不等于"能自己跑"，每次仍要过人手，且"总是允许"压不掉。
+ * 这一条由 `exec-tool.test.ts` 与变异 M13 共同钉住。
+ */
 export function createDefaultRegistry(): ToolRegistry {
-  return new ToolRegistry(FILE_TOOLS);
+  return new ToolRegistry([...FILE_TOOLS, ...EXEC_TOOLS]);
 }

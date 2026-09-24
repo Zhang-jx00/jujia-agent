@@ -1,5 +1,5 @@
 {
-  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）。基线：本轮主提交",
+  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）。基线：本轮主提交",
   "mutations": [
     {
       "id": "M1",
@@ -96,6 +96,30 @@
       "find": "    if (gate.action === 'deny') return refused(`${toolName} 被权限策略拒绝：${gate.reason}`, 'policy:deny');",
       "replace": "    if (gate.action === 'deny') return finish(await execute(root), false, 'policy:deny');",
       "test": "apps/desktop/src/main/git-service.test.ts"
+    },
+    {
+      "id": "M13",
+      "desc": "run_command 不再声明为执行类（kind 从 exec 改成 write → 变成软 ask，一次「总是允许」就永久放行任意命令）",
+      "file": "packages/agent-core/src/tools/builtin/exec-tool.ts",
+      "find": "  kind: 'exec',",
+      "replace": "  kind: 'write',",
+      "test": "packages/agent-core/src/tools/builtin/exec-tool.test.ts"
+    },
+    {
+      "id": "M14",
+      "desc": "工作目录不再经路径守卫（拼字符串代替 guardPath → 越界命令也能跑起来）",
+      "file": "packages/agent-core/src/tools/builtin/exec-tool.ts",
+      "find": "    const cwd = await guardPath(ctx.workspaceRoot, cwdRaw);",
+      "replace": "    const cwd = `${ctx.workspaceRoot}/${cwdRaw}`; // 变异：不走守卫",
+      "test": "packages/agent-core/src/tools/builtin/exec-tool.test.ts"
+    },
+    {
+      "id": "M15",
+      "desc": "子进程环境不再剔除密钥类变量（直接把宿主 env 原样交给命令 → 一句 env 就能带走）",
+      "file": "packages/agent-core/src/tools/builtin/exec-tool.ts",
+      "find": "    const env = buildTerminalEnv(deps.baseEnv, { workspaceRoot: cwd });",
+      "replace": "    const env = { ...deps.baseEnv } as Record<string, string>; // 变异：不脱敏",
+      "test": "packages/agent-core/src/tools/builtin/exec-tool.test.ts"
     }
   ]
 }

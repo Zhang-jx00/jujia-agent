@@ -196,7 +196,8 @@ const allScripts = new Set([
     return n;
   };
   const testFiles = countTests('packages') + countTests('apps');
-  const statedFiles = /(\d+)\s*个测试文件/.exec(progress)?.[1];
+  // 同样锚定「当前规模」行，理由与下面的步数一致：历史行里也各自记过文件数
+  const statedFiles = /(\d+)\s*个测试文件/.exec(progress.split('**当前规模**')[1] ?? '')?.[1];
   report(
     'PROGRESS 里的测试文件数与实际一致',
     statedFiles !== undefined && Number(statedFiles) === testFiles,
@@ -205,11 +206,14 @@ const allScripts = new Set([
 
   const e2eSource = read('apps/desktop/scripts/e2e-ui.mjs');
   const e2eSteps = [...e2eSource.matchAll(/^\s*step\(/gm)].length;
-  const statedSteps = /e2e[^\n]*?(\d+)\s*步/.exec(progress)?.[1];
+  // 必须锚定「当前规模」那一行：历史交付行里也写着各自的步数（如"e2e 19 步含 Git 两步"），
+  // 用"第一个匹配"会被历史行抢走 —— 那样检查器报的是"文档不一致"，错的却是检查器自己。
+  // 与 §数字只写一处 的口径一致：当前状态只在**当前规模**这一行。
+  const statedSteps = /界面级 e2e (\d+)\s*步/.exec(progress)?.[1];
   report(
     'PROGRESS 里的 e2e 步数与脚本一致',
     statedSteps !== undefined && Number(statedSteps) === e2eSteps,
-    `脚本 ${e2eSteps} 步；PROGRESS 写 ${statedSteps ?? '(未写)'} 步`,
+    `脚本 ${e2eSteps} 步；PROGRESS「当前规模」行写 ${statedSteps ?? '(未写)'} 步`,
   );
 }
 
@@ -476,6 +480,7 @@ const walkLiveFiles = (exts) => {
 {
   const TOOL_SOURCES = [
     'packages/agent-core/src/tools/builtin/file-tools.ts',
+    'packages/agent-core/src/tools/builtin/exec-tool.ts',
     'packages/agent-core/src/skills/tool.ts',
     'packages/agent-core/src/loop/agent-loop.ts',
   ];

@@ -58,7 +58,7 @@ npm run setup:terminal
 - shell 取 `ComSpec`；取不到时回退到 `%SystemRoot%\System32\cmd.exe` 的**绝对路径**
   （再退 `C:\Windows\System32\cmd.exe`），**不用裸 `cmd.exe`**，避免 PATH 劫持。
 
-> 说明：模型**没有**自主执行命令的内置工具。命令执行只有两条路 ——
+> 说明：模型有内置的 `run_command`，但它**每一次都要用户确认**（执行类 = 硬 ask）。此外还有两条路 ——
 > 你自己在内置终端里敲，以及你逐个批准的 MCP 工具。
 
 ## 附：这三个包各自做什么

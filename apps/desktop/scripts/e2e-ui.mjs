@@ -14,7 +14,7 @@
  * 退出码：0 = 通过；1 = 失败（打印失败在哪一步、以及界面当时的文本）
  */
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { dirname, join } from 'node:path';
@@ -526,6 +526,41 @@ try {
   if (afterDeny !== beforeDeny) fail(`拒绝之后仓库里却多出了提交（${String(beforeDeny)} → ${String(afterDeny)}）`);
   ok('硬 ask 不被"总是允许"压掉；拒绝后仓库真的没动');
 
+  step('内置 exec：批准后真的落盘；「总是允许」压不掉下一次硬确认；拒绝后磁盘上什么都没有');
+  /**
+   * 三条断言都问**真值**（TEST-POLICY §六 第 1 条）：
+   * 界面说"已执行"不算执行，文件在磁盘上出现才算；说"被拒绝"不算拒绝，文件不存在才算。
+   */
+  const execOut = async (command) =>
+    win.evaluate(async (c) => await window.jujia.toolRun('run_command', { command: c }), command);
+  const dialogCount = async () => (await win.locator('[role="dialog"][aria-label="权限请求"]').count());
+
+  const fileA = `exec-approved-${String(Date.now()).slice(-6)}.txt`;
+  // 不能 await：invoke 要等用户在弹窗上点完才回，先 await 就把整个流程堵死了
+  const first = execOut(`echo approved > ${fileA}`);
+  const firstDialog = await waitForText(`需要你确认：run_command · 执行命令：echo approved > ${fileA}`);
+  if (firstDialog !== true) fail('exec 没有弹硬确认，或标题里看不到将要执行的命令行', String(firstDialog).slice(0, 600));
+  await win.locator('button', { hasText: '本次会话总是允许' }).first().click();
+  await first;
+  await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
+  const aExists = existsSync(join(wsDir, fileA));
+  if (!aExists) fail('批准后文件没有真的出现在磁盘上（命令其实没跑？）');
+  ok('批准 → 命令真的执行（磁盘上有文件）');
+
+  const fileB = `exec-denied-${String(Date.now()).slice(-6)}.txt`;
+  const second = execOut(`echo denied > ${fileB}`);
+  const secondDialog = await waitForText(`需要你确认：run_command · 执行命令：echo denied > ${fileB}`);
+  if (secondDialog !== true) fail('「总是允许」把第二次的硬确认也压掉了（执行类绝不允许这样）', String(secondDialog).slice(0, 600));
+  const pendingDialogs = await dialogCount();
+  if (pendingDialogs !== 1) fail('第二次执行应当只有一个确认框挂着', String(pendingDialogs));
+  await win.locator('button', { hasText: '拒绝' }).first().click();
+  const secondRes = await second;
+  if (secondRes.ok !== false) fail(`拒绝了却返回成功：${JSON.stringify(secondRes)}`);
+  if (secondRes.decision !== 'deny') fail(`决定不是 deny：${String(secondRes.decision)}`);
+  const bExists = existsSync(join(wsDir, fileB));
+  if (bExists) fail('用户明明拒绝了，命令却还是执行了（磁盘上留下了文件）');
+  ok('硬 ask 不被"总是允许"压掉；拒绝 → 零副作用');
+
   server.close();
   otherSite.close();
 
@@ -546,5 +581,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门（含磁盘真值核对）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 干净退出');
 process.exit(0);

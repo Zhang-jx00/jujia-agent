@@ -247,9 +247,11 @@ describe('内置文件工具', () => {
 });
 
 describe('注册表', () => {
-  it('默认注册表含三个内置文件工具', () => {
+  it('默认注册表 = 三个文件工具 + 一个执行工具（清单变了这条就该红，逼着登记）', () => {
     const registry = createDefaultRegistry();
-    expect(registry.names()).toEqual(['list_dir', 'read_file', 'write_file']);
+    expect(registry.names()).toEqual(['list_dir', 'read_file', 'run_command', 'write_file']);
+    // 执行工具必须是 exec 类：这是"每次硬 ask、总是允许压不掉"的唯一依据
+    expect(registry.get('run_command').kind).toBe('exec');
   });
 
   it('未注册的工具名 → 明确报错（不做模糊匹配）', () => {
