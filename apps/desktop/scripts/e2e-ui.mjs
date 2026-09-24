@@ -282,14 +282,23 @@ try {
    */
   step('内置浏览器：真实加载本地页面并读出正文（不依赖外网）');
   const MARKER = 'JUJIA_E2E_BODY_MARKER';
+  const OTHER_MARKER = 'JUJIA_E2E_OTHER_SITE';
   // 端口在 listen 之后才知道；请求处理函数是**之后**才被调用的，所以这里先声明再赋值是安全的
   let portAddr = 0;
+  let otherPort = 0;
+  /** 第二个站点：用来当"跳转目标"。**同主机不同端口 = 不同 origin**，而且不会被 Chromium 改写 */
+  const otherSite = createServer((_req, res) => {
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    res.end(`<html><body><p>${OTHER_MARKER}</p></body></html>`);
+  });
   const server = createServer((req, res) => {
     res.setHeader('content-type', 'text/html; charset=utf-8');
     if (req.url === '/jump') {
-      // 页面自己跳去 localhost —— 与用户打开的 127.0.0.1 **不是同一个 origin**，必须被拦
+      // 页面自己跳去**另一个站点** —— 与用户打开的那个 origin 不同，必须被拦。
+      // 为什么不用 localhost：Chromium 会把 localhost 重写回 127.0.0.1，
+      // 那样"origin 变了没"就看不出来了（红/绿实验实测），换端口才是干净的第二 origin。
       res.end(
-        `<html><head><meta http-equiv="refresh" content="0;url=http://localhost:${String(portAddr)}/x">` +
+        `<html><head><meta http-equiv="refresh" content="0;url=http://127.0.0.1:${String(otherPort)}/stolen">` +
           `</head><body>waiting-jump</body></html>`,
       );
       return;
@@ -306,10 +315,15 @@ try {
     );
   });
   await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+  await new Promise((resolveListen) => otherSite.listen(0, '127.0.0.1', resolveListen));
   const bound = server.address();
+  const otherBound = otherSite.address();
   if (bound === null || typeof bound === 'string') fail('本地测试服务没拿到端口', String(bound));
+  if (otherBound === null || typeof otherBound === 'string') fail('第二个站点没拿到端口', String(otherBound));
   portAddr = bound.port;
+  otherPort = otherBound.port;
   const baseUrl = `http://127.0.0.1:${String(portAddr)}`;
+  const otherUrl = `http://127.0.0.1:${String(otherPort)}`;
 
   await tabButton('浏览器').click();
   const browserReady = await waitForText('尚未打开');
@@ -357,12 +371,29 @@ try {
   await win.locator('button', { hasText: '打开' }).first().click();
   const jumped = await waitForText('跳出用户打开的站点');
   if (jumped !== true) fail('跨站跳转没有被拦下（策略可能没挂在 will-navigate 上）', String(jumped).slice(0, 800));
-  const afterJump = await bodyText();
-  if (!afterJump.includes(`${baseUrl}/jump`)) {
-    fail('被拦之后当前地址已经不是原页面（说明跳转实际发生了）', afterJump.slice(0, 600));
+
+  /**
+   * **真值断言**：不看界面文案，直接问 guest 现在实际在哪个 origin、显示的是哪一页。
+   * 为什么必须这样（红/绿实验实测出来的）：界面里"已打开 …/jump"那句提示会一直挂着，
+   * 只断言 innerText 的话，**把 preventDefault 整行删掉、网页真跳走了，这一步照样绿**。
+   * 一条不会红的断言等于没有断言。
+   */
+  const guestNow = await win.evaluate(async () => {
+    const r = await window.jujia.browserGetText();
+    return r.ok === true ? { origin: r.origin, text: r.text } : { origin: `__ERR__${r.error}`, text: '' };
+  });
+  if (guestNow.origin !== baseUrl) {
+    fail('被拦之后 guest 的实际 origin 已经变了（拦截没生效）', JSON.stringify(guestNow).slice(0, 600));
   }
-  if (afterJump.includes('localhost')) ok('理由里点出了目标站点，且当前页没被换掉');
-  else fail('被拦理由里没有目标 origin', afterJump.slice(0, 600));
+  if (!guestNow.text.includes('waiting-jump')) {
+    fail('guest 显示的不是用户打开的那个页面', JSON.stringify(guestNow).slice(0, 600));
+  }
+  if (guestNow.text.includes(OTHER_MARKER)) {
+    fail('guest 已经落到另一个站点（正文里出现了目标站点标记）', guestNow.text.slice(0, 300));
+  }
+  const afterJump = await bodyText();
+  if (afterJump.includes(otherUrl)) ok('理由可见，且 guest 实际仍停在用户打开的站点');
+  else fail('被拦理由里没有点出目标站点', afterJump.slice(0, 600));
 
   step('内置浏览器：file:// 被拒且理由可读（界面级断言）');
   await addressBox.fill('file:///C:/Windows/win.ini');
@@ -373,9 +404,18 @@ try {
   // 只说"不行"不够：必须说清是**哪个协议、为什么**，否则用户会以为是软件坏了
   if (!fileOut.toLowerCase().includes('file')) fail('拒绝理由里没有点出 file 协议', fileOut.slice(0, 600));
   if (!fileOut.includes('本地文件')) fail('拒绝理由没有说明风险（读磁盘任意文件）', fileOut.slice(0, 600));
-  ok('危险协议被拒且理由可见');
+  // 真值断言（同上一步的理由）：界面写了"已拒绝"还不够，得确认 guest **实际**没换页
+  const guestAfterFile = await win.evaluate(async () => {
+    const r = await window.jujia.browserGetText();
+    return r.ok === true ? r.origin : `__ERR__${r.error}`;
+  });
+  if (guestAfterFile !== baseUrl) {
+    fail(`file:// 被"拒绝"之后 guest 实际换了页（当前 origin：${String(guestAfterFile)}）`);
+  }
+  ok('危险协议被拒、理由可见，且 guest 确实还停在原页面');
 
   server.close();
+  otherSite.close();
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
