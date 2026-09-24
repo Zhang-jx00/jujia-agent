@@ -48,8 +48,12 @@ git 的参数是确定的子命令，拼 shell 就是纯注入面；而"执行�
 | `npm run typecheck` / `lint` | ✅ 全 0 |
 | `npm run check:docs` | ✅ 全绿（README 的 `run_command` 行升 ✅ 由能力表交叉断言认出） |
 | `npm run check:docs:selftest` | ✅ 9 处注入全被拦住 |
-| `smoke` / `perf` / `e2e` | 见下方提交前复跑记录 |
-| `npm run mut` | ⏳ **待回填**（15 条；只能在已提交的干净基线上跑） |
+| `npm run smoke` | ✅ 主进程 + 预加载桥 + 渲染层 + IPC 全链路；渲染层无 Node 泄漏 |
+| `npm run perf` | 834ms 过预算 —— **非规范采样**（紧跟构建的单点），不当回归基线（欠账仍在 `docs/PERF-BUDGET.md` §五） |
+| `npm run e2e` | ✅ **20/20**（exec 那一步用磁盘真值：批准才有文件、拒绝后没有、第二次仍弹确认） |
+| `npm run mut` | ✅ **15/15 被拦住 · 未被拦住 0 · 注入失败 0 · 无法运行 0**（基线 `781768d`）；还原后 8 个受影响测试文件复跑通过，`git status` 零残留 |
+| 红/绿实验 | ✅ **红**：手工施加 M13（`kind: 'exec'` → `'write'`）后 e2e 第 19 步报"exec 没有弹硬确认"；`git checkout --` 还原后字节与基线一致（该状态本轮已跑过 20/20） |
+
 
 **如实记录：本轮我自己制造又抓回的四个问题**
 
