@@ -29,13 +29,14 @@ npm run perf         # 启动性能预算判定（首帧 < 1000ms）
 源码层面的 shell 选择等逻辑对 macOS / Linux 做了兼容处理，但**尚未在这些平台上验证**，
 欢迎你来补验证或修问题（请在 PR 里注明你实际跑过的平台与版本）。
 
-## 三、提交前必须过的门（门禁全绿 —— 清单见 docs/PROGRESS.md）
+## 三、提交前必须过的门（门禁全绿 —— **清单以 docs/PROGRESS.md 为准**）
 
 ```bash
-npm run typecheck && npm run lint && npm run test && npm run smoke && npm run perf
+npm run typecheck && npm run lint && npm run test && npm run smoke && npm run perf && npm run e2e && npm run check:docs
 ```
 
-五项全绿才提交。**不允许**用"本地跑过了"代替 —— 请把实际输出贴在 PR 里。
+**门禁清单以 `docs/PROGRESS.md` 为唯一权威**（本文件刻意不写"几件套"，避免多一处会漂移的数字）；全绿才提交。
+**不允许**用"本地跑过了"代替 —— 请把实际输出贴在 PR 里。
 
 ## 四、这个项目的几条硬规矩
 

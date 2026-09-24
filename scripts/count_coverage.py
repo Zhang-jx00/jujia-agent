@@ -10,13 +10,27 @@
   避免 ⚠️ 同时被用作「部分覆盖」与「宣告留空」两种含义时统计失真。
 - 以表格逐格为准，不采信正文里的口头汇总数字。
 """
+# 让 `str | None` 这类注解在 Python 3.8 上也能跑（PEP 563：注解不在运行时求值）。
+# 为什么需要：约定要求"统计一律用脚本"，脚本就不能只在某一个 Python 版本上可用；
+# 实测 PATH 上的 python 是 3.8.3，缺这一行会在定义函数时就 TypeError 崩掉。
+from __future__ import annotations
+
 import glob
 import os
 import re
 import sys
 from collections import Counter
+from pathlib import Path
 
-ROOT = r"D:\MiMo\ProjectOne\俱佳agent\knowledge\sources"
+# **按脚本自身位置解析仓库根**，不写死本机绝对路径 —— 这是对外开源的工程底线
+# （别人 clone 下来要能直接跑），也是 `docs/HANDOVER.md` §5.6 第 7 条对脚本的要求。
+ROOT = str(Path(__file__).resolve().parent.parent / "knowledge" / "sources")
+
+# Windows 控制台默认 GBK，打印 ✅ / ⚠️ 会 UnicodeEncodeError 直接崩掉。
+# 本项目**只支持 Windows**，而"统计一律用脚本"是用户固定约定 ——
+# 所以脚本必须在目标平台的默认控制台上跑得完，不能要求先设 PYTHONIOENCODING。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 OK_SYM = {"✅", "✓"}
 PARTIAL_SYM = {"⚠️", "⚠", "△"}

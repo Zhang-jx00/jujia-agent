@@ -16,10 +16,10 @@ atomicWriteJSON(path, value) // write tmp → fsync → rename
 readJSONSafe(path) // { ok, data, raw?, error? }
 ```
 
-Harness/skill-store 已有正确范例（Yan `continual-harness.js`）；config/session/memory 是反例。
+正确做法是「写临时文件 → fsync → rename」；反例是原地覆写 config/session/memory —— 一旦中途中断就留下半截 JSON。
 
 ## 风险
 
-Issue #4 同类：坏 state + 启动重放 → 崩溃/卸载无效。
+坏 state + 启动时重放 → 崩溃或卸载无效，是持久化最典型的连带故障。
 
-来源：findings F4 + Yan 优化报告 S1–S3
+来源：findings F4（另有内部调研，未随仓库交付）

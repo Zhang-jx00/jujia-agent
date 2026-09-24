@@ -70,6 +70,38 @@ const cases = [
     to: '99 步全自动',
     expect: 'e2e 步数与脚本一致',
   },
+  {
+    // 用哨兵名注入，避免把真正的对标产品名再写一遍（哨兵在 check-docs 的清单里）
+    name: '活文档里出现对标产品名',
+    file: 'README.md',
+    from: '## 核心理念与独特之处',
+    to: '## 核心理念与独特之处（对标 __PEER_NAME_SELFTEST__）',
+    expect: '没有对标产品名',
+  },
+  {
+    name: 'IPC 通道数写错',
+    file: 'README.md',
+    from: '## 数据与目录（它把你的东西放哪了）',
+    to: '## 数据与目录（33 个 IPC 通道，它把你的东西放哪了）',
+    expect: 'IPC 通道数',
+  },
+  {
+    // 这条是交接验收抓到的真实漂移：git 模块整块未接线却在能力表标 ✅
+    name: '能力表把未接线的 git 标成 ✅',
+    file: 'README.md',
+    from: '| **git 队列与 diff 审阅**（关键行摘录、噪音文件识别） | 🔶 **代码与测试就绪，未接线** —— 没有 IPC 通道也没有界面，运行期用户不可达 |',
+    to: '| **git 队列与 diff 审阅**（关键行摘录、噪音文件识别） | ✅ |',
+    expect: '真实运行期通路',
+  },
+  {
+    // 交接验收抓到 scripts/ 与 make-logo-mono.mjs 里写死过本机路径（后者还带用户名）。
+    // 注入用运行时算出的 repoRoot，所以脚本里不含任何字面量本机路径。
+    name: '代码里写死本机绝对路径',
+    file: 'packages/shared/src/json-store.ts',
+    from: 'export interface Envelope<T> {',
+    to: `// 把本机路径写进代码 = 别人 clone 下来跑不了：${repoRoot}\nexport interface Envelope<T> {`,
+    expect: '本机绝对路径',
+  },
 ];
 
 for (const c of cases) {
@@ -94,4 +126,4 @@ for (const c of cases) {
 const after = await runCheck();
 if (after.code !== 0) fail('还原后检查器仍失败 —— 基线已被污染，请人工检查');
 
-console.log('\nDOCS-CHECK SELFTEST OK：4 处注入的漂移全部被拦住，还原后检查器恢复通过。');
+console.log(`\nDOCS-CHECK SELFTEST OK：${cases.length} 处注入的漂移全部被拦住，还原后检查器恢复通过。`);

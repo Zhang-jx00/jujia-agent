@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 从 sources/S*.md 的「覆盖度自评」表逐格取值，生成 SOURCE-MATRIX.md 用的
-89 行领域索引表（markdown 片段）与空缺台账。
+领域索引表（markdown 片段）与空缺台账。**行数 = 领域数**，以 `sources/` 的实际内容为准
+（脚本里不写死领域数 —— 口径统一为 108 之后，写死的数字已经漂过一次）。
 
 产出文件：
   knowledge/_generated-matrix.md
@@ -11,9 +12,13 @@ import glob
 import os
 import re
 from collections import OrderedDict
+from pathlib import Path
 
-ROOT = r"D:\MiMo\ProjectOne\俱佳agent\knowledge\sources"
-OUT = r"D:\MiMo\ProjectOne\俱佳agent\knowledge\_generated-matrix.md"
+# **按脚本自身位置解析仓库根**，不写死本机绝对路径 —— 别人 clone 下来要能直接跑
+# （对外开源的工程底线；同 `docs/HANDOVER.md` §5.6 第 7 条对脚本的要求）。
+_REPO = Path(__file__).resolve().parent.parent
+ROOT = str(_REPO / "knowledge" / "sources")
+OUT = str(_REPO / "knowledge" / "_generated-matrix.md")
 
 OK_SYM = {"✅", "✓"}
 PARTIAL_SYM = {"⚠️", "⚠", "△"}

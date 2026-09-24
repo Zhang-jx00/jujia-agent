@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
  * 2. **fsync 后再 rename**：否则断电/强杀时可能 rename 了但内容还在页缓存里 → 目标文件为空；
  * 3. **覆盖前把旧文件转 .bak**：写坏或 schema 升级失败时可回滚到上一版；
  * 4. **读取失败自动降级**：主文件损坏 → 读 .bak → 用默认值并标记 recovered，绝不抛崩；
- * 5. **同路径写入串行化**：避免两个 action 并发写导致后写覆盖先写（Yan 的配置竞态教训）；
+ * 5. **同路径写入串行化**：避免两个 action 并发写导致后写覆盖先写（配置竞态会让用户的设置静默丢失）；
  * 6. **带 version 信封**：schema 变更时可识别旧版本并走 migrate。
  */
 

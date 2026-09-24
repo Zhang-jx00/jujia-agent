@@ -159,14 +159,16 @@
 | 5. IPC | ✅ | ✅ | ✅ | ✅ | ✅ | 完整 |
 | 6. 安全 Checklist | ✅ | ✅ | ✅ | ✅ | ✅ | 完整（T1 已 WebFetch 提取 20 条） |
 | 7. UtilityProcess | ✅ | ✅ | ✅ | ✅ | ✅ | 完整 |
+| 8. Sidecar / 内核隔离 | ✅ | ⬜ | ✅ | ✅ | ✅ | T1 用 utilityProcess API 替代（进程隔离无 Electron 官方专属教程，该 API 是底层能力依据）；**T2 留空**：本节正文表历史上曾填满（`knowledge/SOURCE-MATRIX.md` 旧行记为 ✅✅✅✅✅），但 T2 那一条来源**已随正文表的一次删改丢失**，而矩阵只存 ✅ 符号、不存 URL，**无法在不编造的前提下恢复** —— 按第一纪律记 ⬜。**这是一格真实的信息损失，不是笔误** |
 | 9. 内置终端 | ✅ | ✅ | ✅ | ✅ | ✅ | T1 用 node-pty 仓库（终端集成无 Electron 官方专属教程，node-pty 为事实标准） |
 | 10. electron-builder | ✅ | ✅ | ✅ | ✅ | ✅ | 完整 |
 | 11. 原生模块 | ✅ | ✅ | ✅ | ✅ | ✅ | 完整 |
 | 12. monorepo | ✅ | ✅ | ✅ | ✅ | ✅ | 完整 |
 
-**总计**：12 个领域 × 5 类 = 60 格，全部填满，无留白。
+**总计**：12 个领域 × 5 类 = 60 格 —— **完全覆盖 59 · 空缺 1**（领域 8 的 T2，原因见该行备注）。
 
 **真实性说明（重要）**
 - 全部 URL 均来自本次 WebSearch 检索结果，或对 `process-model`、`security` 两页做了 WebFetch 亲自打开确认（标注 canonical）。
 - 领域 8（sidecar）与领域 9（终端）无 Electron 官方专属教程，已用最贴近的权威来源（utilityProcess API / node-pty 仓库）替代 T1，并说明原因；T4 在 sidecar 领域以通用 Electron 工程课程兜底，未编造专门课程。
+- **领域 8 的 T2（开源实现）确无合格来源**：自评表里以 ⬜ 留空并写明原因，**未编造**。
 - 未使用任何凭记忆捏造的 URL；社区类（T5）多数以官方/权威社区入口（GitHub Discussions、Stack Overflow 标签、r/electronjs）标注，确保可检索、不失效。

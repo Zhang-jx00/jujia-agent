@@ -14,7 +14,13 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
 
-const SRC = process.argv[2] ?? 'C:/Users/张/Desktop/extracted_pattern.png';
+// 刻意**不设默认值**：这里曾经写死一个本机桌面路径作为 fallback，
+// 既让别人 clone 后跑不了，也把开发者的 Windows 用户名泄漏进了公开仓库。
+const SRC = process.argv[2];
+if (SRC === undefined || SRC === '') {
+  console.error('用法：node apps/desktop/scripts/make-logo-mono.mjs <源图路径>');
+  process.exit(1);
+}
 const ROOT = new URL('../../../', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const OUT = join(decodeURIComponent(ROOT), 'assets', 'icon');
 

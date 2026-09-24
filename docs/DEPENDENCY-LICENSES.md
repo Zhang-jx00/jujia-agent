@@ -3,9 +3,9 @@
 > 由 `npm run license:check` 生成。**不要手改**——重新运行即可更新。
 > 规则：强 copyleft（GPL/AGPL/SSPL）= 硬拒绝；LGPL/MPL/CC-BY = 需声明义务；其余按各自许可。
 
-**汇总**：共 443 个去重依赖。
+**汇总**：共 452 个去重依赖。
 
-## MIT（339 个）
+## MIT（347 个）
 
 - code-frame@7.29.7
 - compat-data@7.29.7
@@ -22,6 +22,8 @@
 - helpers@7.29.7
 - parser@7.29.8
 - plugin-transform-arrow-functions@7.29.7
+- plugin-transform-react-jsx-self@7.29.7
+- plugin-transform-react-jsx-source@7.29.7
 - template@7.29.7
 - traverse@7.29.8
 - types@7.29.8
@@ -51,8 +53,10 @@
 - sourcemap-codec@1.6.0
 - trace-mapping@0.3.31
 - agent-core@0.0.1
-- desktop@0.9.0
+- desktop@0.30.0
 - win32-x64@0.25.12
+- pluginutils@1.0.0-rc.3
+- plugin-react@5.2.0
 - electron-vite@5.0.0
 - esbuild@0.25.12
 - magic-string@0.30.21
@@ -75,6 +79,10 @@
 - rollup-win32-x64-msvc@4.63.3
 - is@4.6.0
 - http-timer@4.0.6
+- babel__core@7.20.5
+- babel__generator@7.27.0
+- babel__template@7.4.4
+- babel__traverse@7.28.0
 - cacheable-request@6.0.3
 - chai@5.2.3
 - debug@4.1.13
@@ -101,7 +109,6 @@
 - typescript-estree@8.70.0
 - utils@8.70.0
 - visitor-keys@8.70.0
-- plugin-react@6.1.1
 - mocker@5.0.1
 - spy@5.0.1
 - xmldom@0.8.15
@@ -293,6 +300,7 @@
 - qified@0.10.1
 - hookified@2.2.0
 - quick-lru@5.1.1
+- react-refresh@0.18.0
 - read-binary-file-arch@1.0.6
 - readable-stream@2.3.8
 - require-directory@2.1.1
@@ -390,7 +398,7 @@
 - yallist@3.1.1
 - yargs-parser@21.1.1
 
-## Apache-2.0（23 个）
+## Apache-2.0（24 个）
 
 - config-array@0.23.5
 - config-helpers@0.7.0
@@ -412,6 +420,7 @@
 - exponential-backoff@3.1.3
 - filelist@1.0.6
 - jake@10.9.4
+- playwright-core@1.63.0
 - sharp@0.35.4
 - sumchecker@3.0.1
 - typescript@6.0.3

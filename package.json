@@ -24,9 +24,12 @@
     "perf": "npm run perf --workspace @jujia/desktop",
     "setup:terminal": "npm i -w @jujia/desktop node-pty @xterm/xterm @xterm/addon-fit",
     "check:pty": "node apps/desktop/scripts/check-pty.mjs",
+    "knowledge:coverage": "python scripts/count_coverage.py",
+    "knowledge:matrix": "python scripts/gen_matrix.py",
     "license:check": "node apps/desktop/scripts/license-check.mjs",
     "e2e": "npm run e2e --workspace @jujia/desktop",
     "app": "npm run app --workspace @jujia/desktop",
+    "dist": "npm run dist --workspace @jujia/desktop",
     "mut": "node scripts/mutation-check.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "check:docs:selftest": "node scripts/verify-docs-check.mjs"

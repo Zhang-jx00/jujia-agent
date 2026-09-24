@@ -74,7 +74,7 @@ Electron 工程、性能与流畅、UI/UX/动效/组件卡片、模型适配（�
 | 校验 | zod | v3/v4 级 | 工具 schema、IPC 契约、图 schema 共用 | ajv |
 | 打包 | electron-builder | 最新 | nsis + portable + asarUnpack（S4 §10） | forge |
 | 测试 | vitest（单测）+ Playwright（e2e 冒烟） | 最新 | agent-core 可无 Electron 单测（S4 §12） | jest |
-| Lint | eslint + prettier + `tsc --noEmit` + 文件行数上限 | — | 防 Yan 式巨石文件 | — |
+| Lint | eslint + prettier + `tsc --noEmit` + 文件行数上限 | — | 防单文件巨石（`max-lines` 800 逻辑行） | — |
 
 ### 2.2 关键决策记录（ADR 摘要）
 
@@ -82,7 +82,7 @@ Electron 工程、性能与流畅、UI/UX/动效/组件卡片、模型适配（�
 |------|------|------|
 | Agent 执行位置 | **计划：utilityProcess（main 只路由）** —— ⚠️ **尚未实现**（现状：Agent Loop / 工具执行 / SSE / MCP 都在 main 进程） | Electron 官方性能/安全（S4 §7–8） |
 | 控制流 | 三分支 loop + maxTurns | OpenAI/Claude Agent SDK（S1 §2/§10） |
-| 工具路径 | **绝对路径** + 工作区校验 | Anthropic ACI 经验 + Yan 教训（S1 §5） |
+| 工具路径 | **绝对路径** + 工作区校验 | Anthropic ACI 经验（S1 §5）；相对路径跨进程传递后无法可靠沙箱化 |
 | 写并发 | 写盘/Shell 串行，只读可并行 | Claude Agent SDK（S1 §4） |
 | 内嵌网页 | WebContentsView（不用 `<webview>`） | 官方推荐演进（S10 §95） |
 | 能力门控 | 声明 → UI 禁用/降级 → 探测兜底 | S11 §101；禁止「点了才报错」 |
@@ -200,11 +200,11 @@ jujia/
 | M1 | 桌面壳与工程底座 | 窗口/主题/托盘/安全基线/monorepo | `createWindow`、`window.jujia` 白名单 | Electron | S4 §1–6, S5 §2–4 | 安全 checklist 全绿；冷启动 <3s |
 | M2 | 连接与模型适配 | 多 Connection、preset、apiFormat 两档、模型目录 | `testConnection`、`listModels` | M12 | S7 §1–6 | DeepSeek/GLM/OpenAI/Anthropic 各连一次成功 |
 | M3 | 聊天与流式 UI | 会话列表、消息、thinking 折叠、rAF 合批 | `sendMessage`、`stop` | M2/M12 | S6 §3, S5 §5/§7 | 流式时可输入；断流可重试 |
-| M4 | 工具执行与权限 | 内置工具（read/write/ls/run_command/git）、权限队列 | `runTool`、permission request/resolve | M1/M12 | S1 §4–8, S6 §5 | 权限面板不闪退不自动拒；危险命令强制确认 |
+| M4 | 工具执行与权限 | 内置工具（**现状只有 read/write/ls**；`run_command`、git 工具属后续阶段，按同一契约追加）、权限队列 | `runTool`、permission request/resolve | M1/M12 | S1 §4–8, S6 §5 | 权限面板不闪退不自动拒；危险命令强制确认 |
 | M5 | Agent Loop（agent-core） | 三分支循环、maxTurns、失败恢复、只读子代理 | `runAgentTurn` | M2/**M4**/M6 | S1 §1–10, S2 §11–18 | 循环有界；工具错误回模型可恢复 |
 | M6 | 记忆与上下文 | core blocks、notes、压缩 handoff、评估脚本 | `assembleContext`、`compact` | M12 | S3 §1–10 | 重启后能回忆偏好；压缩后有 UI 提示 |
 | M7 | 扩展生态 | MCP Host、Skills、Hooks、定时任务 | `mcp.list/call`、`skills.install`、`schedule.*` | M5 | S2 §1–12 | 挂 filesystem server；装 1 个 Skill；跑 1 个定时 |
-| M8 | 终端与 Git | xterm 终端、git status/diff/commit 队列 | `pty.write/resize`、`git.*` | M1/M4 | S4 §9, F6 | 终端可交互；diff 懒加载 |
+| M8 | 终端与 Git | xterm 终端（**已接线**）、git status/diff/commit 队列（**代码与测试就绪、未接线**） | `pty.write/resize`、`git.*` | M1/M4 | S4 §9, F6 | 终端可交互；diff 懒加载 |
 | M9 | **无限画布工作流** | 节点/连线/DAG 校验/对齐吸附/替代交互/执行/持久化 | `canvas.*`（graph/exec/serialize） | M5/M12 | S9 §86–94 | §6 P4 验收表全绿 |
 | M10 | **内置浏览器与文档** | WebContentsView、安全钩子、打开方式三档、PDF/MD 查看 | `browser.open/nav`、`docs.open` | M1 | S10 §95–99 | §6 P4 验收表全绿 |
 | M11 | **多模态与媒体** | capability registry、视频生成任务、媒体资产、任务面板 | `capabilities.check`、`media.submit/cancel` | M2/M12 | S11 §100–104 | §6 P5 验收表全绿 |
@@ -353,11 +353,11 @@ W18（多子 agent 编排）、W19（轻量 IDE）、W20–W22（远程 / 云端
 | # | 风险 | 等级 | 应对 |
 |---|------|------|------|
 | 1 | 代理网络不稳：npm 全量安装卡死、Electron 二进制下载失败 | 高 | lockfile + `npm ci`；卡 5 分钟即重试；npmmirror + `ELECTRON_MIRROR` 兜底（§2.3 已验证可达）；CI 里预拉缓存 |
-| 2 | 范围膨胀（想抄全 Yan / 画布自研底层） | 高 | 严格按 §6 周表交付；画布明确不自研（§2.2）；砍功能优先于砍质量 |
+| 2 | 范围膨胀（功能全都想做 / 画布自研底层） | 高 | 严格按 §6 周表交付；画布明确不自研（§2.2）；砍功能优先于砍质量 |
 | 3 | 模型 API 变更（实例：OpenAI Sora API 2026-09-24 弃用） | 高 | Connection/preset 抽象；能力声明与代码解耦（JSON 可热改）；弃用 preset 动态下线并引导替代厂商 |
 | 4 | 权限/路径事故（写错盘、删错文件） | 高 | 绝对路径 + workspace resolve + 高危命令清单 + 权限队列永不自动拒 + PreToolUse deny |
 | 5 | 画布大规模节点卡顿 | 中 | xyflow 官方性能指南（视口裁剪、节点 memo、避免每帧 setState）；>1k 节点压测脚本；超出再议 Canvas 渲染层 |
-| 6 | Electron 渲染卡顿（Yan 的老问题） | 中 | 性能预算写进 DoD（流式可输入/60fps 录制佐证）；rAF 合批；虚拟列表；main 零同步 IO |
+| 6 | Electron 渲染卡顿（长会话 + 流式高频 setState 的典型退化） | 中 | 性能预算写进 DoD（流式可输入/60fps 录制佐证）；rAF 合批；虚拟列表；main 零同步 IO |
 | 7 | 内置浏览器引入安全面（恶意网页） | 中 | `setWindowOpenHandler` 一律拒绝或转系统浏览器；will-navigate 白名单；权限请求默认拒绝；scheme 白名单（S10 §96） |
 | 8 | 能力门控误判（声明说有、实际没有） | 中 | 声明 + 探测双保险；探测失败走兜底提示而非崩溃；厂商 preset JSON 化便于热修 |
 | 9 | 配置/会话损坏 | 中 | json-store 单测模拟半截写入；.bak 自愈 |
@@ -522,7 +522,7 @@ W18（多子 agent 编排）、W19（轻量 IDE）、W20–W22（远程 / 云端
 
 | 模块 | findings | sources |
 |------|----------|---------|
-| M2/M3 | F8 | S7 §1–10 |
+| M2/M3 | —（内部调研，未随仓库交付） | S7 §1–10 |
 | M4/M5 | F1、F2 | S1 §1–18 |
 | M6 | F4 | S3 §1–10 |
 | M7 | F3 | S2 §1–12 |

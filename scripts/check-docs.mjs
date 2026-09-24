@@ -18,7 +18,9 @@
  * 退出码：0 = 一致；1 = 发现漂移（逐条打印 文件 / 期望 / 实际）
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -256,6 +258,10 @@ const allScripts = new Set([
   const orphans = files.filter((f) => {
     const base = f.split('/').pop() ?? f;
     if (f === 'knowledge/README.md' || f === 'knowledge/BRIEF.md') return false; // 入口/任务书
+    // `_generated-*.md` 是 `gen_matrix.py` 的**中间产物**（已在 .gitignore 与 cleanup.py 的清理范围内），
+    // 按定义就不会被任何索引引用。不豁免的话，"改过覆盖度自评表就重跑 gen_matrix.py"
+    // 这个**文档化的维护动作**会立刻让门禁变红 —— 检查器不该和自家约定打架。
+    if (base.startsWith('_generated-')) return false;
     return !allText.includes(base);
   });
   report(
@@ -340,6 +346,213 @@ const expectedCn = CN_NUM[GATE.length];
     '除 PROGRESS 外没有"N件套"式数量表述（避免多处漂移）',
     violations.length === 0,
     '请改写成「门禁全绿」并指向 docs/PROGRESS.md 的清单：\n     ' + violations.join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 6. IPC 通道数：文档/注释若写了数字，必须与 `channels.ts` 一致
+ *
+ * 为什么加：交接验收抓到"33 个通道"这个常数同时写在两处**源码注释**和交接文档里，
+ * 而通道早就加到了更多 —— 通道是**只会增加**的东西，写死数字必漂。
+ * 治本做法是文档不写数字（改成"清单以 channels.ts 为准"）；这条检查负责保证
+ * **一旦有人再写数字，它必须是对的**。
+ * ------------------------------------------------------------------ */
+
+const channelsSource = read('packages/shared-ipc/src/channels.ts');
+const ipcBody = /export const IPC = \{([\s\S]*?)\n\}/.exec(channelsSource)?.[1] ?? '';
+const CHANNEL_COUNT = [...ipcBody.matchAll(/^\s*([A-Z][A-Z0-9_]*):\s*'/gm)].length;
+
+/* ------------------------------------------------------------------ *
+ * 7. 对标产品名：活文档与源码注释里必须 0 命中
+ *
+ * 项目所有者的固定约定：**对外不写"参考/借鉴 XX 项目"**，学到的东西内化成
+ * "我们为什么这样做"，痕迹只留内部私有目录。仓库是公开的，所以这条要机器管 ——
+ * 此前一轮"去参考化"人工检索声称 0 命中，实际漏了 20 多处变体写法。
+ *
+ * **为什么这里只存哈希、不存名字**：这条规则要求"全仓 0 命中"，
+ * 如果把被禁的名字写进脚本，那么**守约的工具自己就成了违禁词的出现位置**，
+ * "全仓 0 命中"就得永远挂一个白名单例外 —— 而例外是会繁殖的东西。
+ * 存 SHA-256 前 12 位（按小写比较），名字本身、清洗原因与背景见
+ * `review/REVIEW-LOG.md` 复核 013 / 025 与项目记忆；**本注释里同样不写原名**。
+ * 第二条是给 `verify-docs-check.mjs` 用的**哨兵**（注入它来证明这条检查真的会咬），不是产品名。
+ * 加新名字的方法：`node -p "require('crypto').createHash('sha256').update('名字'.toLowerCase()).digest('hex').slice(0,12)"`
+ * ------------------------------------------------------------------ */
+
+/** 命中判定 = 长度粗筛 + 摘要比对（长度非敏感信息，避免对整仓每个词都做哈希） */
+const BLOCKED_NAME_DIGESTS = [
+  { len: 3, h: '281aca1a80b5' },
+  { len: 22, h: 'c4771baf8437' },
+];
+const digest12 = (s) => createHash('sha256').update(s.toLowerCase(), 'utf8').digest('hex').slice(0, 12);
+
+/** 仓库内需要扫描的活文件（排除依赖、产物、回收站与历史归档） */
+const walkLiveFiles = (exts) => {
+  const SKIP_DIRS = new Set(['node_modules', '.git', '.trash', '.tmp', 'out', 'dist', 'release', 'coverage']);
+  const out = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (SKIP_DIRS.has(e.name)) continue;
+      const full = join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else {
+        const rel = relative(repoRoot, full).split('\\').join('/');
+        if (rel.includes('ARCHIVE')) continue; // 历史归档是审计轨迹，不改也不扫
+        if (!exts.some((x) => e.name.endsWith(x))) continue;
+        out.push(rel);
+      }
+    }
+  };
+  walk(repoRoot);
+  return out;
+};
+
+{
+  // 本脚本已改为只存哈希，**不再需要自我豁免**；
+  // 只有 verify-docs-check.mjs 仍豁免 —— 它必须含哨兵字面量才能注入测试。
+  const SELF = new Set(['scripts/verify-docs-check.mjs']);
+  const TOKEN_RE = /[A-Za-z_][A-Za-z0-9_]*/g;
+  const hits = [];
+  for (const rel of walkLiveFiles(['.md', '.ts', '.tsx', '.js', '.mjs', '.cjs'])) {
+    if (SELF.has(rel)) continue;
+    const text = read(rel);
+    for (const m of text.matchAll(TOKEN_RE)) {
+      const tok = m[0];
+      if (!BLOCKED_NAME_DIGESTS.some((b) => b.len === tok.length)) continue; // 长度粗筛
+      const d = digest12(tok);
+      if (BLOCKED_NAME_DIGESTS.some((b) => b.len === tok.length && b.h === d)) {
+        hits.push(`${rel}:${String(text.slice(0, m.index).split('\n').length)}`);
+      }
+    }
+  }
+  report(
+    '活文档与源码注释里没有对标产品名（内化成"我们为什么这样做"）',
+    hits.length === 0,
+    `命中 ${String(hits.length)} 处（**只给位置，不回显命中的名字**）：${hits.slice(0, 12).join(', ')}${hits.length > 12 ? ' …' : ''}`,
+  );
+}
+
+{
+  // 谁写了"N 个通道"就必须写对；没写数字是最推荐的（以 channels.ts 为准）。
+  // 豁免：① CHANGELOG 与 review/ 是**历史审计轨迹**（记录的是当时的通道数），按约定不改写；
+  //      ② 本脚本与它的自检脚本 —— 自检要**故意注入一个错的数字**来证明检查会咬。
+  const claimRe = /(\d+)\s*(?:个\s*)?(?:IPC\s*)?通道/g;
+  const AUDIT_TRAIL = (rel) => rel === 'CHANGELOG.md' || rel.startsWith('review/');
+  const SELF = (rel) => rel === 'scripts/check-docs.mjs' || rel === 'scripts/verify-docs-check.mjs';
+  const wrong = [];
+  for (const rel of walkLiveFiles(['.md', '.ts', '.tsx', '.js', '.mjs'])) {
+    if (SELF(rel) || AUDIT_TRAIL(rel)) continue;
+    const text = read(rel);
+    for (const m of text.matchAll(claimRe)) {
+      if (Number(m[1]) !== CHANNEL_COUNT) {
+        const line = text.slice(0, m.index).split('\n').length;
+        wrong.push(`${rel}:${line} 写「${m[0].trim()}」`);
+      }
+    }
+  }
+  report(
+    'IPC 通道数：文档/注释里写的数字与 channels.ts 一致',
+    CHANNEL_COUNT > 0 && wrong.length === 0,
+    `channels.ts 实际 ${CHANNEL_COUNT} 个；不一致的声明：${wrong.join('；') || '(无)'}`,
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 8. 能力表交叉断言：README 标 ✅ 的能力必须真有运行期通路
+ *
+ * 为什么加：交接验收抓到两条"能力被高估"——git 模块整块未接线却标 ✅、
+ * 以及把"能跑命令"写成模型的内置能力（实际内置工具只有读/写/列目录三个）。
+ * 这类漂移最伤项目可信度（本项目的立身之本是"说了没做就是没做"），
+ * 而它**不会让任何测试变红** —— 所以在这里把它和代码事实钉在一起：
+ *   ① ✅ 行里出现的工具名，必须真的在工具清单里；
+ *   ② ✅ 行若声称 git 能力，必须存在 GIT_* IPC 通道（= 真的接了线）。
+ * ------------------------------------------------------------------ */
+
+{
+  const TOOL_SOURCES = [
+    'packages/agent-core/src/tools/builtin/file-tools.ts',
+    'packages/agent-core/src/skills/tool.ts',
+    'packages/agent-core/src/loop/agent-loop.ts',
+  ];
+  const toolNames = new Set();
+  for (const f of TOOL_SOURCES) {
+    const text = read(f);
+    for (const m of text.matchAll(/name:\s*'([a-z][a-z0-9_]*)'/g)) toolNames.add(m[1]);
+    for (const m of text.matchAll(/_TOOL_NAME\s*=\s*'([a-z][a-z0-9_]*)'/g)) toolNames.add(m[1]);
+  }
+
+  const section = /## 当前能力([\s\S]*?)\n## /.exec(readme)?.[1] ?? '';
+  const rows = section
+    .split('\n')
+    .filter((l) => l.startsWith('|') && !/^\|[-\s|]+\|$/.test(l) && !l.includes('能力 | 状态'))
+    .filter((l) => l.includes('✅'));
+
+  const badTools = [];
+  const badBacking = [];
+  for (const row of rows) {
+    // 只认"整个反引号内容就是一个工具名"的写法，避免把 `.env`、`npm run e2e` 当成工具
+    for (const m of row.matchAll(/`([a-z][a-z0-9_]*)`/g)) {
+      if (!toolNames.has(m[1])) badTools.push(`「${m[1]}」不在实际工具清单里`);
+    }
+    if (/\bgit\b/i.test(row) && !/\bGIT_[A-Z]/.test(channelsSource)) {
+      badBacking.push('声称 git 能力 ✅，但 channels.ts 里没有任何 GIT_* 通道（= 未接线）');
+    }
+  }
+
+  report(
+    'README 能力表标 ✅ 的项都有真实运行期通路（工具名 / IPC 通道交叉核对）',
+    rows.length > 0 && toolNames.size > 0 && badTools.length === 0 && badBacking.length === 0,
+    [
+      `实际工具清单：${[...toolNames].join(', ') || '(空)'}`,
+      `标 ✅ 的能力行：${rows.length} 行`,
+      badTools.length > 0 ? `工具名对不上：${badTools.join('；')}` : '',
+      badBacking.length > 0 ? `缺运行期通路：${badBacking.join('；')}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 9. 本机绝对路径：代码与配置里不许出现"这台机器上仓库在哪"的字面量
+ *
+ * 为什么加：PROGRESS 的开源就绪表一直写着"源码无本机绝对路径 ✅ 已审计"，
+ * 但交接验收在 `scripts/` 里找到 6 处写死的 checkout 路径 —— 别人 clone 下来那些脚本直接跑不了，
+ * 违反工程底线"不得依赖本机特殊状态才能跑"。这条把它变成机器断言。
+ *
+ * 判据是**运行时算出来的**（当前仓库根 + 当前用户主目录），
+ * 因为把某台机器的路径写成字面量正则，等于让检查器自己带上一个本机绝对路径 ——
+ * 与 §7 改用哈希是同一个道理：**守约的工具不能自己成为违约现场**。
+ * 也**不用**通用的 `C:\Users\` 形态做判据：那样会被安全文档里的示例路径误伤
+ * （`path-guard.ts` 就用 `C:\Users\...\id_rsa` 举例说明越界写盘的风险），
+ * 误伤三次之后人就学会忽略红灯了。用"这台机器的家目录全路径"判，precision 高且零误报。
+ * 只扫代码与配置，不扫 .md —— 台账与变更记录需要引用路径作为证据。
+ * ------------------------------------------------------------------ */
+
+{
+  const norm = (s) => s.split('\\').join('/');
+  const repoRootLit = norm(repoRoot);
+  const homeLit = norm(homedir());
+  const CODE_EXTS = ['.ts', '.tsx', '.js', '.mjs', '.cjs', '.py', '.json', '.yml', '.yaml', '.css', '.html'];
+  const hits = [];
+  for (const rel of walkLiveFiles(CODE_EXTS)) {
+    if (rel === 'package-lock.json') continue; // 依赖锁由 npm 生成，不在本规则范围内
+    const text = norm(read(rel));
+    if (repoRootLit !== '' && text.includes(repoRootLit)) {
+      hits.push(`${rel}：写死了本机仓库绝对路径`);
+    } else if (homeLit !== '' && homeLit !== '/' && text.includes(homeLit)) {
+      hits.push(`${rel}：写死了本机用户主目录（连用户名一起泄漏进公开仓库）`);
+    }
+  }
+  report(
+    '代码与配置里没有本机绝对路径（别人 clone 下来就能跑）',
+    hits.length === 0,
+    `命中 ${String(hits.length)} 处：${hits.join('；')}`,
   );
 }
 

@@ -168,7 +168,7 @@ export function PermissionRulesPanel(): ReactElement {
             <input
               value={pattern}
               onChange={(e) => setPattern(e.target.value)}
-              placeholder="例如 mcp__* 或 write_file 或 git_*"
+              placeholder="例如 mcp__* 或 write_file 或 list_dir"
               spellCheck={false}
             />
           </label>

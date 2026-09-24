@@ -105,7 +105,8 @@ export function isAllowedNavigation(
 /**
  * 校验 IPC 调用来自**我们自己的渲染层**（2026-09-23 补）。
  *
- * 为什么需要：33 个 `ipcMain.handle` 此前都无条件接受任何发送方。
+ * 为什么需要：全部 `ipcMain.handle`（通道清单以 `@jujia/shared-ipc` 的 `channels.ts` 为准）
+ * 此前都无条件接受任何发送方。
  * 渲染层的导航与新窗口已被基线挡住，所以这不是"已经能被利用"，
  * 而是**纵深防御**：将来一旦引入 WebContentsView（内置浏览器）、扩展页面或任何
  * 第二个 webContents，没有这道校验就等于给它开了全套 IPC。

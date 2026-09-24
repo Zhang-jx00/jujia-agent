@@ -54,7 +54,7 @@
 | 37 | RAG vs Agent Memory | 文档检索 vs 写路径抽取 | P: Zep Graphiti [F4] |
 | 38 | Mem0 写管线 | extract/consolidate/retrieve | P: arXiv 2504.19413 [F4] |
 | 39 | 记忆评估 | LOCOMO / LongMemEval | P: F4 |
-| 40 | 原子 JSON 落盘 | tmp+rename+version | O: skill-store/harness · 反例 Yan memory |
+| 40 | 原子 JSON 落盘 | tmp+rename+version | D: cards/003（原子写 + 自愈） |
 
 ## 5. 系统架构与 Electron（12）
 
@@ -67,11 +67,13 @@
 | 45 | IPC invoke/handle vs send | 契约化错误对象 | D: Electron IPC [F5] |
 | 46 | Security Checklist | 20 条；校验 sender | D: Electron security [F5] |
 | 47 | UtilityProcess | 优于 child_process.fork | D: Electron utility-process [F5] |
-| 49 | 内置终端 | xterm.js + node-pty | D/O: Electron + Yan terminal |
-| 50 | electron-builder | nsis/portable、asarUnpack | D: electron-builder · A: Yan package.json |
+| 49 | 内置终端 | xterm.js + node-pty | D: cards/016（终端选型，含 8 个来源） |
+| 50 | electron-builder | nsis/portable、asarUnpack | D: electron-builder · cards/016（打包与 rebuild 结论） |
 | 51 | 原生模块 | 禁止进 sandboxed renderer | D: Electron security |
 
 ## 6. 性能 / 缓存 / 预加载 / 流畅（10）
+
+> 来源：`knowledge/sources/S5-performance.md`（`S5 §N` 按该文件的主题序号）+ `knowledge/findings/F6.md`。
 
 | # | 主题 | 关键点 | 资源 |
 |---|------|--------|------|
@@ -82,9 +84,9 @@
 | 57 | 流式事件批处理 | rAF / 32–50ms | C/D: F6 |
 | 58 | 虚拟列表 | react-window + overscan | O: bvaughn/react-window [F6] |
 | 59 | IPC 只传 delta | Structured Clone 成本 | D: Electron IPC [F6] |
-| 60 | 配置内存缓存 | 热路径禁 normalize-on-read | A: Yan loadConfig 反例 |
+| 60 | 配置内存缓存 | 热路径禁 normalize-on-read | S5 §8 |
 | 61 | 分层缓存 SWR | 目录/技能/设置 | C: F6 |
-| 62 | 内存泄漏 | 可退订监听、清理 interval | O: Yan renderer 反例 |
+| 62 | 内存泄漏 | 可退订监听、清理 interval | S5 §10 |
 
 ## 7. UI / UX / 视觉 / 动效 / 组件（10）
 
@@ -94,7 +96,7 @@
 | 64 | Fluent UI React v9 | Windows 气质组件库 | D: fluent2.microsoft.design [F7] |
 | 65 | 聊天信息架构 | 消息/工具/思考分层 | O: Open WebUI / LobeHub [F7] |
 | 66 | 工具卡 L0–L2 | 渐进披露 | D/C: NN/g + Agent UI 实践 [F7] |
-| 67 | 权限审批 UI | 动词+名词、不自动拒 | D: Fluent MessageBar · A: Yan issue #3 |
+| 67 | 权限审批 UI | 动词+名词、不自动拒 | D: Fluent MessageBar · cards/002（禁止自动拒绝） |
 | 68 | 四态设计 | empty/loading/error/success | C: NN/g [F7] |
 | 69 | MessageBar vs Toast vs Dialog | 反馈三分工 | D: Fluent 2 [F7] |
 | 70 | 动效预算 | 100–300ms + reduced-motion | D: M3 motion · F7 |
@@ -103,14 +105,17 @@
 
 ## 8. 模型适配与产品工程（8+）
 
+> 来源：`knowledge/sources/S7-model.md`（§ 编号按该文件的主题序号，非领域号）。
+> 本簇结论**未单独成 findings 文档**，综合结论见 `knowledge/REPORT.md`（见 `knowledge/README.md` 的簇对照表）。
+
 | # | 主题 | 关键点 | 资源 |
 |---|------|--------|------|
-| 74 | Anthropic Messages | blocks 历史、thinking 回传 | D/O: F8 |
-| 75 | SSE 流式 | main 侧解析、事件枚举 | A: Yan sidecar stream [F8] |
-| 76 | reasoning_content | 与正文分离，禁当交付 | A: Yan vision-relay 反例 |
-| 77 | 多连接 Connection | apiFormat 两档 | A: Yan connection-presets [F8] |
-| 78 | 模型目录与回退 | API 权威、标注过期 | A/F8 |
-| 80 | 安全边界 | 工作区沙箱、权限门禁 | A: Yan 优化报告 · Electron checklist |
+| 74 | Anthropic Messages | blocks 历史、thinking 回传 | S7 §2 |
+| 75 | SSE 流式 | main 侧解析、事件枚举 | S7 §3 |
+| 76 | reasoning_content | 与正文分离，禁当交付 | S7 §4 |
+| 77 | 多连接 Connection | apiFormat 两档 | S7 §5 |
+| 78 | 模型目录与回退 | API 权威、标注过期 | S7 §6 |
+| 80 | 安全边界 | 工作区沙箱、权限门禁 | S7 §8 · D: Electron security checklist |
 
 ---
 

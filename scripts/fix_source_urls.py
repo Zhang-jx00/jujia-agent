@@ -10,7 +10,10 @@ import os
 import re
 import sys
 
-ROOT = r"D:\MiMo\ProjectOne\俱佳agent\knowledge\sources"
+# 按脚本自身位置解析仓库根，不写死本机绝对路径（开源工程底线；见 docs/HANDOVER.md §5.6 第 7 条）
+from pathlib import Path  # noqa: E402
+
+ROOT = str(Path(__file__).resolve().parent.parent / "knowledge" / "sources")
 
 # 已用 curl 实测确认的路径修正
 PATH_FIXES = [

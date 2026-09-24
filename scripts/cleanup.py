@@ -14,6 +14,11 @@
     python scripts/cleanup.py --apply     # 实际清理（移入 .trash/）
     python scripts/cleanup.py --apply --purge-trash   # 额外真删 .trash 里超期条目
 """
+# 让 `str | None` 这类注解在 Python 3.8 上也能跑（PEP 563：注解不在运行时求值）。
+# 为什么需要：本项目的收尾清理是**用户固定约定**，不能只在某一个 Python 版本上可用；
+# 实测 PATH 上的 python 是 3.8.3，缺这一行会在 import 阶段就 TypeError 崩掉。
+from __future__ import annotations
+
 import argparse
 import os
 import shutil

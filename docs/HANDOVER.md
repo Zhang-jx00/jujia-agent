@@ -13,7 +13,8 @@
 ### 1.1 项目是什么
 
 **俱佳Agent（JujiaAgent）**：跑在用户自己 Windows 机器上的个人 Agent ——
-**能读文件 / 改代码 / 跑命令，但每个有副作用的动作都必须用户点头，数据默认不出本机**。
+**能读文件 / 改代码；命令执行只走用户手驱动的内置终端与逐个批准的 MCP 工具
+（模型当前没有自主执行命令的内置工具）；每个有副作用的动作都必须用户点头，数据默认不出本机**。
 
 三条不可妥协的定位（详见 `docs/PRODUCT-GOAL.md`）：
 
@@ -31,7 +32,7 @@
 | 桌面壳 | **Electron**（main / preload / renderer 三进程） | 安全基线：`contextIsolation: true`、`sandbox: true`、`nodeIntegration: false` |
 | UI | **React 19 + Vite**（自研组件，**未用** Fluent UI / zustand / xyflow —— PLAN 选型表里曾写过，实际未引入，见注意事项 §5.7） | 工具卡 L0–L2（一行 → 卡片 → 抽屉）、rAF 合批、气泡窗口化（常驻 ≤120） |
 | 引擎 | **`@jujia/agent-core`**（纯 TS，不依赖 Electron） | provider/SSE、工具执行、权限门、钩子、技能、插件、记忆装配、MCP 客户端 |
-| 契约 | **`@jujia/shared-ipc`**（zod schema + 通道常量） | 33 个 IPC 通道，入参/出参全部过 zod；**刻意不依赖 agent-core**（分包边界） |
+| 契约 | **`@jujia/shared-ipc`**（zod schema + 通道常量） | **全部 IPC 通道**（清单与数量以 `src/channels.ts` 为准 —— 文档刻意不写数字，避免再漂移）；入参/出参全部过 zod；**刻意不依赖 agent-core**（分包边界） |
 | 存储 | **`@jujia/shared` 的 `json-store`** | 原子写（tmp + fsync + rename + `.bak` + version 信封 + 损坏自愈） |
 | 终端 | **node-pty + xterm** | node-pty 是 **N-API 模块（ABI 稳定，预编译二进制跨 Node/Electron 通用）→ 不需要 electron-rebuild**（打包配置 `build.npmRebuild: false`；本机 VS Build Tools 缺 Spectre 缓解库，从源码编译会报 MSB8040） |
 | 测试 | **vitest**（单元/集成）+ **Playwright 驱动真 Electron**（e2e） | `maxWorkers: 4`（本机满并发会出现"加载超时假红灯"） |
@@ -44,7 +45,7 @@
 ```
 俱佳agent/
 ├─ apps/desktop/                 Electron 桌面端
-│  ├─ src/main/                  主进程：index.ts（窗口+安全基线）、ipc.ts（33 通道统一入口）、
+│  ├─ src/main/                  主进程：index.ts（窗口+安全基线）、ipc.ts（全部通道的统一入口）、
 │  │                             chat-service.ts、terminal-service.ts、mcp/、permission-bridge.ts、
 │  │                             security.ts（发送方校验）、config-write.ts（配置白名单纯函数）、
 │  │                             session-lru.ts（会话淘汰）、secret.ts、paths.ts、connections-store.ts
@@ -58,7 +59,7 @@
 │  │                             skills/ plugins/ memory/ git/ mcp/ terminal/ browser/（新，见 §3.3）
 │  ├─ shared-ipc/                zod 契约 + IPC 通道常量（contracts.ts / channels.ts）
 │  └─ ui-tokens/                 外观系统：主题包（受控字段白名单，拒绝任意 CSS/JS）
-├─ scripts/                      check-docs.mjs（13 项文档检查）、verify-docs-check.mjs（检查器自检）、
+├─ scripts/                      check-docs.mjs（文档一致性检查，**项数以自身输出为准**）、verify-docs-check.mjs（检查器自检）、
 │                                mutation-check.mjs（变异测试）、cleanup.py、license 相关、gen_matrix.py
 ├─ docs/                         PRODUCT-GOAL / PLAN / PROGRESS / TRACK-PLANS / TRACK-ROADMAP /
 │                                COVERAGE-MATRIX / HOOKS / SKILLS / PLUGINS / TEST-POLICY /
@@ -92,7 +93,7 @@
 | 项 | 位置 | 思路 |
 |----|------|------|
 | 窗口与生命周期 | `apps/desktop/src/main/index.ts` | `closed` 时调用 `permissionBridge.cancelAll('窗口已关闭')`（兑现"挂起审批立即收尾"承诺）；`before-quit` 清理 MCP/终端子进程 |
-| **IPC 发送方校验** | `apps/desktop/src/main/security.ts`（`isTrustedSenderUrl`）+ `ipc.ts` 统一入口 | **33 个通道共用一个入口**，入口先校验发送方是应用自己的渲染层（fail-closed）。**新通道默认受保护** |
+| **IPC 发送方校验** | `apps/desktop/src/main/security.ts`（`isTrustedSenderUrl`）+ `ipc.ts` 统一入口 | **全部通道共用一个入口**（清单以 `shared-ipc/src/channels.ts` 为准），入口先校验发送方是应用自己的渲染层（fail-closed）。**新通道默认受保护** |
 | 渲染层隔离 | preload 白名单暴露 `window.jujia.*` | 渲染层**零** `node:` 依赖（有检查）；能力全部走 IPC |
 
 测试：`security.test.ts`（URL 判定）、`ipc-wiring.test.ts`（接线锁：统一入口、白名单调用、cancelAll 位置）、e2e 步骤 4/5。
@@ -111,10 +112,11 @@
   重页签（对话/终端/外观/连接）`React.lazy` 懒加载。
 - 测试：`docs/PERF-BUDGET.md`（**采样铁律：空闲状态连续 ≥3 次，单次不可比**）；`npm run perf` 预算判定（首帧 <1000ms）。
 
-### 2.4 工具执行与权限门（M4）✅ —— 本项目的心脏，改动需最谨慎
+### 2.4 工具执行与权限门（M4）🔶 权限门已落地，**内置工具面仍窄** —— 本项目的心脏，改动需最谨慎
 
 | 项 | 位置 | 思路 |
 |----|------|------|
+| **内置工具清单（实际）** | `packages/agent-core/src/tools/registry.ts` 的 `createDefaultRegistry()` | **只有 `read_file` / `write_file` / `list_dir` 三个**，外加技能的 `load_skill`、Loop 的 `handoff`、逐个批准的 MCP 工具。**没有 `run_command`、没有 git 工具** —— `file-tools.ts:126` 与 `registry.ts:69` 的注释写明"后续阶段按同一契约追加"。因此"能跑命令"的准确含义是：**用户手驱动的内置终端 + 批准过的 MCP 工具**，模型不能自主执行命令 |
 | 路径沙箱 | `packages/agent-core/src/tools/path-guard.ts` | **不做字符串前缀匹配**（Windows 短名/大小写/符号链接都会绕）；按真实路径解析判定 |
 | 权限门 | `packages/agent-core/src/permissions/policy.ts` | 5 种模式（default/acceptEdits/plan/dontAsk/bypassPermissions）；**硬 ask vs 软 ask 两级**：执行类命令/敏感路径/用户自写 ask 规则/高危清单 = **硬 ask**（「总是允许」压不掉），普通写文件 = 软 ask（可被会话白名单压掉） |
 | 高危清单 | 配置 `alwaysAskTools`（引擎级兜底） | 来自配置文件，**不经渲染层写入** |
@@ -127,6 +129,9 @@
 ### 2.5 Agent Loop 与钩子（M5）✅
 
 - Loop：`packages/agent-core/src/loop/agent-loop.ts` —— 三分支（最终答复 / 继续调工具 / 移交）+ `maxTurns` 熔断 + 工具错误回模型可恢复。
+  ⚠️ **第三分支"移交"在应用层没有被区别处置**：`chat-service.ts` 把 `branch === 'handoff'` 与正常结束都赋成 `'stop'`
+  （三元表达式两个分支字面相同），界面因此拿不到区分。Loop 层语义正确且有测试；**要让用户看见"移交"，
+  需让 `done` 事件带上 `reason`** —— 已记入 `docs/PROGRESS.md` §2.3，不要以为"三分支"等于界面有三种结果。
 - 钩子：`packages/agent-core/src/hooks/`（**七类事件**：SessionStart / UserPromptSubmit / PreToolUse / PermissionRequest / PostToolUse / PostToolUseFailure / Stop）。
   进程型 runner；**默认关闭**、可拒绝、有超时与输出上限；`PermissionRequest` 钩子在硬 ask 时照常运行。
 - 测试：`runner.test.ts`（21 例）、e2e 步骤 12（七类齐全且默认关闭）。
@@ -151,7 +156,7 @@
 ### 2.8 终端与 Git（M8）🔶 部分
 
 - 终端：`apps/desktop/src/main/terminal-service.ts`（node-pty + xterm；**每次启动需审批**；只能开在当前工作区内；子进程环境**剔除敏感变量**（`API_KEY`/`*_TOKEN` 等）并对代理变量脱掉内嵌凭据）。
-- Git：`packages/agent-core/src/git/git.ts` —— status/diff/commit 队列**读侧已接线**；**stage/unstage 写操作未接线**（见 §3.4）。
+- Git：`packages/agent-core/src/git/git.ts`（334 行 + 测试齐全）—— status / diffStat / diffSummary / recentCommits / stage / unstage / commit **全部实现，但整个模块未接线**：无 `GIT_*` IPC 通道、preload 无对应方法、渲染层无 git/diff 界面、`apps/` 下零调用方（唯一引用是 `agent-core` 的 barrel 导出与它自己的测试）。**读侧与写侧同样不可达** —— 本文档此前写"读侧已接线"是错的，已更正；`review/TRACK-SWEEP-1.md` 的 M6 当时也只点了写侧。接线时读侧可直接放行，写侧走软 ask、`commit` 走硬 ask。
 
 ### 2.9 外观系统（M23）✅
 
@@ -175,12 +180,12 @@
 | 工具 | 命令 | 说明 |
 |------|------|------|
 | 类型/静态检查 | `npm run typecheck` / `npm run lint` | 严格模式（strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes） |
-| 单元/集成测试 | `npm test` | **665 通过 / 1 跳过**（40 个文件）；`maxWorkers: 4`（防满并发假红灯） |
-| 界面级 e2e | `npm run e2e` | **14 步**，真 Electron + 真点击，数据隔离到唯一临时目录；收尾清理失败只提示不静默 |
+| 单元/集成测试 | `npm test` | 全量绿（**测试文件数与用例数以 `docs/PROGRESS.md` 为准**，那里有机器检查）；`maxWorkers: 4`（防满并发假红灯） |
+| 界面级 e2e | `npm run e2e` | 真 Electron + 真点击，数据隔离到唯一临时目录；收尾清理失败只提示不静默（**步数以 `apps/desktop/scripts/e2e-ui.mjs` 为准**） |
 | 启动性能 | `npm run perf` | 预算判定，超预算非零退出；**采样铁律见 PERF-BUDGET** |
 | 冒烟 | `npm run smoke` | 真实启动 Electron 断言 IPC 全链路 |
 | **变异测试** | `npm run mut` | 按 `review/mutations.json` 逐项改坏代码验证测试真拦得住；**"无法运行"单独成类，不算被拦住** |
-| **文档一致性** | `npm run check:docs`（13 项）+ `npm run check:docs:selftest`（4/4） | 见 §5.4 |
+| **文档一致性** | `npm run check:docs`（**项数以自身输出为准**）+ `npm run check:docs:selftest`（注入的漂移必须全部被拦住） | 见 §5.4 |
 | 许可证 | `npm run license:check` | 强 copyleft 硬拒绝；清单自动生成于 `docs/DEPENDENCY-LICENSES.md` |
 | 清理 | `python scripts/cleanup.py --apply` | 移入项目内 `.trash/<时间戳>/`，30 天可反悔，**绝不直接删** |
 | CI | `.github/workflows/ci.yml` | lint / typecheck / test / **check:docs** / build；**CI 不跑 smoke/perf/e2e**（需真实图形环境，本地跑） |
@@ -202,7 +207,8 @@
 | M19–M22 | 轻量 IDE / 远程接入 / 云 worker / 调度 | ⏳ 未开始（**先解决与"数据不出本机"定位的冲突**，见 §5.8） |
 | M6 写入侧 | `memory.ts appendNote` 接线（会话结束时写长期记忆） | ⏳ 未接线 |
 | M7 定时任务 | RRULE + 补跑 | ⏳ 未开始 |
-| M8 git 写操作 | stage/unstage/commit 的 UI 与权限门接线 | ⏳ 未接线 |
+| **M8 git（整个模块）** | status/diff/log/stage/unstage/commit 已实现且有测试，但**无 IPC 通道、无界面、零调用方** → 需接线（读侧放行、写侧软 ask、`commit` 硬 ask） | ⏳ **未接线（读侧同样不可达）** |
+| **内置 exec 工具** | 让模型能自主执行命令（`run_command`），**一律硬 ask** | ⏳ 未做（当前命令执行只有"用户手驱终端 + 批准的 MCP 工具"两条路） |
 | M12 日志/自动更新 | 结构化日志、更新通道 | ⏳ 未做 |
 
 ### 3.2 中断位置与原因（接手方从这里继续）
@@ -232,7 +238,7 @@
 
 - `MODE_LABEL`（agent-core 版）与 `fatigueHint` **已删除**（零调用方死代码）。
   **审批疲劳提示**若要做：做在审批弹窗里（main 侧记录连续批准次数），并补测试 —— **不要只把函数加回来**。
-- git 写操作、记忆写入：**未接线是已知状态**（README/PROGRESS 如实标注），接线时必须过权限门。
+- git（**整个模块**，不只是写操作）、记忆写入：**未接线是已知状态**（README/PROGRESS 如实标注），接线时必须过权限门。
 
 ---
 
@@ -243,8 +249,8 @@
 | 优先级 | 任务 | 步骤摘要 | 预期目标（DoD） |
 |--------|------|----------|-----------------|
 | **P0** | **M10 第 2 步**（服务/IPC/界面/e2e） | 见 §3.2 的 5 步 | 浏览器能开网页、能读正文；危险导航被拒且理由可读；e2e 含本地 HTTP 真加载 |
-| **P1** | **R-12：`ipc.ts` 拆分**（596 行 → ≤300） | 按块抽成 `ipc/handlers/{terminal,connections,chat,mcp,hooks,permission-rules}.ts`，共享上下文对象传 `handle`；**同步改 `ipc-wiring.test.ts` 扫描全部 ipc 文件** | 每文件 ≤300 行；全部接线锁保持绿色；e2e 14/14 |
-| **P1** | **M6 写入侧 + M8 git 写操作接线** | 过权限门（写=软 ask、执行=硬 ask）；接线后**补变异测试** | 用户能通过界面/对话真实使用；台账记录 |
+| **P1** | **R-12：`ipc.ts` 拆分**（596 行 → ≤300） | 按块抽成 `ipc/handlers/{terminal,connections,chat,mcp,hooks,permission-rules}.ts`，共享上下文对象传 `handle`；**同步改 `ipc-wiring.test.ts` 扫描全部 ipc 文件** | 每文件 ≤300 行；全部接线锁保持绿色；e2e 全绿 |
+| **P1** | **M6 写入侧 + M8 git 模块接线（读侧与写侧）+ M4 内置 exec 工具** | 过权限门（读=放行、写=软 ask、执行/`commit`=硬 ask）；接线后**补变异测试与接线锁**（防"抽了纯函数却没接上"） | 用户能通过界面/对话真实使用；台账记录 |
 | **P2** | **M9 无限画布** | 先写 `docs/LINKAGE-1.md`（画布↔编码引擎的对接契约）再动工 | 3 节点流程能跑、图可存可读 |
 | **P2** | utilityProcess 迁移**评估**（只评估不实现） | 输出"做/不做/分几步 + 代价"结论 | PLAN 的 ADR 不再悬空 |
 | **P3** | M7 定时任务 / M11 多模态 / M19+ | 按路线图 | 各自 DoD 见 PLAN 验收清单 |
@@ -291,17 +297,23 @@
 
 - **状态唯一权威 = `docs/PROGRESS.md`**；`PRODUCT-GOAL`/`COVERAGE-MATRIX` 已指针化，不再写状态。
 - **数字只写一处**（测试数/步数/门禁清单等），写在多处必被 `check:docs` 判漂移。
-- `check:docs` **13 项**：npm 脚本存在性、README 链接、docs 导航、孤儿文档（docs/review/knowledge 三处）、
-  **悬空引用**、钩子事件数、权限模式数、e2e 步数（README+PROGRESS）、测试文件数、门禁清单、
-  "N件套"只许 PROGRESS 一处、**应用版本 = 最新变更记录版本**。
-- 改了检查器规则必须跑 `npm run check:docs:selftest`（注入 4 处漂移证明它真的会咬）。
+- `check:docs` 的检查项**以它自己的输出为准，文档不写数字**（写数字必漂 —— 本轮就抓到"文档说 13 项、实际输出 14 项"）：
+  npm 脚本存在性、README 链接、docs 导航、孤儿文档（docs/review/knowledge 三处）、**悬空引用**、钩子事件数、
+  权限模式数、e2e 步数（README+PROGRESS）、测试文件数、门禁清单、"N件套"只许 PROGRESS 一处、
+  **应用版本 = 最新变更记录版本**、**IPC 通道数（文档若写数字必须与 `channels.ts` 一致）**、
+  **能力表交叉断言（README 的 ✅ 能力 ↔ `createDefaultRegistry()` 实际工具 ↔ `channels.ts` 实际通道）**、
+  **对标产品名 0 命中（活文档与源码注释不得出现；归档豁免。判据用 SHA-256 摘要，脚本里不出现原名）**、
+  **代码与配置无本机绝对路径（运行时算出仓库根与用户主目录再比对，检查器自身不含任何本机路径字面量）**。
+- 改了检查器规则必须跑 `npm run check:docs:selftest`（逐条注入漂移证明它真的会咬；**用例数以脚本为准**，文档不写数字）。
 - **归档文件不受"N件套"规则约束**（历史记录不算漂移）；**绝不改写已推送的 git 历史与标签**。
 - **里程碑编号规范**（唯一权威 `docs/TRACK-ROADMAP.md` §一）：连续的 **M1–M23，分三段来源**
   （M1–M12 核心模块 · M13–M18 新增交付物 · M19–M23 扩展架构）。
   **废弃写法（全仓不得再出现）**：`M0` · `M5a` · `M5b` · `M6b` · 把阶段号 `P5` 当模块号 · "钩子四类"（现为七类）；
   `W0–W23` 只是周次，不承载依赖与验收语义。
 - **删文件/改引用前先看谁在索引它**：悬空引用检查（`check:docs`）就是为 `findings/F8.md` 事故加的
-  —— 该文件被索引引用却从未存在，"点不开的链接"比缺文档更坏。
+  —— 该文件被 `knowledge/README.md` 索引引用，而**仓库里没有它**。
+  **更正一处表述**：F8 的调研内容确实存在，是内部调研材料，在"仓库去参考化"那一轮移出了仓库 ——
+  准确说法是「**未随仓库交付**」，不是此前写的「从未存在」。"点不开的链接"比缺文档更坏。
 - 记录命名：CHANGELOG 标题 `[vX.Y.Z-轨道简称N]`，正文首行写轨道归属；十条轨道定义见 `docs/TRACK-PLANS.md`。
 
 ### 5.5 变异测试的操作禁忌
@@ -332,7 +344,7 @@
 
 - `ipc.ts` 596 行（目标 ≤300）—— **R-12**。
 - Agent runtime 在 main 进程而非 `utilityProcess`（PLAN 的 ADR 未兑现，已在 PLAN 就地标注"未实现"）—— 待评估。
-- 首屏 chunk 652KB（目标 <400KB gzip）；长会话 fps 未实测（需 DevTools 录制）—— PERF-BUDGET 待办。
+- 首屏 chunk 体积超标（目标 <400KB gzip；**当前实测值与增长原因见 `docs/PERF-BUDGET.md` §二/§四**）；长会话 fps 未实测（需 DevTools 录制）—— PERF-BUDGET 待办。
 - `as never` / `as unknown as` 断言集中在工具入参与 provider 解析处（有注释说明，属类型边界妥协）。
 - PLAN 选型表里的 React 18 / Fluent UI / zustand / xyflow **与实际不符**（实际 React 19 + 自研组件）——已按事实修正一部分，选型表仍待清理。
 
@@ -385,10 +397,10 @@ README 的"无服务器中转"存在**表述冲突**（SECURITY 的出站表也�
 | PLAN 两条 ADR 未兑现未标注（S4） | utilityProcess 未实现、main≤300 行未落地，文档却称"一致" | PLAN 就地标注"未实现"；评估列入队列 | 🔶 已如实标注；评估未做 |
 | 里程碑编号三套语义（S5） | M3/M4/M5 在不同文档指不同物，还有 M5a/M5b 别名 | 定死 M1–M23（`TRACK-ROADMAP` §一）；全仓清别名 | ✅ 已修（机器管） |
 | PERF-BUDGET 整篇重复两套（S6） | 追加时未删旧版 | 合并为单一权威版 + 采样铁律 | ✅ 已修 |
-| **check:docs 盲区**（S7） | 不扫 PROGRESS 数量、不扫 CHANGELOG/review | 扩到 13 项；自检 4/4；归档合理豁免 | ✅ 已修 |
+| **check:docs 盲区**（S7） | 不扫 PROGRESS 数量、不扫 CHANGELOG/review | 扩充检查项（**项数以它自己的输出为准**）；自检注入的漂移全部被拦住；归档合理豁免 | ✅ 已修 |
 | **spawnSync 全部 EBUSY**，变异"十项齐刷刷被拦住" | 本机同步 spawn 不可用；脚本把"没跑起来"当成"测试失败" | 全改异步 spawn；"无法运行"单独成类、不计入被拦住 | ✅ 已修（工具层） |
 | 变异 M4 逃逸 | 用例取值让变异不可观测（可写键+undefined） | 改用"不可写键+undefined"；记录教训 | ✅ 已修 |
-| `findings/F8.md` 悬空引用 | 被索引引用但文件从未存在 | 索引按事实改写；加**悬空引用检查** | ✅ 已修（机器管） |
+| `findings/F8.md` 悬空引用 | 被索引引用，但**未随仓库交付**（内部调研材料，去参考化时移出仓库；此前记为"从未存在"，表述不准，**已更正**） | 索引按事实改写；加**悬空引用检查** | ✅ 已修（机器管） |
 | CHANGELOG 拆分方向搞反 | 该文件"新的在前"，脚本却保留了最老的 | `git checkout HEAD --` 还原重做（已提交文件本身是保险） | ✅ 已修 |
 | **Shell 反引号坑（7 次）** | 用 `node -e`/heredoc 写含反引号内容 | 铁律：一律编辑工具写文件（§5.3）；事故均已修复 | ⚠️ **靠纪律维持**，接手方继续遵守 |
 | 权限模式/文案双份定义 | 两个包各自定义（分包边界使然） | 不合并；**跨包一致性锁** 4 例 | ✅ 已锁 |
@@ -412,7 +424,7 @@ README 的"无服务器中转"存在**表述冲突**（SECURITY 的出站表也�
 | 架构与模块职责 | `docs/PLAN.md`（§4 模块表、§5 阶段表） |
 | 全项目问题清单 | `review/TRACK-SWEEP-1.md`（轨道排查计划 1） |
 | 每轮复核与变异记录 | `review/REVIEW-LOG.md`（更早的在 ARCHIVE） |
-| 历史变更 | `CHANGELOG.md`（最近 12 条）+ `docs/CHANGELOG-ARCHIVE.md` |
+| 历史变更 | `CHANGELOG.md`（**最近若干条**，条数以文件为准 —— 文档不写数字）+ `docs/CHANGELOG-ARCHIVE.md`（更早的原文归档） |
 | 安全承诺与边界 | `SECURITY.md` |
 | 怎么装终端依赖、常见报错 | `docs/SETUP-TERMINAL.md` |
 | 性能预算与采样铁律 | `docs/PERF-BUDGET.md` |
@@ -429,14 +441,14 @@ npm run typecheck          # 类型检查
 npm run lint               # 静态检查
 npm test                   # 单元 + 集成测试
 npm run smoke              # 真实启动 Electron 冒烟
-npm run e2e                # 界面级端到端（14 步）
+npm run e2e                # 界面级端到端（真 Electron + 真点击；步数以脚本为准）
 npm run perf               # 启动性能预算判定
 npm run mut                # 变异测试（按 review/mutations.json）
-npm run check:docs         # 文档一致性（13 项）
+npm run check:docs         # 文档一致性（项数以它自己的输出为准）
 npm run check:docs:selftest# 检查器自检（证明它会咬）
 npm run license:check      # 依赖许可证合规
 python scripts/cleanup.py  # 收尾清理（预览→--apply）
-npm run dist               # 打 Windows 安装包（内含 build）
+npm run dist               # 打 Windows 安装包（根目录代理到 apps/desktop；内含 build）
 ```
 
 ### 6.3 部署 / 发布流程

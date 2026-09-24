@@ -17,7 +17,8 @@
 import os
 from pathlib import Path
 
-ROOT = Path(r"D:\MiMo\ProjectOne\俱佳agent\knowledge\sources")
+# 按脚本自身位置解析仓库根，不写死本机绝对路径（开源工程底线；见 docs/HANDOVER.md §5.6 第 7 条）
+ROOT = Path(__file__).resolve().parent.parent / "knowledge" / "sources"
 
 FIXES = {
     "S1-agent-core.md": [

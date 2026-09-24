@@ -9,6 +9,11 @@ build/
 coverage/
 .vitest/
 
+# Python 字节码缓存：scripts/ 下的工具脚本跑一次就会生成，不该入库
+# （此前只写在 cleanup.py 的清理清单里，没写进 .gitignore —— 别人跑一次脚本就可能把它 add 进来）
+__pycache__/
+*.py[cod]
+
 # 本地回收站（cleanup.py 使用）
 .trash/
 

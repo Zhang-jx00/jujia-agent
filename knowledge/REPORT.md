@@ -11,7 +11,7 @@
 8. **Electron 安全默认值不可妥协**：contextIsolation + sandbox + 禁止暴露 raw ipcRenderer + 校验 IPC sender；Agent 运行时放 utilityProcess/sidecar，渲染层只做 UI（F5）。
 9. **流畅 UI 的根因**：测量优先（DevTools + Chrome Tracing）；流式 delta 小事件 + rAF 批处理；消息/审阅虚拟列表；主进程禁止同步 IPC/重 IO（F6）。
 10. **UI 基线**：Windows 桌面优先 Fluent UI React v9 + 语义 Design Tokens；工具卡 L0/L1/L2 渐进披露；权限按钮「动词+名词」；每个表面四态 empty/loading/error/success；动效 100–300ms 且尊重 reduced-motion（F7）。
-11. **模型层**：连接抽象为「多 Connection」，协议仅 `anthropic | openai` 两档；对话历史必须 block 级（text/thinking/tool_use/tool_result）；SSE 在主进程/utility 解析（F8）。
+11. **模型层**：连接抽象为「多 Connection」，协议仅 `anthropic | openai` 两档；对话历史必须 block 级（text/thinking/tool_use/tool_result）；SSE 在主进程/utility 解析（内部调研，未随仓库交付；在库来源见 `sources/S7-model.md`）。
 
 ## Background & scope
 
@@ -114,7 +114,7 @@ jujia-agent/
 | 缓存 | 内存 → 磁盘快照 → 网络 SWR（模型目录、Skill 市场） |
 | 禁止 | `sendSync`、main 同步 fs、SSE 路径上大文件 readFileSync |
 
-（F6 + Yan 问题对照）
+（F6）
 
 ## 七、UI/UX / 视觉 / 动效 / 组件 / 卡片
 
@@ -129,7 +129,7 @@ jujia-agent/
 | 项目 | 可学 | 可避 |
 |------|------|------|
 
-连接 schema 建议（F8/Yan）：
+连接 schema 建议（内部调研，未随仓库交付）：
 
 ```ts
 type ApiFormat = 'openai' | 'anthropic';

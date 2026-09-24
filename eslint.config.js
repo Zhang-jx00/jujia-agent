@@ -23,7 +23,7 @@ export default tseslint.config(
       ],
       '@typescript-eslint/consistent-type-imports': 'warn',
       'no-console': 'off',
-      // 防 Yan 式巨石文件：单文件逻辑行上限
+      // 防单文件巨石：逻辑行上限 800（超限即报错，逼迫拆分职责）
       'max-lines': ['error', { max: 800, skipBlankLines: true, skipComments: true }],
     },
   },
