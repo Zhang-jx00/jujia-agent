@@ -703,6 +703,8 @@ try {
     '',
     '<img src=x onerror=alert(1)>',
     '',
+    '![远端图](https://example.invalid/pic.png)',
+    '',
     '[正常链接](https://example.com) 与 [坑链接](javascript:alert(1))',
     '',
     '段落一',
@@ -736,6 +738,14 @@ try {
   /** 安全真值：第三方文件里的 HTML 与 javascript: 链接都不该变成真的 DOM */
   if ((await win.locator('.jj-docs-body img').count()) !== 0) {
     fail('文档里的原始 img 标签被解释成了元素（HTML 不该被解释）');
+  }
+  /**
+   * **双向断言**（本轮被定为安全类断言的通用范式）：只断"没有 img 元素"是不够的 ——
+   * 整块没渲染也能通过。所以同时断"那张 Markdown 图片确实被识别、并留下了不加载的占位说明"。
+   */
+  const mdImgShown = await bodyText();
+  if (!mdImgShown.includes('图片（未加载远程内容）：远端图')) {
+    fail('Markdown 图片语法没被识别成图片（那"零 img 元素"可能只是整块没渲染，不是没加载）', mdImgShown.slice(0, 900));
   }
   if ((await win.locator('.jj-docs-body a[href^="javascript:"]').count()) !== 0) {
     fail('javascript: 链接变成了可点元素（协议白名单没生效）');

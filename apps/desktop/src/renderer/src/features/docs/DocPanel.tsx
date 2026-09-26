@@ -24,6 +24,16 @@ const CHUNK = 240;
 const TRUNCATION_HINT =
   '一次最多读取 256KB（沿用 read_file 的上限）；更大的文件本页会显示『已截断』标注，完整阅读需分页 —— 已随 M19 的文件树一起做。';
 
+/**
+ * 查看器边界（红线 2：不支持的东西必须让用户看得见，否则他会以为是文档坏了）。
+ * 每条都是刻意的取舍而不是漏做，理由见 `markdown/parse.ts` 头部。
+ */
+const VIEWER_LIMITS =
+  '查看器边界（不是文档坏了）：原始 HTML 按字面显示、不解释；' +
+  '远程图片永不加载（那会是出站请求，本应用默认数据不出本机）；' +
+  'setext 标题与脚注不支持，`---` 一律当分隔线；任务列表的方框不能点。' +
+  '表格与列表已支持（管道式表格）。';
+
 export function DocPanel(): ReactElement {
   const [path, setPath] = useState('');
   const [content, setContent] = useState<string | null>(null);
@@ -105,10 +115,13 @@ export function DocPanel(): ReactElement {
       )}
 
       {content === null ? (
-        <p className="p0-subtitle">
-          还没打开文档。只读工作区内的文件，越界会被路径守卫拒绝并把理由显示在这里。
-          {TRUNCATION_HINT}
-        </p>
+        <>
+          <p className="p0-subtitle">
+            还没打开文档。只读工作区内的文件，越界会被路径守卫拒绝并把理由显示在这里。
+            {TRUNCATION_HINT}
+          </p>
+          <p className="jj-muted">{VIEWER_LIMITS}</p>
+        </>
       ) : (
         <>
           <div className="jj-docs-body">
@@ -135,6 +148,7 @@ export function DocPanel(): ReactElement {
               </p>
             )}
             <p className="jj-muted">{TRUNCATION_HINT}</p>
+            <p className="jj-muted">{VIEWER_LIMITS}</p>
           </div>
         </>
       )}

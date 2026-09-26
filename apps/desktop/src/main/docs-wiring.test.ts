@@ -65,6 +65,19 @@ describe('文档查看的安全底线（渲染第三方文件内容）', () => {
     expect(panelSource).not.toMatch(/TOOL_RUN|ipcRenderer|fetch\(/);
   });
 
+  it('远程图片永不加载（红线：加载远端图片 = 出站请求，违反"数据默认不出本机"）', () => {
+    // 结构性证据：渲染层里根本没有 img 元素可言
+    expect(viewSource).not.toMatch(/<img|createElement\(['"]img|new Image\(/);
+    expect(viewSource).toContain('未加载远程内容');
+    // 注释里的红线声明也要在（防"顺手支持图片"时连理由一起删掉）—— 这条读原文，不剥注释
+    const raw = readFileSync(join(here, '..', 'renderer', 'src', 'markdown', 'parse.ts'), 'utf8');
+    expect(raw).toContain('永不加载');
+    expect(raw).toMatch(/数据(默认)?不出本机/);
+    // 界面上也要把这条讲给用户（红线 2：不支持集要可见，否则用户以为文档坏了）
+    expect(panelSource).toContain('查看器边界');
+    expect(panelSource).toContain('远程图片永不加载');
+  });
+
   it('长文档分块挂载：渲染数量由 shown 控制，且页面上说明还剩多少', () => {
     expect(viewSource).toContain('blocks.slice(0, shown)');
     expect(panelSource).toContain('继续加载');
