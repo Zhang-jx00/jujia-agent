@@ -23,7 +23,7 @@
 `apps/desktop/src/main/open-with-gate.ts`（**唯一判档处**，纯函数）+ `open-with-service.ts`（流程与静态校验）
 + `open-with-launch.ts`（唯一碰 `shell.openExternal` 与 `spawn` 的地方）+ 两个测试文件（43 例）·
 `ipc/browser.ts`（4 条新通道）· `shared-ipc`：4 条通道常量 + 6 个 zod 契约 + `AppConfig.browserOpenWith` ·
-preload 4 个方法 · `BrowserPanel.tsx`（档位下拉 + 自选程序行）· 新增接线锁 9 条 ·
+preload 4 个方法 · `BrowserPanel.tsx`（档位下拉 + 自选程序行）·
 `config-write.ts`（写明为什么新字段**不进**白名单）· 接线锁 +9 条 · e2e 第 20 步 · 变异 M17–M19
 
 **三条安全语义（所有者 2026-09-26 批复的直译）**
