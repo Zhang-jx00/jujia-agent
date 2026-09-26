@@ -89,8 +89,7 @@ describe('接线锁：策略确实在运行路径上（不是只活在单测里�
 
   it('每条浏览器通道都在统一入口后面注册（新通道默认受发送方校验保护）', () => {
     const channels = [
-      'BROWSER_OPEN',
-      'BROWSER_NAVIGATE',
+      'BROWSER_OPEN_WITH',
       'BROWSER_BACK',
       'BROWSER_FORWARD',
       'BROWSER_RELOAD',
@@ -98,6 +97,9 @@ describe('接线锁：策略确实在运行路径上（不是只活在单测里�
       'BROWSER_SET_BOUNDS',
       'BROWSER_GET_TEXT',
       'BROWSER_STATE',
+      'BROWSER_EXE_PICK',
+      'BROWSER_EXE_GET',
+      'BROWSER_EXE_SET',
     ];
     for (const name of channels) {
       // 必须是 `handle(IPC.X` 开头 —— 直接写 ipcMain.handle 会绕开发送方校验
@@ -106,6 +108,69 @@ describe('接线锁：策略确实在运行路径上（不是只活在单测里�
     // 反向锁：本模块绝不能出现裸 ipcMain.handle（绕过统一入口 = 绕过安全默认值）
     const bare = ipcSource.match(/ipcMain\.handle\(/g) ?? [];
     expect(bare.length).toBe(0); // 唯一的裸入口在 ipc/handle.ts，由 ipc-wiring.test.ts 锁
+  });
+});
+
+describe('打开方式三档（M10 收尾）：外发动作的接线锁', () => {
+  const gateSource = stripComments(readFileSync(join(here, 'open-with-gate.ts'), 'utf8'));
+  const serviceSource = stripComments(readFileSync(join(here, 'open-with-service.ts'), 'utf8'));
+  const launchSource = stripComments(readFileSync(join(here, 'open-with-launch.ts'), 'utf8'));
+
+  it('IPC 层不自己判档：判档只活在 open-with-gate.ts 一处', () => {
+    // 就地判档 = 变异咬不到、单测也测不动的那一类老毛病（与 config-write、git-gate 同一教训）
+    expect(ipcSource).toContain('createOpenWithService(');
+    expect(ipcSource).toContain('openWith.openWith(');
+    expect(ipcSource).not.toContain('decideGate(');
+    expect(serviceSource).not.toContain('decideGate(');
+    expect((gateSource.match(/decideGate\(/g) ?? []).length).toBe(1);
+  });
+
+  it('硬 ask 的落地只有一处，且写的是 false（M17 的靶子）', () => {
+    expect((gateSource.match(/bypassable: false/g) ?? []).length).toBe(1);
+    expect(gateSource).not.toContain('bypassable: true');
+  });
+
+  it('服务层没有任何"记住"这条路：不存在 remembered / alwaysAllow 缓存', () => {
+    // 两档都是硬 ask，一次授权只覆盖一次交付 —— 记下来就等于把它变成软 ask
+    expect(serviceSource).not.toMatch(/remembered|alwaysAllow|allow_always/);
+  });
+
+  it('真正交给本机的动作只在 open-with-launch.ts，且永不经过 shell', () => {
+    expect(launchSource).toContain('spawn(exePath, buildProgramArgs(url)');
+    expect(launchSource).toContain('shell: false');
+    expect(launchSource).not.toContain('shell: true');
+    // 参数只有一个网址：拼任何开关、命令或前缀都要先过这一关
+    expect(launchSource).toContain('return [url];');
+    // 运行时接进去的是真实现，而不是留着某个测试假实现上线
+    expect(ipcSource).toContain('...createRealLaunchers()');
+  });
+
+  it('自选程序：只有对话框那条能写路径，SET 只能清空', () => {
+    const pickRegion = ipcSource.slice(ipcSource.indexOf('handle(IPC.BROWSER_EXE_PICK'));
+    const setRegion = pickRegion.slice(pickRegion.indexOf('handle(IPC.BROWSER_EXE_SET'));
+    expect(pickRegion.slice(0, pickRegion.indexOf('handle(IPC.BROWSER_EXE_SET'))).toContain('openWith.acceptPickedExe(');
+    expect(setRegion).toContain('openWith.clearExePath()');
+    // 反向：SET 那段绝不能调 acceptPickedExe —— 那等于把"选程序"的授权交回渲染层
+    expect(setRegion).not.toContain('acceptPickedExe(');
+    // 而且 SET 的入参先过"只收 null"的契约
+    expect(setRegion).toContain('browserExeClearSchema.safeParse(');
+  });
+
+  it('网址先过浏览器策略层，再谈权限（越界输入不该有机会弹到用户面前求确认）', () => {
+    expect(serviceSource).toContain('decideNavigation(url)');
+    const openRegion = serviceSource.slice(serviceSource.indexOf('const openWith = async'));
+    expect(openRegion.indexOf('safeUrl(url)')).toBeLessThan(openRegion.indexOf('loadPolicy()'));
+  });
+
+  it('外部两档的确认走的是同一个审批桥（不给自己另开一条"更容易批"的路）', () => {
+    expect(ipcSource).toContain('resolvePermission: (req) => deps.permission.resolve(req)');
+  });
+
+  it('内置档回给界面的状态一律**现读**（复核 030 的 N-1：旧快照会把"被拦"广播盖掉）', () => {
+    // 导航结果里那份 state 是 navigate() **内部**取的快照；只要响应路径上再多一个 await
+    // （本轮多的是写默认档），被拦广播就会先到、后被这份旧快照覆盖 → 拒绝理由静默消失。
+    expect(ipcSource).not.toContain('state: result.state');
+    expect((ipcSource.match(/state: browser\.state\(\)/g) ?? []).length).toBeGreaterThanOrEqual(3);
   });
 });
 

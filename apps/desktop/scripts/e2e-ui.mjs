@@ -91,6 +91,28 @@ writeFileSync(
   'utf8',
 );
 
+/**
+ * 「自选本机程序」那一档的路径**只能由原生文件对话框写入**，而自动化点不了本机对话框，
+ * 所以这里把同一份存储预置进隔离数据目录（等价于"用户已经选过一次"）。
+ * 挑哪个程序：Windows 自带的命令行 HTTP 客户端 —— 交给它的参数只有一个网址，
+ * 它就一定会真的发一次请求，于是本地站点的请求台账就成了"真的交出去了"的硬证据。
+ * 路径由环境变量算出，脚本里不出现任何本机字面量。
+ */
+const systemRoot = process.env['SystemRoot'] ?? process.env['WINDIR'] ?? '';
+const handoutExe = systemRoot === '' ? '' : join(systemRoot, 'System32', 'curl.exe');
+const handoutExeReady = handoutExe !== '' && existsSync(handoutExe);
+if (handoutExeReady) {
+  writeFileSync(
+    join(dataDir, 'browser-exe.json'),
+    JSON.stringify({
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      data: { path: handoutExe },
+    }),
+    'utf8',
+  );
+}
+
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE; // 不清掉它 Electron 会退化成纯 Node
 env.JUJIA_DATA_BASE_DIR = dataDir;
@@ -290,12 +312,17 @@ try {
   // 端口在 listen 之后才知道；请求处理函数是**之后**才被调用的，所以这里先声明再赋值是安全的
   let portAddr = 0;
   let otherPort = 0;
+  /** 本地站点收到过的请求路径（按到达顺序）。外部程序有没有真的来取，问它 */
+  const hits = [];
   /** 第二个站点：用来当"跳转目标"。**同主机不同端口 = 不同 origin**，而且不会被 Chromium 改写 */
   const otherSite = createServer((_req, res) => {
     res.setHeader('content-type', 'text/html; charset=utf-8');
     res.end(`<html><body><p>${OTHER_MARKER}</p></body></html>`);
   });
   const server = createServer((req, res) => {
+    // 请求台账：这一步的"真值"就靠它 —— 界面说"已交给外部程序"不算数，
+    // 外部程序真的回来取了一次，才算那次交付发生了（拒绝之后台账里没有这一条，才算真没做）。
+    hits.push(req.url ?? '');
     res.setHeader('content-type', 'text/html; charset=utf-8');
     if (req.url === '/jump') {
       // 页面自己跳去**另一个站点** —— 与用户打开的那个 origin 不同，必须被拦。
@@ -417,6 +444,7 @@ try {
     fail(`file:// 被"拒绝"之后 guest 实际换了页（当前 origin：${String(guestAfterFile)}）`);
   }
   ok('危险协议被拒、理由可见，且 guest 确实还停在原页面');
+
 
   /* ---------------------------- git 接线（M8） ----------------------------
    *
@@ -561,6 +589,91 @@ try {
   if (bExists) fail('用户明明拒绝了，命令却还是执行了（磁盘上留下了文件）');
   ok('硬 ask 不被"总是允许"压掉；拒绝 → 零副作用');
 
+  /* 回到浏览器页签：这一步只验"交给外部程序"那一支，不需要视图真的打开 */
+  await tabButton('浏览器').click();
+  const backToBrowser = await waitForText('尚未打开');
+  if (backToBrowser !== true) fail('切回浏览器页签没有渲染出来', String(backToBrowser).slice(0, 600));
+
+  /* ---------------- 打开方式三档（M10 收尾 · 外发动作必须过权限门） ----------------
+   *
+   * 真值是**本地站点的请求台账**：界面说"已交给外部程序"不算数，
+   * 外部程序真的来取过一次才算交付发生；拒绝之后台账里没有那一条，才算真的没做。
+   * （复核 026 的 G-8 教训：只断言界面文案的"安全断言"可以把拦截整个删掉还全绿。）
+   */
+  const waitHit = async (path) => {
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline) {
+      if (hits.includes(path)) return true;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return false;
+  };
+
+  step('内置浏览器：地址交给外部程序 —— 问过才交、拒绝就不交、「总是允许」压不掉下一次');
+
+  // ① 切到"系统默认浏览器"这一档：界面必须先把"为什么要问一次"说清楚
+  await win.locator('select[aria-label="打开方式"]').selectOption('system');
+  const whyAsked = await waitForText('交给应用之外的程序');
+  if (whyAsked !== true) fail('切到外部档之后，界面没有说明这一步会把地址交出去');
+
+  // ② 拒绝分支。这一档**只做拒绝**：允许会真的唤起用户日常用的浏览器，那不该发生在测试里
+  const deniedUrl = '/handed-denied';
+  await addressBox.fill(`${baseUrl}${deniedUrl}`);
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const sysDialog = await waitForText('需要你确认：地址将离开本应用的安全边界');
+  if (sysDialog !== true) {
+    fail('交给系统默认浏览器竟然没有弹确认框（本机外发动作必须问）', String(sysDialog).slice(0, 800));
+  }
+  await win.locator('button', { hasText: '拒绝' }).first().click();
+  await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
+  if (hits.includes(deniedUrl)) fail('点了拒绝，地址却还是交了出去');
+  ok('系统默认浏览器那一档会先问；拒绝之后没有交付');
+
+  // ③ 自选程序档：允许 → 真的交出去（请求台账为证）
+  if (!handoutExeReady) {
+    fail('这台机器上没有 Windows 自带的命令行 HTTP 客户端，本步无法用"真的来取过一次"作真值');
+  }
+  await win.locator('select[aria-label="打开方式"]').selectOption('custom');
+  const exeRow = await waitForText('自选程序：');
+  if (exeRow !== true) fail('切到自选程序档后没有显示当前选定的程序');
+  const firstUrl = '/handed-exe-1';
+  await addressBox.fill(`${baseUrl}${firstUrl}`);
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const exeDialog = await waitForText('用本机程序');
+  if (exeDialog !== true) fail('自选程序档没有弹出能看清"交给哪个程序"的确认框', String(exeDialog).slice(0, 800));
+  const dialogText = await bodyText();
+  // 只说"用本机程序打开"不够：必须把**是哪个文件**摊开给人看，否则点允许就是盲批
+  if (!dialogText.includes('curl.exe')) fail('确认框里没有点出接收方是哪个程序', dialogText.slice(0, 900));
+  await win.locator('button', { hasText: '本次会话总是允许' }).first().click();
+  if (!(await waitHit(firstUrl))) fail('允许之后本机程序并没有真的收到这个地址 —— 交付其实没发生');
+  await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
+  ok('允许 → 本机程序真的取了这个地址（请求台账为证）');
+
+  // ④ 「总是允许」之后必须**仍然问**：一次授权不外溢到下一个网址（外发动作没有"记住"这条路）
+  const secondUrl = '/handed-exe-2';
+  await addressBox.fill(`${baseUrl}${secondUrl}`);
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const again = await waitForText('需要你确认：地址将离开本应用的安全边界');
+  if (again !== true) fail('「本次会话总是允许」压掉了下一次确认 —— 外发动作被做成了软 ask');
+  await win.locator('button', { hasText: '拒绝' }).first().click();
+  await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
+  if (hits.includes(secondUrl)) fail('拒绝了第二个地址，它却还是交了出去');
+  ok('硬 ask 不被「总是允许」压掉；拒绝 → 零交付');
+
+  // ⑤ 清除自选程序之后：缺前置条件就直接说清楚，不弹一个注定失败的确认框
+  await win.locator('button', { hasText: '清除' }).first().click();
+  const thirdUrl = '/handed-exe-3';
+  await addressBox.fill(`${baseUrl}${thirdUrl}`);
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const noExe = await waitForText('还没有选定');
+  if (noExe !== true) fail('清除自选程序后没有给出可读理由', String(noExe).slice(0, 800));
+  if ((await win.locator('[role="dialog"][aria-label="权限请求"]').count()) > 0) {
+    fail('还没选程序就弹确认 —— 那等于让用户替一个注定失败的交付背书');
+  }
+  if (hits.includes(thirdUrl)) fail('没有选定程序，地址却还是交了出去');
+  ok('缺前置条件时直接给理由：不弹窗、不交付');
+  // 选回内置档，别把外部档留给后面的步骤（它们不该被弹确认框）
+  await win.locator('select[aria-label="打开方式"]').selectOption('internal');
   server.close();
   otherSite.close();
 

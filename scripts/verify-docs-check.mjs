@@ -72,6 +72,27 @@ const TOOL_SENTINEL = 'no_such_tool__selftest';
   }
 }
 
+/**
+ * 「e2e 步数与脚本不一致」这条注入用例的锚点：数字**从脚本现读**，不写死。
+ *
+ * 为什么单独处理：本轮把 README 里的 20 步改成 21 步，写死的锚 `20 步全自动` 当场失效，
+ * 自检直接报"锚点未命中"。这是"成功交付反而腐蚀自检靶子"这一类事故的**第四次**
+ * （K-3 工具名、H-4 工具名、L-6 换了哨兵名、这次是数字）。
+ * 前三次都在换靶子的**内容**，这次换的是靶子的**来源**：只要它抄本机数字，就一定会被下一次交付冲掉。
+ */
+const e2eScriptPath = 'apps/desktop/scripts/e2e-ui.mjs';
+const realSteps = [...readFileSync(join(repoRoot, e2eScriptPath), 'utf8').matchAll(/^\s*step\(/gm)].length;
+const readmeText = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+const readmeSteps = Number(/e2e[^\n]*?(\d+) 步/.exec(readmeText)?.[1] ?? 'NaN');
+if (!Number.isInteger(readmeSteps) || readmeSteps !== realSteps) {
+  fail(
+    `README 写的 e2e 步数（${String(readmeSteps)}）与脚本实际（${realSteps}）不一致 —— ` +
+    '自检的靶子立在坏基线上，先把文档改一致再跑这个验证',
+  );
+}
+const STEP_FROM = `${readmeSteps} 步全自动`;
+const STEP_TO = `${readmeSteps + 3} 步全自动`;
+
 /** 每个用例：文件、要替换的片段、替换成什么、期望命中的检查项名 */
 const cases = [
   {
@@ -98,8 +119,8 @@ const cases = [
   {
     name: 'e2e 步数与脚本不一致',
     file: 'README.md',
-    from: '20 步全自动',
-    to: '99 步全自动',
+    from: STEP_FROM,
+    to: STEP_TO,
     expect: 'e2e 步数与脚本一致',
   },
   {

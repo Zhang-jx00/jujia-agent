@@ -33,13 +33,23 @@ describe('pickWritableConfig', () => {
     expect(rejected).toEqual(['alwaysAskTools']);
   });
 
+  it('「打开方式默认档」同样不接受界面写入（M10 收尾）', () => {
+    // 它记的只是"下拉框停在哪一档"，不是授权；但写入由**主进程在真的打开成功之后**完成。
+    // 少开一个"界面能写安全相关字段"的口子，同时省掉一次读-改-写竞态。
+    const { clean, rejected } = pickWritableConfig({ theme: 'dark', browserOpenWith: 'custom' });
+    expect(rejected).toEqual(['browserOpenWith']);
+    expect(clean.browserOpenWith).toBeUndefined();
+    expect(Object.keys(clean)).toEqual(['theme']);
+  });
+
   it('多个越权字段一次全部报出来（不是只报第一个）', () => {
     const { rejected } = pickWritableConfig({
       workspace: 'D:/x',
       alwaysAskTools: [],
+      browserOpenWith: 'system',
       theme: 'light',
     });
-    expect(rejected.sort()).toEqual(['alwaysAskTools', 'workspace']);
+    expect(rejected.sort()).toEqual(['alwaysAskTools', 'browserOpenWith', 'workspace']);
   });
 
   it('`permissionMode` 的任何合法取值都能写（**不能只放行某个特殊值**）', () => {

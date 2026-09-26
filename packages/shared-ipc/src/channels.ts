@@ -93,14 +93,12 @@ export const IPC = {
   /* ---------------------------- 内置浏览器（M10） ---------------------------- */
 
   /**
-   * 用户从地址栏主动打开/跳转。
-   *
-   * 为什么 OPEN 与 NAVIGATE 分两条：OPEN 负责"创建受控视图 + 首次加载"，
-   * NAVIGATE 负责"视图已存在时按用户意图换页"。两者走**同一条策略判定**
-   * （`agent-core` 的 `decideNavigation`），分开只是让界面的意图与主进程的生命周期对齐。
+   * 打开一个网址。**只有一个入口**（M10 收尾时把原先的 `browser:open` / `browser:navigate`
+   * 两条并进这一条）：三档"交给谁打开"授权强度不同（内置不问、外部两档每次硬 ask），
+   * 如果界面还能绕过选档直接调"内置打开"，那"要不要问"就变成由调用方决定 —— 那不对。
+   * 视图已存在时换页还是首次加载，由主进程按当前状态判断，渲染层不必区分。
    */
-  BROWSER_OPEN: 'browser:open',
-  BROWSER_NAVIGATE: 'browser:navigate',
+  BROWSER_OPEN_WITH: 'browser:open-with',
   BROWSER_BACK: 'browser:back',
   BROWSER_FORWARD: 'browser:forward',
   BROWSER_RELOAD: 'browser:reload',
@@ -114,6 +112,20 @@ export const IPC = {
   BROWSER_STATE: 'browser:state',
   /** main → renderer：状态变化广播（含"某次导航被策略拒绝"） */
   BROWSER_STATE_CHANGED: 'browser:state-changed',
+
+  /**
+   * 自选程序路径的三条（M10 收尾）。
+   *
+   * 为什么路径**只能经 PICK 写入**：这个值决定"启动哪个本机进程"。
+   * 开一条"界面塞个路径进来"的通道，等于把选程序的授权转移给渲染层 ——
+   * 一旦渲染层被注入，"打开网页"就会变成"执行攻击者指定的 exe"。
+   * 所以 SET 只接受清空（见 `browserExeClearSchema` 的 `.strict()` + 只收 null）。
+   */
+  BROWSER_EXE_PICK: 'browser:exe-pick',
+  /** 查询当前自选程序路径与它还能不能用 */
+  BROWSER_EXE_GET: 'browser:exe-get',
+  /** 清除自选程序 */
+  BROWSER_EXE_SET: 'browser:exe-set',
 
   /* ---------------------------- git 模块（M8 接线） ---------------------------- */
 

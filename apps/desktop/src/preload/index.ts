@@ -56,10 +56,13 @@ import {
   type TerminalStartPayload,
   type TerminalStartResultPayload,
   browserBoundsSchema,
-  browserNavResultSchema,
   browserStateSchema,
   browserTextResultSchema,
-  browserUrlSchema,
+  browserExeClearSchema,
+  browserExePickResultSchema,
+  browserExeStateSchema,
+  browserOpenWithResultSchema,
+  browserOpenWithSchema,
   gitActionResultSchema,
   gitCommitSchema,
   gitDiffResultSchema,
@@ -67,7 +70,10 @@ import {
   gitPathsSchema,
   gitStatusResultSchema,
   type BrowserBoundsPayload,
-  type BrowserNavResult,
+  type BrowserExePickResult,
+  type BrowserExeState,
+  type BrowserOpenTarget,
+  type BrowserOpenWithResult,
   type BrowserState,
   type BrowserTextResult,
   type GitActionResultView,
@@ -332,18 +338,12 @@ const api = {
   /* ---------------------------- 内置浏览器（M10） ---------------------------- */
 
   /**
-   * 用户主动打开/跳转。被拒时**一定带可读理由**（拒绝要看得见，不是静默失败）。
-   * 策略判定全在主进程，这里只负责传参和校验返回。
+   * 用户主动打开/跳转。**只有一个入口**：交给谁打开由 `target` 决定，
+   * 授权与否由主进程判档（内置不问；外部两档每次硬 ask）—— 渲染层没有"绕过选档"的另一条通道。
    */
-  async browserOpen(url: string): Promise<BrowserNavResult> {
-    return browserNavResultSchema.parse(
-      await ipcRenderer.invoke(IPC.BROWSER_OPEN, browserUrlSchema.parse({ url })),
-    );
-  },
-
-  async browserNavigate(url: string): Promise<BrowserNavResult> {
-    return browserNavResultSchema.parse(
-      await ipcRenderer.invoke(IPC.BROWSER_NAVIGATE, browserUrlSchema.parse({ url })),
+  async browserOpenWith(url: string, target: BrowserOpenTarget): Promise<BrowserOpenWithResult> {
+    return browserOpenWithResultSchema.parse(
+      await ipcRenderer.invoke(IPC.BROWSER_OPEN_WITH, browserOpenWithSchema.parse({ url, target })),
     );
   },
 
@@ -381,6 +381,23 @@ const api = {
 
   async browserState(): Promise<BrowserState> {
     return browserStateSchema.parse(await ipcRenderer.invoke(IPC.BROWSER_STATE));
+  },
+
+  /* ---------------- 自选程序（M10 收尾：打开方式的第三档） ---------------- */
+
+  /** 用**主进程的原生对话框**选自选程序；界面没有"直接填路径"这条路 */
+  async browserExePick(): Promise<BrowserExePickResult> {
+    return browserExePickResultSchema.parse(await ipcRenderer.invoke(IPC.BROWSER_EXE_PICK));
+  },
+
+  async browserExeGet(): Promise<BrowserExeState> {
+    return browserExeStateSchema.parse(await ipcRenderer.invoke(IPC.BROWSER_EXE_GET));
+  },
+
+  async browserExeClear(): Promise<BrowserExePickResult> {
+    return browserExePickResultSchema.parse(
+      await ipcRenderer.invoke(IPC.BROWSER_EXE_SET, browserExeClearSchema.parse({ path: null })),
+    );
   },
 
   /** 订阅浏览器状态变化；返回取消订阅函数 */

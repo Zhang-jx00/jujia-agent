@@ -53,6 +53,14 @@ export const appConfigSchema = z.object({
   /** 会话级权限模式；规则表是常设配置，二者关系见 agent-core 的 decideGate */
   permissionMode: permissionModeSchema.default('default'),
   /**
+   * 「打开方式」的**默认预选档**（M10 收尾）。
+   *
+   * 注意它记住的只是"下拉框默认停在哪一档"，**不是授权** ——
+   * `system` / `custom` 每一交都仍要过硬 ask（判档在 main 的 `open-with-gate.ts`）。
+   * 渲染层可以写它：被注入的最多是改成一个更麻烦的默认值，改不出一次放行。
+   */
+  browserOpenWith: z.enum(['internal', 'system', 'custom']).default('internal'),
+  /**
    * 高危清单：命中即**硬 ask**（任何「总是允许」都压不掉）。
    *
    * 面向用户的"这个工具永远问我"请用权限规则里的 `ask`（同样是硬 ask）；
@@ -70,6 +78,7 @@ export const defaultAppConfig = (): AppConfig => ({
   workspace: null,
   appearance: { packId: 'default-dark', pack: null },
   permissionMode: 'default',
+  browserOpenWith: 'internal',
   alwaysAskTools: [],
 });
 
@@ -504,12 +513,6 @@ export type PluginsState = z.infer<typeof pluginsStateSchema>;
  * 由主进程调用；契约层只描述跨进程的数据形状与"拒绝理由"的载体。
  * ------------------------------------------------------------------ */
 
-/** 网址输入：长度设上限 —— 网址不该被拿来搬运大数据 */
-export const browserUrlSchema = z.object({
-  url: z.string().min(1).max(2048),
-});
-export type BrowserUrlPayload = z.infer<typeof browserUrlSchema>;
-
 /** 占位区位置（CSS 像素、相对渲染层视口）；上限是为了挡住畸形输入而不是限制功能 */
 export const browserBoundsSchema = z.object({
   x: z.number().int().min(0).max(20000),
@@ -533,19 +536,82 @@ export const browserStateSchema = z.object({
 });
 export type BrowserState = z.infer<typeof browserStateSchema>;
 
-/** 打开 / 导航的结果：**被拒时一定带可读理由**（同时回一份最新状态，界面不用二次查询） */
-export const browserNavResultSchema = z.union([
-  z.object({ ok: z.literal(true), state: browserStateSchema }),
-  z.object({ ok: z.literal(false), reason: z.string(), state: browserStateSchema }),
-]);
-export type BrowserNavResult = z.infer<typeof browserNavResultSchema>;
-
-/** 读正文的结果：超限截断并如实标注，绝不静默截断 */
+/**
+ * 读正文的结果：超限截断并如实标注，绝不静默截断。
+ *
+ * （旁边曾有一条 `browserNavResultSchema`：`browser:open` / `browser:navigate` 两条通道的返回形状。
+ * 三档打开方式落地后那两条通道并进了 `browser:open-with`，那个形状**只剩主进程内部用**，
+ * 于是按"不留没人引用的契约"删掉 —— 跨进程返回统一用下面的 `browserOpenWithResultSchema`。）
+ */
 export const browserTextResultSchema = z.union([
   z.object({ ok: z.literal(true), origin: z.string(), text: z.string(), truncated: z.boolean() }),
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type BrowserTextResult = z.infer<typeof browserTextResultSchema>;
+
+/* ------------------------------------------------------------------ *
+ * 「打开方式」三档（M10 收尾 · 轨道扩容计划 1 第 3 步）
+ *
+ * 目标档位与主进程 `open-with-gate.ts` 的清单**必须一一对应**：
+ * 这里多出或漏掉一档，判档那边就会"未知目标直接抛"，接线锁也会红。
+ * 网址长度上限 2048 —— 外部程序同样不该被拿来搬运大数据（原先 `browser:open` 那条也是这个上限）。
+ * ------------------------------------------------------------------ */
+
+export const browserOpenTargetSchema = z.enum(['internal', 'system', 'custom']);
+export type BrowserOpenTarget = z.infer<typeof browserOpenTargetSchema>;
+
+/** 一次"换地方打开"的请求 */
+export const browserOpenWithSchema = z
+  .object({ url: z.string().min(1).max(2048), target: browserOpenTargetSchema })
+  .strict();
+export type BrowserOpenWithPayload = z.infer<typeof browserOpenWithSchema>;
+
+/**
+ * 打开方式的结果。刻意用**一个对象形状**而不是 union：
+ * 界面只有一个"打开"按钮、三种目标，返回形状统一才好写（不用先判断该按哪种结果解析）。
+ *
+ * - `asked` = 这次**是否真的过了人手**（内置档永远 false）；
+ * - `decision` 让人看得见决定来源（`policy:allow` / `allow_once` / `allow_always` / `deny` / `timeout`）；
+ * - `state` 只有内置档会带回视图状态（交给外部程序时没有视图可报）；
+ * - `error` 是给用户读的理由，不润色成"打开失败"。
+ */
+export const browserOpenWithResultSchema = z.object({
+  ok: z.boolean(),
+  target: browserOpenTargetSchema,
+  asked: z.boolean(),
+  decision: z.string().nullable(),
+  state: browserStateSchema.nullable(),
+  error: z.string().nullable(),
+});
+export type BrowserOpenWithResult = z.infer<typeof browserOpenWithResultSchema>;
+
+/**
+ * 自选程序路径的写入请求：**只允许清空**。
+ *
+ * 设为 `strict()` 且不接 `path` 字段，是刻意的：路径只能由主进程的原生文件对话框选定
+ * （见 `BROWSER_EXE_PICK`）。若界面能直接填一个路径进来，"选程序"这一步的授权
+ * 就从"用户在本机挑了一个文件"退化成"渲染层说了算"。
+ */
+export const browserExeClearSchema = z.object({ path: z.null() }).strict();
+export type BrowserExeClearPayload = z.infer<typeof browserExeClearSchema>;
+
+/** 当前生效的自选程序路径（null = 还没选）；拒绝理由必须可读 */
+export const browserExeStateSchema = z.object({
+  path: z.string().nullable(),
+  /** 这个路径现在还能不能用（文件被删/移走时为 false，界面要如实标出来） */
+  usable: z.boolean(),
+});
+export type BrowserExeState = z.infer<typeof browserExeStateSchema>;
+
+/**
+ * 文件对话框 / 清除操作的结果。`path` 是**操作之后当前生效**的路径
+ * （取消选择、或被校验拒绝时也要如实带回原值，不能让界面以为变了）。
+ */
+export const browserExePickResultSchema = z.union([
+  z.object({ ok: z.literal(true), path: z.string().nullable(), message: z.string() }),
+  z.object({ ok: z.literal(false), path: z.string().nullable(), error: z.string() }),
+]);
+export type BrowserExePickResult = z.infer<typeof browserExePickResultSchema>;
 
 /* ------------------------------------------------------------------ *
  * 7. git 模块（M8 接线）

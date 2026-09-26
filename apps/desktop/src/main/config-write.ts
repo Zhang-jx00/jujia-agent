@@ -29,6 +29,16 @@ export const WRITABLE_CONFIG_KEYS: ReadonlyArray<keyof AppConfig> = [
   'permissionMode',
 ];
 
+/**
+ * **`browserOpenWith` 刻意不在此列**（M10 收尾）：它记的是"上次用户真的用哪一档打开了"，
+ * 由主进程在打开成功之后写入（见 `ipc/browser.ts`）。
+ * 虽然它只是下拉框的预选位置、不是授权（外发两档每次都过硬 ask），
+ * 但"界面能写安全相关字段"这个口子少开一个是一个 —— 而且省掉一次读-改-写的竞态。
+ *
+ * 与之同类的还有**自选程序的路径**：那条更直接，它决定启动哪个进程，
+ * 只能由主进程的原生文件对话框选定（见 `open-with-service.ts`）。
+ */
+
 export interface ConfigWriteDecision {
   /** 真正允许落盘的字段 */
   clean: Partial<AppConfig>;

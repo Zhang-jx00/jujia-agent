@@ -1,5 +1,5 @@
 {
-  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）。基线：本轮主提交",
+  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）。基线：本轮主提交",
   "mutations": [
     {
       "id": "M1",
@@ -128,6 +128,30 @@
       "find": "  registerGitIpc(ctx);",
       "replace": "  // 变异：忘记装配 git 模块",
       "test": "apps/desktop/src/main/ipc-wiring.test.ts"
+    },
+    {
+      "id": "M17",
+      "desc": "外发交付的硬 ask 被改成可压掉（一次「总是允许」就永久放行把任意地址交给外部程序）",
+      "file": "apps/desktop/src/main/open-with-gate.ts",
+      "find": "    return { ...gate, bypassable: false };",
+      "replace": "    return { ...gate, bypassable: true };",
+      "test": "apps/desktop/src/main/open-with-gate.test.ts"
+    },
+    {
+      "id": "M18",
+      "desc": "清除契约放宽成接受路径（渲染层又能直接指定「启动哪个程序」= 选程序的授权离开主进程对话框）",
+      "file": "packages/shared-ipc/src/contracts.ts",
+      "find": "export const browserExeClearSchema = z.object({ path: z.null() }).strict();",
+      "replace": "export const browserExeClearSchema = z.object({ path: z.string() }).strict();",
+      "test": "apps/desktop/src/main/open-with-service.test.ts"
+    },
+    {
+      "id": "M19",
+      "desc": "把「交给系统默认浏览器」降级成不问（嫌每次都弹烦 —— 本机外发动作从此静默发生）",
+      "file": "apps/desktop/src/main/open-with-gate.ts",
+      "find": "  if (target === 'internal') return 'none';",
+      "replace": "  if (target === 'internal' || target === 'system') return 'none';",
+      "test": "apps/desktop/src/main/open-with-gate.test.ts"
     }
   ]
 }

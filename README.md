@@ -101,10 +101,10 @@ npm run typecheck      # 类型检查
 npm run lint           # 静态检查
 npm run test           # 单元 + 集成测试
 npm run smoke          # 真实启动 Electron，断言 IPC 全链路 + 渲染层无 Node 泄漏
-npm run e2e            # 界面级端到端：真应用 + 真点击，20 步全自动（数据隔离到临时目录）
+npm run e2e            # 界面级端到端：真应用 + 真点击，21 步全自动（数据隔离到临时目录）
 npm run mut            # 变异测试：按 review/mutations.json 逐项改坏代码，验证测试真拦得住
 npm run check:docs     # 文档一致性：文档里的命令/链接/步数/事件数必须与代码一致
-npm run check:docs:selftest  # 检查器自检：注入 4 处漂移，证明它真的会失败（而不是永远绿）
+npm run check:docs:selftest  # 检查器自检：注入 9 处漂移，证明它真的会失败（而不是永远绿）
 npm run perf           # 启动性能预算判定（首帧 < 1000ms）
 
 npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/）
@@ -144,8 +144,8 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 | **技能（Skills）**（`SKILL.md` 渐进披露 + `load_skill` 按需加载） | ✅ |
 | **插件**（一个清单打包技能 / 命令 / MCP 服务端 / 选项；贡献物经同一套批准流程） | ✅ |
 | **生命周期钩子**（七类事件 · 默认关闭 · 可拒绝 · 有超时与输出上限） | ✅ |
-| **界面级自动化验证**（`npm run e2e` 20 步 · 变异测试 · 文档一致性检查） | ✅ |
-| **内置浏览器**（本地受控视图 · 只放 http/https · 页面不得跨站跳转 · 读正文给模型） | 🔶 **能开网页、能读正文**（M10 第 2 步）；PDF/Markdown 查看与「三档打开方式」未做 |
+| **界面级自动化验证**（`npm run e2e` 21 步 · 变异测试 · 文档一致性检查） | ✅ |
+| **内置浏览器**（本地受控视图 · 只放 http/https · 页面不得跨站跳转 · 读正文给模型） | ✅ 能开网页、能读正文；**三档打开方式已可用**：内置不问，交给系统默认浏览器或自选程序时**每次都确认**（弹窗点明"地址将离开本应用的安全边界"，自选那档还摊开是哪个程序）；自选程序只能由本机文件对话框选定、不得放在工作区内。剩：PDF/Markdown 应用内查看 |
 | 启动性能（`npm run perf`；历史采样与预算见 [`docs/PERF-BUDGET.md`](docs/PERF-BUDGET.md)） | 🔶 见该文档的"采样铁律" |
 | 定时任务（RRULE + 补跑） | ⏳ 未开始 |
 | **无限画布** / 多模态门控 | ⏳ 未开始 |
