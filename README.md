@@ -60,7 +60,7 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 | 做了什么、还差什么 | [docs/PROGRESS.md](docs/PROGRESS.md) · [CHANGELOG.md](CHANGELOG.md) |
 | 每轮复核记录（含未通过项） | [review/REVIEW-LOG.md](review/REVIEW-LOG.md) |
 | 工作怎么分类与记录（轨道计划） | [docs/TRACK-PLANS.md](docs/TRACK-PLANS.md) |
-| 开发必须遵守的工作协议（28 条，逐条有出处） | [docs/WORK-PROTOCOL.md](docs/WORK-PROTOCOL.md) |
+| 开发必须遵守的工作协议（29 条，逐条有出处） | [docs/WORK-PROTOCOL.md](docs/WORK-PROTOCOL.md) |
 | 排期、里程碑编号与修复队列（路线图） | [docs/TRACK-ROADMAP.md](docs/TRACK-ROADMAP.md) |
 | 全项目排查记录 | [review/TRACK-SWEEP-1.md](review/TRACK-SWEEP-1.md) |
 | 第三方依赖与许可证 | [docs/DEPENDENCY-LICENSES.md](docs/DEPENDENCY-LICENSES.md) |
@@ -145,7 +145,7 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 | **插件**（一个清单打包技能 / 命令 / MCP 服务端 / 选项；贡献物经同一套批准流程） | ✅ |
 | **生命周期钩子**（七类事件 · 默认关闭 · 可拒绝 · 有超时与输出上限） | ✅ |
 | **界面级自动化验证**（`npm run e2e` 21 步 · 变异测试 · 文档一致性检查） | ✅ |
-| **内置浏览器**（本地受控视图 · 只放 http/https · 页面不得跨站跳转 · 读正文给模型） | ✅ 能开网页、能读正文；**三档打开方式已可用**：内置不问，交给系统默认浏览器或自选程序时**每次都确认**（弹窗点明"地址将离开本应用的安全边界"，自选那档还摊开是哪个程序）；自选程序只能由本机文件对话框选定、不得放在工作区内。剩：PDF/Markdown 应用内查看 |
+| **内置浏览器**（本地受控视图 · 只放 http/https · 页面不得跨站跳转 · 读正文给模型） | ✅ 能开网页、能读正文；**三档打开方式已可用**：内置不问，交给系统默认浏览器或自选程序时**每次都确认**（弹窗点明"地址将离开本应用的安全边界"，自选那档还摊开是哪个程序）；自选程序只能由本机文件对话框选定、不得放在工作区内。剩**应用内文档查看**（已拍板：Markdown 先行，PDF 用 `pdfjs-dist` 且随 M19 与文件树一起做） |
 | 启动性能（`npm run perf`；历史采样与预算见 [`docs/PERF-BUDGET.md`](docs/PERF-BUDGET.md)） | 🔶 见该文档的"采样铁律" |
 | 定时任务（RRULE + 补跑） | ⏳ 未开始 |
 | **无限画布** / 多模态门控 | ⏳ 未开始 |

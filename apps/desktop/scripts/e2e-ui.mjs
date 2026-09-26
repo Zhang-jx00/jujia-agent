@@ -642,8 +642,9 @@ try {
   const exeDialog = await waitForText('用本机程序');
   if (exeDialog !== true) fail('自选程序档没有弹出能看清"交给哪个程序"的确认框', String(exeDialog).slice(0, 800));
   const dialogText = await bodyText();
-  // 只说"用本机程序打开"不够：必须把**是哪个文件**摊开给人看，否则点允许就是盲批
-  if (!dialogText.includes('curl.exe')) fail('确认框里没有点出接收方是哪个程序', dialogText.slice(0, 900));
+  // 只说"用本机程序打开"不够：必须把**那个文件的完整路径**摊开给人看，否则点允许就是盲批
+  // （批复点名要求：断言到**整条路径**，不是只断言文件名 —— 那样界面改成只显示 basename 也不会红）
+  if (!dialogText.includes(handoutExe)) fail('确认框里没有点出接收方是哪个程序', dialogText.slice(0, 900));
   await win.locator('button', { hasText: '本次会话总是允许' }).first().click();
   if (!(await waitHit(firstUrl))) fail('允许之后本机程序并没有真的收到这个地址 —— 交付其实没发生');
   await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });

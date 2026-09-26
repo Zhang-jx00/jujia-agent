@@ -161,7 +161,9 @@ describe('外部两档：问过才交出去', () => {
     const r = await h.service.openWith('custom', 'https://example.com/b');
     expect(r.ok).toBe(true);
     expect(h.launched).toEqual([`exe|${join(outsideDir, 'fake-browser.exe')}|https://example.com/b`]);
-    expect(h.dialogs[0]?.summary).toContain('fake-browser.exe');
+    // 复核 030 批复点名的那条：**完整路径**要摊在弹窗上，不是只给个文件名
+    // （与 run_command 同一条原则：审批看不到内容，就等于没有审批）
+    expect(h.dialogs[0]?.summary).toContain(join(outsideDir, 'fake-browser.exe'));
   });
 });
 
