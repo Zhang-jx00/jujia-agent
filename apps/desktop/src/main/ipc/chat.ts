@@ -1,5 +1,6 @@
 import {
   IPC,
+  chatHistoryQuerySchema,
   chatSendResultSchema,
   connectionInputSchema,
   testResultSchema,
@@ -15,7 +16,7 @@ import {
   resolveConnection,
   updateConnection,
 } from '../connections-store';
-import { getHistory, sendMessage, stopMessage } from '../chat-service';
+import { historyPage, hydrateSession, listSessions, sendMessage, stopMessage } from '../chat-service';
 import { getWorkspaceInfo } from '../workspace';
 import { summarizeCatalog } from '@jujia/agent-core';
 import type { IpcContext } from './context';
@@ -94,6 +95,10 @@ export function registerChatIpc(ctx: IpcContext): void {
     const skillCatalog = await skills.refresh(ws.valid ? ws.root : null);
     mcpDebug('[plugins] ' + plugins.summary());
     mcpDebug('[skills] ' + summarizeCatalog(skillCatalog));
+    // 重启后第一次发问：会话不在内存里就从磁盘装回来（6a 的"续上"就走这一步）
+    if (typeof sessionId === 'string' && sessionId !== '') {
+      await hydrateSession(sessionId, connectionId).catch(() => undefined);
+    }
     const result = sendMessage(
       {
         connectionId,
@@ -122,8 +127,17 @@ export function registerChatIpc(ctx: IpcContext): void {
     return stopMessage(sessionId);
   });
 
-  handle(IPC.CHAT_HISTORY, async (_e, sessionId: unknown) => {
-    if (typeof sessionId !== 'string' || sessionId === '') return [];
-    return getHistory(sessionId);
+  /** 会话清单（磁盘事实）：界面用它列出可继续的历史会话，与内存驻留与否无关 */
+  handle(IPC.CHAT_LIST, async () => listSessions());
+
+  /**
+   * 分页读历史。**盘上是事实，内存只是缓存**：会话没驻留也读得出来，
+   * 所以"重启后还能继续"这件事在 IPC 层就是可达的，不靠运气等 GC 之前的余温。
+   */
+  handle(IPC.CHAT_HISTORY, async (_e, payload: unknown) => {
+    const parsed = chatHistoryQuerySchema.safeParse(payload);
+    if (!parsed.success) return { messages: [], total: 0, hasMore: 0 };
+    const { sessionId, ...page } = parsed.data;
+    return historyPage(sessionId, page);
   });
 }

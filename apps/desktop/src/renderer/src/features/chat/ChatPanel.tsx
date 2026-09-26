@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import type { ConnectionView, StreamEvent } from '@jujia/shared-ipc';
+import type { ChatSessionMeta, ConnectionView, StreamEvent } from '@jujia/shared-ipc';
 import { createDeltaBatcher, windowedSlice } from '@jujia/shared/stream-batcher';
 import { ToolCard } from './ToolCard';
 
@@ -52,6 +52,16 @@ export function ChatPanel({ connections }: Props): ReactElement {
   const batcherRef = useRef<ReturnType<typeof createDeltaBatcher<{ messageId: string; delta: string }>> | null>(null);
   /** 长会话窗口化：默认只渲染最近 N 条，避免上万个 DOM 节点拖垮滚动 */
   const [windowSize, setWindowSize] = useState(120);
+  /**
+   * 磁盘分页游标（6a 会话持久化）。
+   * `loadedFrom` = 磁盘上还有多少条**没读进来**（也是下一次往前翻的 `before`）。
+   * 渲染层的窗口化（上面的 windowSize）管"一次挂多少 DOM"，这里管"数据从盘上取了几页"，
+   * 两层各解决一个问题：前者是浏览器卡顿，后者是内存与 IO 的规模上界。
+   */
+  const [loadedFrom, setLoadedFrom] = useState(0);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [saved, setSaved] = useState<ChatSessionMeta[]>([]);
+  const [pickId, setPickId] = useState('');
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -175,6 +185,66 @@ export function ChatPanel({ connections }: Props): ReactElement {
   /** 长列表窗口化（纯逻辑在 @jujia/shared）：只渲染末尾 N 条，避免上万个 DOM 节点拖垮滚动 */
   const windowed = windowedSlice(bubbles, windowSize);
 
+  /** 选了连接就把它名下的历史会话列出来（磁盘事实，不看内存驻留） */
+  useEffect(() => {
+    if (connectionId === '') {
+      setSaved([]);
+      return;
+    }
+    let alive = true;
+    void window.jujia
+      .chatList()
+      .then((list) => {
+        if (alive) setSaved(list.filter((s) => s.connectionId === connectionId));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [connectionId]);
+
+  function toBubbles(messages: Array<{ role: string; content: string }>): Bubble[] {
+    return messages
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m, i) => ({
+        id: `h-${String(i)}-${m.role}`,
+        role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+        content: m.content,
+      }));
+  }
+
+  /** 继续一个磁盘上的会话（6a 的"重启不丢对话"就落在这里） */
+  async function resume(id: string): Promise<void> {
+    const page = await window.jujia.chatHistory({ sessionId: id, limit: 120 });
+    setBubbles(toBubbles(page.messages));
+    setToolLines([]);
+    setSessionId(id);
+    setPickId(id);
+    setHistoryTotal(page.total);
+    setLoadedFrom(page.hasMore);
+    setNoteHint(null);
+  }
+
+  /**
+   * 往前翻：盘上还有没读进来的就先从盘读，读完了才放宽渲染窗口。
+   * 顺序反了就等于"以为翻完了"其实只是没读 —— 两层各管各的上界，别互相顶替。
+   */
+  async function loadOlder(): Promise<void> {
+    if (sessionId === undefined) {
+      setWindowSize((w) => w + 200);
+      return;
+    }
+    if (loadedFrom <= 0) {
+      setWindowSize((w) => w + 200);
+      return;
+    }
+    const before = loadedFrom;
+    const page = await window.jujia.chatHistory({ sessionId, before, limit: 120 });
+    setBubbles((prev) => [...toBubbles(page.messages), ...prev]);
+    setHistoryTotal(page.total);
+    setLoadedFrom(page.hasMore);
+  }
+
   /** 四态判定：空 / 加载 / 错误 / 成功 */
   const viewState: 'empty' | 'loading' | 'error' | 'ready' =
     bubbles.length === 0 && sending
@@ -259,7 +329,48 @@ export function ChatPanel({ connections }: Props): ReactElement {
             ))}
           </select>
         </label>
+        {saved.length > 0 && (
+          <label>
+            历史会话
+            <select
+              aria-label="继续会话"
+              value={pickId}
+              onChange={(e) => setPickId(e.target.value)}
+            >
+              <option value="">（选一个接着聊）</option>
+              {saved.slice(0, 8).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {`${s.title} · ${String(s.messageCount)} 条`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {pickId !== '' && pickId !== sessionId && (
+          <button type="button" className="w2-btn" onClick={() => void resume(pickId)}>
+            继续
+          </button>
+        )}
+        {sessionId !== undefined && (
+          <button
+            type="button"
+            className="w2-btn"
+            onClick={() => {
+              setSessionId(undefined);
+              setBubbles([]);
+              setPickId('');
+              setLoadedFrom(0);
+              setHistoryTotal(0);
+              setToolLines([]);
+            }}
+          >
+            新会话
+          </button>
+        )}
         {sessionId && <span className="p0-subtitle">会话 {sessionId.slice(0, 8)}</span>}
+        {historyTotal > 0 && (
+          <span className="p0-subtitle">{`共 ${String(historyTotal)} 条（重启后仍在磁盘上）`}</span>
+        )}
         {usage && (
           <span className="p0-subtitle">
             tokens: 入 {usage.input} / 出 {usage.output}
@@ -303,13 +414,15 @@ export function ChatPanel({ connections }: Props): ReactElement {
           ))}
         </div>
       )}
-      {windowed.hiddenCount > 0 && (
+      {(loadedFrom > 0 || windowed.hiddenCount > 0) && (
         <button
           type="button"
           className="jj-btn jj-btn-quiet jj-transition"
-          onClick={() => setWindowSize((n) => n + 200)}
+          onClick={() => void loadOlder()}
         >
-          显示更早的 {windowed.hiddenCount} 条
+          {loadedFrom > 0
+            ? `从磁盘再读 ${String(Math.min(120, loadedFrom))} 条`
+            : `显示更早的 ${windowed.hiddenCount} 条`}
         </button>
       )}
       {windowed.visible.map((b) => (

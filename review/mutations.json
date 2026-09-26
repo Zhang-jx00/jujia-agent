@@ -184,6 +184,22 @@
       "find": "  kind: 'write',",
       "replace": "  kind: 'read',",
       "test": "packages/agent-core/src/tools/builtin/note-tool.test.ts"
+    },
+    {
+      "id": "M24",
+      "desc": "会话 id 的白名单校验失效（外部输入被直接当路径拼 —— 一个 ../ 就能把会话写到数据目录之外）",
+      "file": "apps/desktop/src/main/session-store.ts",
+      "find": "  if (!SESSION_ID.test(id)) {",
+      "replace": "  if (id.length > 100000) {",
+      "test": "apps/desktop/src/main/session-store.test.ts"
+    },
+    {
+      "id": "M25",
+      "desc": "损坏行的处置反了（末行抛、中间行静默跳过 —— 悄悄丢掉用户的历史记录）",
+      "file": "apps/desktop/src/main/session-store.ts",
+      "find": "          if (!isLast) {",
+      "replace": "          if (isLast) {",
+      "test": "apps/desktop/src/main/session-store.test.ts"
     }
   ]
 }

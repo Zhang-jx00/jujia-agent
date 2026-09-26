@@ -21,6 +21,8 @@ export const IPC = {
   CHAT_SEND: 'chat:send',
   CHAT_STOP: 'chat:stop',
   CHAT_HISTORY: 'chat:history',
+  /** 会话清单（6a 持久化后才有磁盘事实可列） */
+  CHAT_LIST: 'chat:list',
   /** main → renderer：流式事件推送 */
   CHAT_STREAM: 'chat:stream',
 

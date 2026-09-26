@@ -3,8 +3,10 @@ import { z } from 'zod';
 import {
   IPC,
   appInfoSchema,
-  chatMessageSchema,
   chatSendResultSchema,
+  chatHistoryPageSchema,
+  chatHistoryQuerySchema,
+  chatSessionMetaSchema,
   configSnapshotSchema,
   connectionViewSchema,
   mcpApprovalChoiceSchema,
@@ -25,7 +27,9 @@ import {
   workspaceInfoSchema,
   type AppConfig,
   type AppInfo,
-  type ChatMessageView,
+  type ChatHistoryPage,
+  type ChatHistoryQuery,
+  type ChatSessionMeta,
   type ChatSendResult,
   type ConfigSnapshot,
   type ConnectionInput,
@@ -139,10 +143,16 @@ const api = {
     return z.boolean().parse(await ipcRenderer.invoke(IPC.CHAT_STOP, sessionId));
   },
 
-  async chatHistory(sessionId: string): Promise<ChatMessageView[]> {
-    return z
-      .array(chatMessageSchema)
-      .parse(await ipcRenderer.invoke(IPC.CHAT_HISTORY, sessionId));
+  /** 分页读历史（6a）：返回这一页 + 总数 + 还剩多少条可往前翻 */
+  async chatHistory(query: ChatHistoryQuery): Promise<ChatHistoryPage> {
+    return chatHistoryPageSchema.parse(
+      await ipcRenderer.invoke(IPC.CHAT_HISTORY, chatHistoryQuerySchema.parse(query)),
+    );
+  },
+
+  /** 磁盘上有哪些会话（重启后能续哪个，就靠它） */
+  async chatList(): Promise<ChatSessionMeta[]> {
+    return z.array(chatSessionMetaSchema).parse(await ipcRenderer.invoke(IPC.CHAT_LIST));
   },
 
   /* ---------------------- W3：工作区与工具 ---------------------- */

@@ -18,6 +18,13 @@ import {
 import type { StreamEvent } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
 import { needsEviction, pickEvictionCandidate } from './session-lru';
+import {
+  createFileSessionStore,
+  toStoredMessage,
+  type SessionMeta,
+  type SessionStore,
+  type StoredRole,
+} from './session-store';
 
 /**
  * 基础人格。**注意**：项目指令与长期记忆不写死在这里，而是每次发送时按工作区动态装配
@@ -53,6 +60,10 @@ interface Session {
   alwaysAllow: Set<string>;
   /** 最近一次使用时间（用于淘汰最久未用的会话） */
   lastUsedAt: number;
+  /** 建会话的时刻（ISO），进元信息 */
+  createdAt: string;
+  /** 已经落盘的消息条数（不含 system）—— 下一次只追加这个刻度之后的部分 */
+  persistedCount: number;
 }
 
 const sessions = new Map<string, Session>();
@@ -66,6 +77,66 @@ const sessions = new Map<string, Session>();
  */
 const MAX_SESSIONS = 20;
 
+/**
+ * 会话存储（6a）。**进程级单例 + 懒建**：`getDataRoot()` 要用 electron 的 userData 路径，
+ * 在模块加载期调它会让这一层没法被纯单测使用；放到第一次真正要写盘时再取。
+ */
+let storeRef: SessionStore | null = null;
+
+function store(): SessionStore {
+  if (storeRef === null) storeRef = createFileSessionStore();
+  return storeRef;
+}
+
+/** 测试注入（含传 null 恢复"第一次用时再建"的行为） */
+export function __setSessionStoreForTests(injected: SessionStore | null): void {
+  storeRef = injected;
+}
+
+/** 会进磁盘的部分：system 那条**不存** —— 它是每轮重新装配的产物，存下来只会在模型换版后留下旧副本 */
+function persistable(s: Session): Session['messages'] {
+  return s.messages.filter((m) => m.role !== 'system');
+}
+
+function metaOf(s: Session, messageCount: number): SessionMeta {
+  const firstUser = persistable(s).find((m) => m.role === 'user');
+  return {
+    id: s.id,
+    connectionId: s.connectionId,
+    title: (firstUser?.content ?? '（无标题）').slice(0, 40),
+    createdAt: s.createdAt,
+    lastUsedAt: new Date(s.lastUsedAt).toISOString(),
+    messageCount,
+    compactedThrough: 0,
+  };
+}
+
+/**
+ * 把本轮新增的消息追加落盘。**只追加完整行**，所以进程中途死最多丢最后一条。
+ * 失败不静默：console.warn 报出来（丢历史是可感知的事实，不能假装写成功）。
+ */
+async function flushSession(s: Session): Promise<void> {
+  const all = persistable(s);
+  const fresh = all.slice(s.persistedCount);
+  if (fresh.length === 0) return;
+  try {
+    await store().record(
+      metaOf(s, all.length),
+      fresh.map((m) =>
+        toStoredMessage(m.role as StoredRole, m.content, new Date(), {
+          ...(m.toolCallId !== undefined ? { toolCallId: m.toolCallId } : {}),
+          ...(m.toolCalls !== undefined
+            ? { toolCalls: m.toolCalls.map((c) => ({ id: c.id, name: c.name, argumentsText: c.argumentsText })) }
+            : {}),
+        }),
+      ),
+    );
+    s.persistedCount = all.length;
+  } catch (err) {
+    console.warn(`[chat] 会话 ${s.id.slice(0, 8)} 的历史没写进去：`, err);
+  }
+}
+
 /** 淘汰最久未使用的会话；正在运行的不动（避免把用户正在等的对话删掉） */
 function evictOldSessions(): void {
   // 一次可能清掉多个（例如把上限调小之后），循环直到不需要淘汰为止
@@ -73,9 +144,13 @@ function evictOldSessions(): void {
     if (!needsEviction(sessions.size, MAX_SESSIONS)) return;
     const victim = pickEvictionCandidate([...sessions.values()], MAX_SESSIONS);
     if (victim === null) return; // 全都在运行 → 暂不淘汰
+    const doomed = sessions.get(victim);
     sessions.delete(victim);
+    // 6a 起"淘汰 = 从内存卸载"，磁盘上那份还在 —— 运行中的会话由 pickEvictionCandidate 排除在外，
+    // 这里再兜一次：真被删掉的这个如果还在写，就把已落盘的部分保住，不动进行中的那一轮
+    if (doomed !== undefined && !doomed.running) void flushSession(doomed);
     console.warn(
-      `[chat] 会话数达到上限 ${MAX_SESSIONS}，已释放最久未使用的会话（会话历史在内存中，属既定设计，见 README）`,
+      `[chat] 会话数达到上限 ${MAX_SESSIONS}，已从内存卸载最久未使用的会话（历史已落盘，重启后仍可继续）`,
     );
   }
 }
@@ -92,10 +167,13 @@ export function __sessionCount(): number {
 
 function buildSession(connectionId: string): Session {
   evictOldSessions();
+  const now = new Date().toISOString();
   const session: Session = {
     id: randomUUID(),
     connectionId,
     messages: [{ role: 'system', content: BASE_PROMPT }],
+    createdAt: now,
+    persistedCount: 0,
     startedHookFired: false,
     controller: null,
     running: false,
@@ -108,6 +186,65 @@ function buildSession(connectionId: string): Session {
 
 export function getHistory(sessionId: string): ChatMessage[] {
   return sessions.get(sessionId)?.messages ?? [];
+}
+
+/** 界面用的会话清单（磁盘事实，不看内存驻留与否） */
+export async function listSessions(): Promise<Awaited<ReturnType<SessionStore['list']>>> {
+  return store().list();
+}
+
+/**
+ * 把磁盘上的会话装回内存（重启后续聊的关键一步）。
+ * 返回 false 表示已在内存或没有这个会话，调用方按现有路径走即可。
+ */
+export async function hydrateSession(sessionId: string, connectionId: string): Promise<boolean> {
+  if (sessions.has(sessionId)) return false;
+  const loaded = await store().load(sessionId);
+  const now = new Date().toISOString();
+  const session: Session = {
+    id: sessionId,
+    connectionId,
+    // system 那条不落盘，回来时重新装配 —— 每轮发送前本来也会按工作区覆盖它
+    messages: [{ role: 'system', content: BASE_PROMPT }],
+    createdAt: now,
+    persistedCount: loaded.messages.length,
+    startedHookFired: true,
+    controller: null,
+    running: false,
+    alwaysAllow: new Set<string>(),
+    lastUsedAt: Date.now(),
+  };
+  for (const m of loaded.messages) {
+    session.messages.push({
+      role: m.role,
+      content: m.content,
+      ...(m.toolCallId !== undefined ? { toolCallId: m.toolCallId } : {}),
+      ...(m.toolCalls !== undefined
+        ? { toolCalls: m.toolCalls.map((c) => ({ id: c.id, name: c.name, argumentsText: c.argumentsText })) }
+        : {}),
+    });
+  }
+  evictOldSessions();
+  sessions.set(sessionId, session);
+  return true;
+}
+
+/**
+ * 按盘分页读历史（6a 的第二半：分页窗口不再是前端数组切片的专利）。
+ * `before` 是"从第几条往前取"的下标，缺省取最新的一页。
+ */
+export async function historyPage(
+  sessionId: string,
+  opts: { limit?: number | undefined; before?: number | undefined } = {},
+): Promise<{ messages: ChatMessage[]; total: number; hasMore: number }> {
+  const limit = Math.min(Math.max(opts.limit ?? 120, 1), 400);
+  const resident = sessions.get(sessionId);
+  const all = resident
+    ? resident.messages
+    : (await store().load(sessionId)).messages.map((m) => ({ role: m.role, content: m.content }));
+  const end = Math.min(opts.before ?? all.length, all.length);
+  const start = Math.max(end - limit, 0);
+  return { messages: all.slice(start, end), total: all.length, hasMore: start };
 }
 
 export function isRunning(sessionId: string): boolean {
@@ -316,6 +453,9 @@ export function sendMessage(
     } finally {
       session.running = false;
       session.controller = null;
+      // **落盘点在轮次结束处**，不是每条 token：中途写会把半截回答留在盘上，
+      // 也让一次长回答产生成百上千次 IO
+      await flushSession(session);
       emit({ type: 'done', sessionId: session.id, reason: resolved });
     }
   })();

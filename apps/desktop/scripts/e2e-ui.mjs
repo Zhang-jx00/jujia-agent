@@ -113,6 +113,67 @@ if (handoutExeReady) {
   );
 }
 
+/**
+ * 预置"上一个进程留下的东西"（6a 会话持久化的被测前提）：
+ * 一条连接 + 一个已经写了几轮对话的会话目录。
+ * 会话 id 用符合白名单的 uuid 形态；文件按真实格式写（JsonStore 的信封 + JSONL 一行一条），
+ * 于是"重启后还在"这一条问的是**应用真的能读盘**，不是它自己刚写的内存。
+ */
+const seededConnId = 'e2e-conn-1';
+writeFileSync(
+  join(dataDir, 'connections.json'),
+  JSON.stringify({
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    data: {
+      connections: [
+        {
+          id: seededConnId,
+          name: 'e2e 假连接',
+          baseUrl: 'http://127.0.0.1:9/v1',
+          apiFormat: 'openai-compatible',
+          model: 'e2e-model',
+          // 真实落盘形态：密钥是 protect 后的结构或 null，这里给 null —— 本步骤永不发问，
+          // 只要 CONNECTION_LIST 能安全映射它（少了这个字段，读盘就会炸成"一个连接都没有"）
+          secret: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+    },
+  }),
+  'utf8',
+);
+const seededSession = 'e2e00000-0000-4000-8000-000000000000';
+mkdirSync(join(dataDir, 'sessions', seededSession), { recursive: true });
+writeFileSync(
+  join(dataDir, 'sessions', seededSession, 'messages.jsonl'),
+  [
+    { v: 1, t: '2026-09-26T09:00:00.000Z', role: 'user', content: 'E2E_PERSIST_问一：这个项目叫什么' },
+    { v: 1, t: '2026-09-26T09:00:05.000Z', role: 'assistant', content: 'E2E_PERSIST_答一：叫俱佳Agent' },
+    { v: 1, t: '2026-09-26T09:01:00.000Z', role: 'user', content: 'E2E_PERSIST_问二：记住这一点用' },
+    { v: 1, t: '2026-09-26T09:01:07.000Z', role: 'assistant', content: 'E2E_PERSIST_答二：好的，已记下这条要点' },
+  ].map((m) => JSON.stringify(m)).join('\n') + '\n',
+  'utf8',
+);
+writeFileSync(
+  join(dataDir, 'sessions', seededSession, 'session.meta.json'),
+  JSON.stringify({
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    data: {
+      id: seededSession,
+      connectionId: seededConnId,
+      title: 'E2E_PERSIST_问一',
+      createdAt: '2026-09-26T09:00:00.000Z',
+      lastUsedAt: '2026-09-26T09:01:07.000Z',
+      messageCount: 4,
+      compactedThrough: 0,
+    },
+  }),
+  'utf8',
+);
+
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE; // 不清掉它 Electron 会退化成纯 Node
 env.JUJIA_DATA_BASE_DIR = dataDir;
@@ -830,6 +891,71 @@ try {
   const stillDetached = (await win.locator('[role="dialog"][aria-label="权限请求"]').count()) === 0;
   if (!stillDetached) fail('非法输入也弹了确认框 —— 校验失败不该先问人');
   ok('非法输入先拒、不打扰：没弹窗也不落盘');
+
+  /* ---------------- 会话持久化（6a）：从磁盘续上，并补上欠的按钮点击 ----------------
+   *
+   * 这一步同时做三件事：
+   * ① 证明"上一个进程留下的会话文件"能被本进程读出来（不是靠内存余温）；
+   * ② 复核 032 的 Q-6 欠的账在这里还 ——「记住这一点」按钮**真的被点了一次**；
+   * ③ 关掉再重开：进程死了历史还在，且能再次读回同样内容（"重启不丢对话"的字面验证）。
+   */
+  step('会话持久化：从磁盘续上历史、真的点「记住这一点」、关掉重开之后历史仍在');
+  await tabButton('对话').click();
+  const connSelect = win.locator('select').first();
+  await connSelect.selectOption(seededConnId);
+  const historyPicker = await waitForText('历史会话');
+  if (historyPicker !== true) fail('选了连接之后没有列出磁盘上的历史会话', String(historyPicker).slice(0, 600));
+  await win.locator('select[aria-label="继续会话"]').selectOption(seededSession);
+  await win.locator('button', { hasText: '继续' }).first().click();
+  const resumed = await waitForText('E2E_PERSIST_答一');
+  if (resumed !== true) fail('继续会话没有把那几轮读回界面', String(resumed).slice(0, 800));
+  const totalShown = await bodyText();
+  if (!totalShown.includes('共 4 条')) fail('没有如实报告这个会话共几条消息', totalShown.slice(0, 900));
+  ok('从磁盘续上：四条历史消息回到界面，条数如实标注');
+
+  /** Q-6 还账：这是按钮第一次在界面级被点到（写长期记忆 = 写类操作，照样要过确认） */
+  const notesBefore = existsSync(notesFile) ? readFileSync(notesFile, 'utf8') : '';
+  await win.locator('button', { hasText: '记住这一点' }).first().click();
+  const noteDialog = await waitForText('需要你确认：');
+  if (noteDialog !== true) fail('点「记住这一点」没有过权限门（写类必须问人）', String(noteDialog).slice(0, 600));
+  await win.locator('button', { hasText: '允许一次' }).first().click();
+  await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
+  const notesAfter = readFileSync(notesFile, 'utf8');
+  if (notesAfter.length <= notesBefore.length) fail('点了按钮也允许了，NOTES.md 却没多出行');
+  if (!notesAfter.includes('E2E_PERSIST_答一')) fail('记下的不是被点那条回答的内容', notesAfter.slice(-400));
+  ok('按钮真的点了一次：问过之后，那条回答进了 NOTES.md');
+
+  // 关掉进程再重开：磁盘是事实，内存只是缓存。
+  // 注意：前面那些 helper（waitForText / bodyText）闭包在旧窗口上，重开之后一律用 win2。
+  await app.close();
+  app = undefined;
+  app = await electron.launch({
+    executablePath: electronPath,
+    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`],
+    env,
+  });
+  const win2 = await app.firstWindow();
+  await win2.waitForSelector('body', { timeout: 15_000 });
+  const direct = await win2.evaluate(async (id) => {
+    const page = await window.jujia.chatHistory({ sessionId: id, limit: 120 });
+    return { total: page.total, first: page.messages[0]?.content ?? '(空)', hasMore: page.hasMore };
+  }, seededSession);
+  if (direct.total !== 4) fail(`重启后读到的条数不是 4（实际 ${String(direct.total)}）`, JSON.stringify(direct));
+  if (!direct.first.includes('E2E_PERSIST_问一')) fail('重启后第一条不是原来那句提问', JSON.stringify(direct));
+  /**
+   * 清单文件此刻**还不存在**：本次运行只读不写（没有真正发问，也就没有新会话要落盘）。
+   * 所以这里验的不是"index.json 一定在"，而是"没有缓存也能从目录重建" ——
+   * 清单只是缓存，目录才是事实。这条恰好也覆盖了"用户手动删掉 index.json"的情况。
+   */
+  if (existsSync(join(dataDir, 'sessions', 'index.json'))) {
+    fail('本轮没有任何写入，却生成了会话清单缓存（清单是写出来的，不是读出来的）');
+  }
+  const listed = await win2.evaluate(async () => await window.jujia.chatList());
+  if (!Array.isArray(listed) || listed.length === 0) {
+    fail('清单重建失败：chatList() 在 index.json 缺失时列不出磁盘上的会话', JSON.stringify(listed).slice(0, 400));
+  }
+  if (!listed.some((s) => s.id === seededSession)) fail('重建的清单里没有那个会话目录', JSON.stringify(listed).slice(0, 400));
+  ok('进程死过一次之后：仍是那 4 条，清单缺失也能从目录重建 —— 重启不丢对话');
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();

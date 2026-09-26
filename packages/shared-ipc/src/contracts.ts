@@ -195,12 +195,45 @@ export const chatSendResultSchema = z.object({
 });
 export type ChatSendResult = z.infer<typeof chatSendResultSchema>;
 
-/** 会话历史里的一条消息（渲染层回显用） */
+/** 会话历史里的一条消息（渲染层回显用）。`tool` 也要能回显：工具轨迹是历史的一部分 */
 export const chatMessageSchema = z.object({
-  role: z.enum(['system', 'user', 'assistant']),
+  role: z.enum(['system', 'user', 'assistant', 'tool']),
   content: z.string(),
 });
 export type ChatMessageView = z.infer<typeof chatMessageSchema>;
+
+/**
+ * 分页读历史（6a）。`before` 是"取到第几条为止"的下标，缺省取最新一页；
+ * `hasMore` 返回还剩多少条 —— 界面据此说"显示更早的 N 条"，而不是自己数数组长度猜。
+ */
+export const chatHistoryQuerySchema = z
+  .object({
+    sessionId: z.string().min(1).max(64),
+    limit: z.number().int().positive().max(400).optional(),
+    before: z.number().int().min(0).optional(),
+  })
+  .strict();
+export type ChatHistoryQuery = z.infer<typeof chatHistoryQuerySchema>;
+
+export const chatHistoryPageSchema = z.object({
+  messages: z.array(chatMessageSchema),
+  total: z.number().int().nonnegative(),
+  hasMore: z.number().int().nonnegative(),
+});
+export type ChatHistoryPage = z.infer<typeof chatHistoryPageSchema>;
+
+/** 会话清单一行（磁盘事实；title 是首条用户消息的截断，不含全文） */
+export const chatSessionMetaSchema = z.object({
+  id: z.string(),
+  connectionId: z.string(),
+  title: z.string(),
+  createdAt: z.string(),
+  lastUsedAt: z.string(),
+  messageCount: z.number().int().nonnegative(),
+  /** 6b 才写；6a 恒为 0，字段先立住免得下次改数据格式 */
+  compactedThrough: z.number().int().nonnegative(),
+});
+export type ChatSessionMeta = z.infer<typeof chatSessionMetaSchema>;
 
 /* ------------------------------------------------------------------ *
  * W3：工作区与权限审批
