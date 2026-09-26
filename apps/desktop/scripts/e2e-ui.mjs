@@ -678,6 +678,106 @@ try {
   server.close();
   otherSite.close();
 
+  /* ---------------- 应用内文档查看（M10 收尾 · Markdown） ----------------
+   *
+   * 真值不是"界面上出现了标题"，而是**结构真的被解析过、而且原始 HTML 真的没被解释**：
+   *  - 文档正文里不该出现任何 `img` 元素（那行 `<img onerror=...>` 只该是字面文本）；
+   *  - 不该出现 `href` 以 javascript: 开头的可点元素；
+   *  - 长文档只挂载前若干段，剩下的要点下去才铺开。
+   */
+  const docFile = '查看测试.md';
+  const docBody = [
+    '---',
+    'title: 元信息',
+    'tags: [查看测试]',
+    '---',
+    '',
+    '# 标题一 只在解析后出现',
+    '',
+    '- 列表甲',
+    '- 列表乙',
+    '',
+    '```html',
+    '<b>围栏里的标签</b>',
+    '```',
+    '',
+    '<img src=x onerror=alert(1)>',
+    '',
+    '[正常链接](https://example.com) 与 [坑链接](javascript:alert(1))',
+    '',
+    '段落一',
+    '段落二',
+    '',
+  ].join('\n') + Array.from({ length: 300 }, (_, k) => `分块验证第 ${String(k)} 段`).join('\n\n');
+  writeFileSync(join(wsDir, docFile), docBody, 'utf8');
+
+  step('应用内文档查看：Markdown 真解析、原始 HTML 真不解释、长文档真分块');
+  await tabButton('文档').click();
+  const docsReady = await waitForText('还没打开文档');
+  if (docsReady !== true) fail('文档页签没有渲染出来', String(docsReady).slice(0, 600));
+
+  const docPathBox = win.locator('input[aria-label="文档路径"]');
+  await docPathBox.fill(docFile);
+  await win.locator('button', { hasText: '打开' }).first().click();
+  // 锚点在本步之前不存在：这一句只有解析成标题元素才可能出现
+  const headingShown = await waitForText('标题一 只在解析后出现');
+  if (headingShown !== true) fail('文档没有打开或标题没渲染出来', String(headingShown).slice(0, 800));
+  if ((await win.locator('.jj-md-h', { hasText: '标题一 只在解析后出现' }).count()) === 0) {
+    fail('标题没被解析成标题元素（看起来还是纯文本）');
+  }
+  const docText = await bodyText();
+  if (docText.includes('# 标题一')) fail('正文里还留着 Markdown 标记，说明没解析');
+  if (!docText.includes('已折叠文件头部的 2 行元信息')) fail('front matter 没被折叠');
+  if ((await win.locator('[role="dialog"][aria-label="权限请求"]').count()) > 0) {
+    fail('只读地打开一个文档竟然弹了确认框（read 类不该打扰）');
+  }
+  ok('Markdown 真被解析：标题成元素、front matter 折叠、只读不打扰');
+
+  /** 安全真值：第三方文件里的 HTML 与 javascript: 链接都不该变成真的 DOM */
+  if ((await win.locator('.jj-docs-body img').count()) !== 0) {
+    fail('文档里的原始 img 标签被解释成了元素（HTML 不该被解释）');
+  }
+  if ((await win.locator('.jj-docs-body a[href^="javascript:"]').count()) !== 0) {
+    fail('javascript: 链接变成了可点元素（协议白名单没生效）');
+  }
+  const guardText = await bodyText();
+  if (!guardText.includes('<img src=x onerror')) fail('那行 HTML 没有按字面显示出来（既不解释也不可见）');
+  if (!guardText.includes('不提供跳转')) fail('被拦下的链接没有说明为什么不给点');
+  if ((await win.locator('.jj-docs-body pre code', { hasText: '<b>围栏里的标签</b>' }).count()) === 0) {
+    fail('围栏代码块里的标签没有被原样保留');
+  }
+  ok('原始 HTML 与危险链接都没有变成 DOM，且理由可见');
+
+  // 分块挂载：**默认只铺前 240 段**。真值是"没点之前那一段确实不在 DOM 里"，
+  // 而不是"界面上有一行说还剩多少"（那行字自己也能是假的）。
+  const chunked = await waitForText('已显示前');
+  if (chunked !== true) fail('长文档没有分块挂载（界面没显示还剩多少段）');
+  const beforeMore = await bodyText();
+  if (beforeMore.includes('分块验证第 260 段')) fail('还没点继续加载，后面的段落就已经铺开了（分块是假的）');
+  await win.locator('button', { hasText: '继续加载' }).first().click();
+  const afterMore = await bodyText();
+  if (!afterMore.includes('分块验证第 299 段')) fail('继续加载没有把后面的段落铺开', afterMore.slice(-400));
+  if (!afterMore.includes('已全部显示')) fail('铺完之后没有如实说明共多少段（整行消失会让人以为文档就这么短）');
+  if ((await win.locator('button', { hasText: '继续加载' }).count()) > 0) {
+    fail('已经全部展开了，还在提示继续加载');
+  }
+  // 重开一次应当回到分块起点（"全部展开"不能是单向门）
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const reopened = await waitForText('已显示前');
+  if (reopened !== true) fail('重新打开后没有回到分块挂载的起点', String(reopened).slice(0, 600));
+  if ((await bodyText()).includes('分块验证第 299 段')) fail('重新打开后仍带着上一次的全部展开');
+  await win.locator('button', { hasText: '全部展开' }).first().click();
+  const afterAll = await bodyText();
+  if (!afterAll.includes('分块验证第 299 段')) fail('全部展开后仍缺尾部段落');
+  ok('长文档真分块：没点之前那段不在 DOM 里；铺开与收起都如实收口');
+
+  // 越界路径：守卫拒绝，理由显示在界面上
+  await docPathBox.fill('../逃逸.md');
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const escaped = await waitForText('没读到');
+  if (escaped !== true) fail('越出工作区的路径没有被拒绝', String(escaped).slice(0, 600));
+  ok('越界路径被守卫拒绝，理由显示在界面上');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;

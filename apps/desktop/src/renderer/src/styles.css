@@ -1295,3 +1295,86 @@ html[data-jj-bg-kind='glass'] .app-shell {
   font-size: 13px;
   resize: vertical;
 }
+
+/* 应用内文档查看（M10 收尾 · Markdown）。
+   版式刻意保持朴素：这一块显示的是**第三方文件内容**，样式只负责可读，
+   不做任何"按内容决定布局"的花活（避免一份恶意文档把界面撑坏）。 */
+.jj-docs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-lg) var(--space-xl);
+  min-height: 0;
+  height: 100%;
+}
+
+.jj-docs-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.jj-docs-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  font-size: 14px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.jj-md > * + * {
+  margin-top: 8px;
+}
+
+.jj-md-h {
+  line-height: 1.35;
+}
+
+.jj-md-pre {
+  background: #101010;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.jj-md-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.jj-md-table th,
+.jj-md-table td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+/* 原文照抄显示：这是"HTML 不被解释"的可见证据 */
+.jj-md-raw,
+.jj-md-img,
+.jj-md-blocked-link {
+  color: var(--text-dim);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.jj-md-note {
+  color: var(--text-dim);
+  margin-left: 4px;
+}
+
+.jj-md-lang {
+  float: right;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.jj-md-hr {
+  border: none;
+  border-top: 1px solid var(--border);
+}
+

@@ -1,5 +1,5 @@
 {
-  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）。基线：本轮主提交",
+  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）；M20–M21 来自扩容 3（文档查看：innerHTML 不许回来 / 链接协议白名单不许放宽）。基线：本轮主提交",
   "mutations": [
     {
       "id": "M1",
@@ -152,6 +152,22 @@
       "find": "  if (target === 'internal') return 'none';",
       "replace": "  if (target === 'internal' || target === 'system') return 'none';",
       "test": "apps/desktop/src/main/open-with-gate.test.ts"
+    },
+    {
+      "id": "M20",
+      "desc": "文档渲染改回 innerHTML（第三方 .md 内容里的原始 HTML 从此被解释 —— 渲染层手里有整套 IPC 能力）",
+      "file": "apps/desktop/src/renderer/src/markdown/MarkdownView.tsx",
+      "find": "          return <p key={at}>{renderInline(block.v, at, onOpenLink)}</p>;",
+      "replace": "          return <p key={at} dangerouslySetInnerHTML={{ __html: '' }} />;",
+      "test": "apps/desktop/src/main/docs-wiring.test.ts"
+    },
+    {
+      "id": "M21",
+      "desc": "链接协议判定放宽成一律放行（文档里的 javascript: 与 file: 变成可点元素）",
+      "file": "apps/desktop/src/renderer/src/markdown/parse.ts",
+      "find": "    return u.protocol === 'http:' || u.protocol === 'https:';",
+      "replace": "    return u.protocol !== 'about:';",
+      "test": "apps/desktop/src/renderer/src/markdown/parse.test.ts"
     }
   ]
 }
