@@ -280,9 +280,9 @@ describe('内置文件工具', () => {
 });
 
 describe('注册表', () => {
-  it('默认注册表 = 三个文件工具 + 一个执行工具（清单变了这条就该红，逼着登记）', () => {
+  it('默认注册表 = 三个文件工具 + 一个执行工具 + 一个记忆写入工具（清单变了这条就该红，逼着登记）', () => {
     const registry = createDefaultRegistry();
-    expect(registry.names()).toEqual(['list_dir', 'read_file', 'run_command', 'write_file']);
+    expect(registry.names()).toEqual(['append_note', 'list_dir', 'read_file', 'run_command', 'write_file']);
     // 执行工具必须是 exec 类：这是"每次硬 ask、总是允许压不掉"的唯一依据
     expect(registry.get('run_command').kind).toBe('exec');
   });

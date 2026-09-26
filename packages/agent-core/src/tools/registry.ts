@@ -1,5 +1,6 @@
 import { FILE_TOOLS } from './builtin/file-tools';
 import { EXEC_TOOLS } from './builtin/exec-tool';
+import { NOTE_TOOLS } from './builtin/note-tool';
 import type { StoredTool } from './types';
 
 /**
@@ -75,5 +76,5 @@ export class ToolRegistry {
  * 这一条由 `exec-tool.test.ts` 与变异 M13 共同钉住。
  */
 export function createDefaultRegistry(): ToolRegistry {
-  return new ToolRegistry([...FILE_TOOLS, ...EXEC_TOOLS]);
+  return new ToolRegistry([...FILE_TOOLS, ...EXEC_TOOLS, ...NOTE_TOOLS]);
 }

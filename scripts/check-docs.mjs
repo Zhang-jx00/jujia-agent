@@ -481,6 +481,7 @@ const walkLiveFiles = (exts) => {
   const TOOL_SOURCES = [
     'packages/agent-core/src/tools/builtin/file-tools.ts',
     'packages/agent-core/src/tools/builtin/exec-tool.ts',
+    'packages/agent-core/src/tools/builtin/note-tool.ts',
     'packages/agent-core/src/skills/tool.ts',
     'packages/agent-core/src/loop/agent-loop.ts',
   ];

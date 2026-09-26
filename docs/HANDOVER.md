@@ -139,7 +139,7 @@
 ### 2.6 记忆与上下文（M6）🔶 部分
 
 - 已做：工作区 `AGENTS.md` 项目指令 + `.jujia/NOTES.md` 长期记忆的**读取与装配**（`packages/agent-core/src/memory/memory.ts`）。
-- **未接线**：`appendNote` / `projectContextHints`（见 §3.4 R-04 相关说明）。
+- **未接线**：`projectContextHints`（`appendNote` 已于 `v0.37.0-铺设10` 接通）。
 - 会话历史**仅内存**（重启即丢，**这是刻意的、README 已如实标注**）；`chat-service.ts` 有 **LRU 上限 20**（`session-lru.ts` 纯函数 + 7 例测试）。
 
 ### 2.7 扩展生态（M7）🔶 大部分完成
@@ -248,7 +248,7 @@
 | M11 多模态 | capability registry、视频生成任务 | ⏳ 未开始 |
 | M14 / M17 | 多子 agent 编排 / 长任务断点续跑 | ⏳ 未开始 |
 | M19–M22 | 轻量 IDE / 远程接入 / 云 worker / 调度 | ⏳ 未开始（**先解决与"数据不出本机"定位的冲突**，见 §5.8） |
-| M6 写入侧 | `memory.ts appendNote` 接线（会话结束时写长期记忆） | ⏳ 未接线 |
+| ~~M6 写入侧~~ | **已交付（`v0.37.0-铺设10`）**：`append_note` 工具（写类 + 写前守卫 + 只由人显式点）；`appendNote` 内部也加了守卫 | ✅ 达成（自动摘要写入仍待 compact） |
 | M7 定时任务 | RRULE + 补跑 | ⏳ 未开始 |
 | **M8 git（整个模块）** | status/diff/log/stage/unstage/commit 已实现且有测试，`v0.32.0-铺设9` **已接线**：6 条 `GIT_*` 通道 + `git-gate.ts` 判档 + `git-service.ts` + Git 页签 | ✅ **已接线**（读侧放行、写侧软 ask、`commit` 硬 ask，三重保险各有变异）；**剩余**：`push` / 分支 / stash / 冲突 / 逐行 diff |
 | **内置 exec 工具** | 让模型能自主执行命令（`run_command`），**一律硬 ask** | ✅ **`v0.33.0-铺设8` 已交付**（每次确认 + 工作目录守卫 + 环境脱敏 + 超时与输出上限；变异 M13–M15 各咬一重） |

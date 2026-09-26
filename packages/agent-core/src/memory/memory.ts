@@ -1,5 +1,6 @@
 import { readFile, readdir, appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { join, relative, sep, dirname } from 'node:path';
+import { guardPath } from '../tools/path-guard';
 
 /**
  * 记忆模块（W8）。
@@ -155,7 +156,14 @@ export async function loadNotes(
   return { text, lines: lines.length, bytes: Buffer.byteLength(text, 'utf8'), trimmed };
 }
 
-/** 会话结束时追加一条带日期的记忆（append-only；reservedLines 供文件头注释用） */
+/**
+ * 追加一条带日期的记忆（append-only）。
+ *
+ * **写入前先过路径守卫**（M6 接线时补的）：目标虽然是模块自己拼出来的 `.jujia/NOTES.md`，
+ * 但"工作区根"是外部输入，而且符号链接 / junction 能让一个看起来在工作区内的路径
+ * 实际落到外面 —— 长期记忆是一份会被反复注入给模型的文件，绝不能变成"任意路径写盘"的口子。
+ * 越界一律抛 `ToolError('path_denied')`，调用方（工具执行器）把它当成一次失败的写入报给用户。
+ */
 export async function appendNote(
   workspaceRoot: string,
   summary: string,
@@ -164,7 +172,7 @@ export async function appendNote(
   const clean = summary.replace(/\s+/g, ' ').trim();
   if (clean === '') return false;
   const day = now.toISOString().slice(0, 10);
-  const path = notesPath(workspaceRoot);
+  const path = await guardPath(workspaceRoot, join(NOTES_DIR, NOTES_FILE));
   await mkdir(dirname(path), { recursive: true });
   const header = '<!-- 俱佳Agent 长期记忆：append-only，带日期；超出上限丢最旧 -->\n';
   const existed = await readFile(path, 'utf8').catch(() => null);

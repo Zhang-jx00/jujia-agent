@@ -45,6 +45,9 @@ export function ChatPanel({ connections }: Props): ReactElement {
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
   const [toolLines, setToolLines] = useState<ToolLine[]>([]);
   const [lastError, setLastError] = useState<string | null>(null);
+  /** 长期记忆写入的进行中与回执（只由用户点「记住这一点」触发） */
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteHint, setNoteHint] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   /** delta 合批（纯逻辑在 @jujia/shared/stream-batcher，可单测与变异测试） */
   const batcherRef = useRef<ReturnType<typeof createDeltaBatcher<{ messageId: string; delta: string }>> | null>(null);
   /** 长会话窗口化：默认只渲染最近 N 条，避免上万个 DOM 节点拖垮滚动 */
@@ -224,6 +227,24 @@ export function ChatPanel({ connections }: Props): ReactElement {
     await window.jujia.chatStop(sessionId);
   }
 
+  /**
+   * 把这条回答记进长期记忆 —— **唯一**的写入入口，由人显式点。
+   * 走 `append_note` 工具（而不是另开一条"记忆通道"）：权限门、路径守卫、弹窗摘要与审计
+   * 都已经在工具执行器里实现并测过，第二套口径迟早会漂。
+   */
+  async function remember(text: string): Promise<void> {
+    setNoteBusy(true);
+    setNoteHint(null);
+    try {
+      const result = await window.jujia.toolRun('append_note', { text: text.slice(0, 500) });
+      setNoteHint({ kind: result.ok ? 'ok' : 'err', text: result.content });
+    } catch (err) {
+      setNoteHint({ kind: 'err', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setNoteBusy(false);
+    }
+  }
+
   return (
     <div className="w2-chat">
       <div className="w2-chat-toolbar">
@@ -298,10 +319,33 @@ export function ChatPanel({ connections }: Props): ReactElement {
               {b.content || (b.streaming ? '…' : '')}
               {b.streaming && <span className="w2-caret" />}
               {b.error && <div className="p0-err">✗ {b.error}</div>}
+              {/*
+                长期记忆的**唯一写入口**：只有人按下这个按钮才会写。
+                刻意不做"每轮自动记一条" —— 那会把聊天流水灌进长期记忆（卡片 015 叫它 context sludge）。
+                点它之后走的是 `append_note` 工具：写类操作照样要过权限门，路径守卫在写之前跑。
+              */}
+              {b.role === 'assistant' && !b.streaming && b.error === undefined && b.content !== '' && (
+                <div className="w2-bubble-tools">
+                  <button
+                    type="button"
+                    className="w2-btn w2-btn-quiet"
+                    disabled={noteBusy}
+                    onClick={() => void remember(b.content)}
+                  >
+                    记住这一点
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         ))}
       </div>
+
+      {noteHint !== null && (
+        <p className={noteHint.kind === 'ok' ? 'jj-ok' : 'p0-err'} role="status">
+          {noteHint.text}
+        </p>
+      )}
 
       <div className="w2-chat-input">
         <textarea

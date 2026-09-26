@@ -14,7 +14,7 @@
  * 退出码：0 = 通过；1 = 失败（打印失败在哪一步、以及界面当时的文本）
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { dirname, join } from 'node:path';
@@ -787,6 +787,49 @@ try {
   const escaped = await waitForText('没读到');
   if (escaped !== true) fail('越出工作区的路径没有被拒绝', String(escaped).slice(0, 600));
   ok('越界路径被守卫拒绝，理由显示在界面上');
+
+  /* ---------------- 长期记忆写入（M6） ----------------
+   *
+   * 真值只认磁盘：`.jujia/NOTES.md` 里到底有没有那一行。
+   * **一处如实的限制**：这里经真实 IPC 调工具，但**没走「记住这一点」按钮本身** ——
+   * 那个按钮只挂在已完成的助手气泡上，而本机没有可用的模型端点、也没有会话历史可回放
+   * （`sessions` 目前只在内存里，持久化排在建站计划 6）。按钮的存在与调用点由
+   * `memory-wiring.test.ts` 在源码级钉住；界面级点击等会话历史落地后补。
+   */
+  const notesFile = join(wsDir, '.jujia', 'NOTES.md');
+  const noteText = 'e2e 写入验证：这个项目里的注释一律用中文';
+
+  step('长期记忆写入：问过才落盘；拒绝后磁盘上没有这个文件；非法输入不打扰人');
+  const noteDenied = win.evaluate(async (t) => await window.jujia.toolRun('append_note', { text: t }), noteText);
+  const askedFirst = await waitForText('需要你确认：');
+  if (askedFirst !== true) fail('写入长期记忆竟然没过权限门（写类必须问人）', String(askedFirst).slice(0, 600));
+  await win.locator('button', { hasText: '拒绝' }).first().click();
+  const deniedResult = await noteDenied;
+  if (deniedResult.ok !== false) fail('用户拒绝了，工具却报成功', JSON.stringify(deniedResult).slice(0, 400));
+  if (existsSync(notesFile)) fail('拒绝之后 .jujia/NOTES.md 竟然被创建了（零副作用没做到）');
+  ok('拒绝 → 磁盘上什么都没发生');
+
+  const accepted = win.evaluate(async (t) => await window.jujia.toolRun('append_note', { text: t }), noteText);
+  const askedSecond = await waitForText('需要你确认：');
+  if (askedSecond !== true) fail('第二次写入没有弹确认（权限门被绕过）');
+  await win.locator('button', { hasText: '允许一次' }).first().click();
+  const acceptedResult = await accepted;
+  if (acceptedResult.ok !== true) fail('批准后写入失败', String(acceptedResult.content).slice(0, 400));
+  const onDisk = readFileSync(notesFile, 'utf8');
+  if (!onDisk.includes(noteText)) fail('磁盘上的 NOTES.md 里没有这一行', onDisk.slice(0, 400));
+  // `m` 不能省：NOTES.md 的第一行是文件头注释，`^` 不锚到行首就会一直判"缺日期前缀"
+  if (!/^- \d{4}-\d{2}-\d{2}: /m.test(onDisk)) fail('落盘格式缺日期前缀', onDisk.slice(0, 200));
+  ok('批准 → NOTES.md 真的多出一行带日期的记忆');
+
+  // 非法输入不该打扰人：超长内容在入参校验阶段就被拒，不进入权限询问
+  await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
+  const tooLong = await win.evaluate(async () => {
+    return await window.jujia.toolRun('append_note', { text: 'x'.repeat(600) });
+  });
+  if (tooLong.ok !== false) fail('超长内容居然被接受了（长度上限没生效）');
+  const stillDetached = (await win.locator('[role="dialog"][aria-label="权限请求"]').count()) === 0;
+  if (!stillDetached) fail('非法输入也弹了确认框 —— 校验失败不该先问人');
+  ok('非法输入先拒、不打扰：没弹窗也不落盘');
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();

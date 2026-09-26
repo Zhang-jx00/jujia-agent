@@ -419,11 +419,11 @@ describe('run_command 走的是与文件工具同一套权限门', () => {
 /* ---------------- 注册表 ---------------- */
 
 describe('默认注册表里真的有它（不是写了个工具却没人能调到）', () => {
-  it('createDefaultRegistry 含 read_file / write_file / list_dir / run_command', () => {
+  it('createDefaultRegistry 含 三个文件工具 + run_command + append_note（清单变了要红，逼着登记）', () => {
     const registry = createDefaultRegistry();
     expect(registry.has(EXEC_TOOL_NAME)).toBe(true);
     expect(registry.get(EXEC_TOOL_NAME).kind).toBe('exec');
-    expect(registry.names()).toEqual(['list_dir', 'read_file', 'run_command', 'write_file']);
+    expect(registry.names()).toEqual(['append_note', 'list_dir', 'read_file', 'run_command', 'write_file']);
   });
 });
 
