@@ -1408,7 +1408,7 @@ M21 把链接协议白名单放宽成"除了 about: 都放行"（`javascript:` /
 `assertHooksHardAskInert` 宁可保存失败也不"悄悄不问"、剔密与终端 / exec 同源（漏一处就有一条用例问倒它）。
 
 **门禁实跑**：typecheck / lint 零错误 · 958 通过 / 1 跳过（55 个测试文件）· `check:docs` 19 项 + 注入式自检 9 项 ·
-smoke OK · perf 首帧 497ms · e2e **26/26** · 变异 **32/32**。
+smoke OK · perf 首帧 497ms · e2e **26/26** · 变异 **32/32**（基线 `f7fb781`）。
 
 ### 结论
 
