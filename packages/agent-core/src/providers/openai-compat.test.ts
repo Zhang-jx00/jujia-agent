@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { listModels, resolveEndpoint, streamChat } from './openai-compat';
+import { createStreamTimeout, listModels, resolveEndpoint, streamChat } from './openai-compat';
 import type { ProviderEvent } from './types';
 
 /** 起一个真实的本地 SSE 服务，验证「真·流式」而不是打桩返回值 */
@@ -343,6 +343,150 @@ describe('streamChat：真实 SSE 端到端', () => {
     expect(parsed['temperature']).toBe(0.3);
     expect(parsed['max_tokens']).toBe(64);
     expect(seenAuth).toBe('Bearer secret-key');
+  });
+});
+
+/**
+ * 两条时间界限（2026-09-27 外部审查 T7）。
+ *
+ * 修之前的形状：`chat-service` 给整轮挂一个 5 分钟总超时，provider 自己不看时间 ——
+ * 于是"上游 200 之后不再吐字"要等满 5 分钟才断开，而且断开时抛的是普通 AbortError，
+ * 被下面的 `isAbort` 分支当成"用户点了停止"→ **界面把卡死显示成已停止**（静默失败）。
+ * 现在：空闲超时归 provider（看得见数据在不在流），总时长也改成**按单次调用**算。
+ */
+describe('流式的空闲超时与单次调用上限', () => {
+  const stalled = async (): Promise<MockServer> => {
+    const mock = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(sseChunk('前半段'));
+      // 之后什么都不做：连接活着、但不再有数据 —— 这就是"上游卡住"的真实形状
+    });
+    servers.push(mock);
+    return mock;
+  };
+
+  it('先吐了一段就不再吐 → timeout 且理由写明"没有再吐字"（不是 aborted）', async () => {
+    const mock = await stalled();
+    const received: string[] = [];
+    let failure: unknown;
+    const started = Date.now();
+    try {
+      for await (const ev of streamChat(
+        { baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] },
+        { idleTimeoutMs: 150, totalTimeoutMs: 30_000 },
+      )) {
+        if (ev.type === 'text_delta') received.push(ev.delta);
+      }
+    } catch (err) {
+      failure = err;
+    }
+    // 之前那段确实收到了：证明这条用例测的是"读到一半卡住"，不是"根本没连上"
+    expect(received.join('')).toContain('前半段');
+    expect(failure).toMatchObject({ code: 'timeout' });
+    expect(failure instanceof Error ? failure.message : '').toContain('没有再吐字');
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it('反向：数据持续到达时长流**不被空闲超时误杀**（变异 M33 摘掉 beat 就红在这里）', async () => {
+    const mock = await startServer(async (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      for (let i = 0; i < 20; i += 1) {
+        res.write(sseChunk(`第${String(i)}段`));
+        await new Promise<void>((r) => setTimeout(r, 15));
+      }
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+    servers.push(mock);
+    // 整串流约 300ms，而空闲上限只有 80ms：不续命就一定被掐
+    const events = await collect(
+      streamChat(
+        { baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] },
+        { idleTimeoutMs: 80, totalTimeoutMs: 30_000 },
+      ),
+    );
+    const text = events
+      .filter((e) => e.type === 'text_delta')
+      .map((e) => (e.type === 'text_delta' ? e.delta : ''))
+      .join('');
+    expect(text).toContain('第19段');
+    expect(events.at(-1)).toEqual({ type: 'done', reason: 'stop' });
+  });
+
+  it('每 30ms 一直吐但永不结束 → 由**单次调用总上限**掐断，理由与空闲不同', async () => {
+    const mock = await startServer(async (req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      let alive = true;
+      req.on('close', () => {
+        alive = false;
+      });
+      while (alive) {
+        res.write(sseChunk('滴'));
+        await new Promise<void>((r) => setTimeout(r, 30));
+      }
+    });
+    servers.push(mock);
+    let failure: unknown;
+    try {
+      for await (const _ev of streamChat(
+        { baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] },
+        { idleTimeoutMs: 5_000, totalTimeoutMs: 200 },
+      )) {
+        // 一直产出，直到总上限掐断
+      }
+    } catch (err) {
+      failure = err;
+    }
+    expect(failure).toMatchObject({ code: 'timeout' });
+    expect(failure instanceof Error ? failure.message : '').toContain('单次模型调用超过');
+  });
+
+  it('用户在等待响应头阶段取消 → 仍是 done(aborted)，不会被新分支误报成超时（变异 M34 的靶子）', async () => {
+    const mock = await startServer(() => {
+      // 不响应
+    });
+    servers.push(mock);
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 80);
+    const events = await collect(
+      streamChat(
+        { baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [], signal: ac.signal },
+        { idleTimeoutMs: 10_000, totalTimeoutMs: 30_000 },
+      ),
+    );
+    expect(events).toEqual([{ type: 'done', reason: 'aborted' }]);
+  });
+});
+
+describe('createStreamTimeout', () => {
+  it('不 beat 就到期：idleExceeded 变真且信号被触发', async () => {
+    const clock = createStreamTimeout({ idleMs: 40, totalMs: 10_000 });
+    expect(clock.idleExceeded()).toBe(false);
+    await new Promise<void>((r) => setTimeout(r, 120));
+    expect(clock.idleExceeded()).toBe(true);
+    expect(clock.signal.aborted).toBe(true);
+    expect(clock.totalExceeded()).toBe(false);
+    clock.dispose();
+  });
+
+  it('beat 续命：单段间隔都小于空闲上限时，累计多久都不 idle', async () => {
+    const clock = createStreamTimeout({ idleMs: 60, totalMs: 30_000 });
+    for (let i = 0; i < 8; i += 1) {
+      await new Promise<void>((r) => setTimeout(r, 30));
+      clock.beat();
+    }
+    expect(clock.idleExceeded()).toBe(false);
+    expect(clock.signal.aborted).toBe(false);
+    clock.dispose();
+  });
+
+  it('dispose 之后定时器全部撤掉（不留下会把进程拖住的句柄）', async () => {
+    const clock = createStreamTimeout({ idleMs: 40, totalMs: 60 });
+    clock.dispose();
+    await new Promise<void>((r) => setTimeout(r, 150));
+    expect(clock.idleExceeded()).toBe(false);
+    expect(clock.totalExceeded()).toBe(false);
+    expect(clock.signal.aborted).toBe(false);
   });
 });
 

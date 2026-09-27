@@ -5,6 +5,13 @@ import type { ChatMessage, ChatParams, ProviderError, ProviderEvent } from './ty
 /** 可注入的依赖，便于单测打桩（默认用全局 fetch） */
 export interface ProviderDeps {
   fetcher?: typeof fetch;
+  /**
+   * 流式读取的**空闲超时**与**单次调用总时长**（毫秒）。
+   * 刻意放在 deps 而不是 params：它们是本应用的运行时策略，不是发给厂商的请求参数；
+   * 放在 params 会让它们看起来像协议字段。
+   */
+  idleTimeoutMs?: number;
+  totalTimeoutMs?: number;
 }
 
 function makeError(
@@ -16,6 +23,31 @@ function makeError(
   err.code = code;
   if (status !== undefined) err.status = status;
   return err;
+}
+
+/**
+ * 把"被时间掐断"翻成可区分的错误；没掐断返回 null（交给调用方继续按"用户中止"处理）。
+ * 单独成一个函数是因为 streamChat 有**两个** catch 点（连不上 / 读到一半），
+ * 两处必须给同一套说法——写两遍就会有一天只改一遍。
+ */
+function stuckError(
+  clock: ReturnType<typeof createStreamTimeout>,
+  idleMs: number,
+  totalMs: number,
+): ProviderError | null {
+  if (clock.idleExceeded()) {
+    return makeError(
+      'timeout',
+      `上游 ${String(Math.round(idleMs / 1000))} 秒没有再吐字，已断开（已收到的内容不完整，可重试）`,
+    );
+  }
+  if (clock.totalExceeded()) {
+    return makeError(
+      'timeout',
+      `单次模型调用超过 ${String(Math.round(totalMs / 1000))} 秒，已断开（可重试）`,
+    );
+  }
+  return null;
 }
 
 /**
@@ -33,7 +65,23 @@ export function resolveEndpoint(baseUrl: string, path: 'chat/completions' | 'mod
   return `${withVersion}/${path}`;
 }
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+/**
+ * 流式读取的**空闲超时**（默认值）：两次数据之间最长允许隔多久。
+ *
+ * 为什么是"空闲"而不是"总时长"（2026-09-27 外部审查 T7）：
+ * 总时长一刀切会**误伤正常的长轮** —— 传进来的信号覆盖的是**整轮**（含工具执行、
+ * 含用户在审批弹窗上思考的时间），所以一个 5 分钟的总上限会掐掉本来好端端的轮次。
+ * 而真正要防的是"上游 200 之后不再吐字"，那种情况的特征正好是**一段时间没有新数据**，
+ * 所以按空闲判既更准、也不会伤到健康连接。
+ */
+const STREAM_IDLE_TIMEOUT_MS = 60_000;
+
+/**
+ * 单次模型调用的总时长上限（默认值）。
+ * 口径与 `createStreamTimeout` 的注释一致：**按调用算，不按整轮算** ——
+ * 工具执行与用户在审批弹窗上的思考时间都不该占模型的预算。
+ */
+const STREAM_TOTAL_TIMEOUT_MS = 300_000;
 
 /**
  * OpenAI 兼容协议的流式对话。
@@ -47,6 +95,14 @@ export async function* streamChat(
 ): AsyncGenerator<ProviderEvent> {
   const doFetch = deps.fetcher ?? fetch;
   const url = resolveEndpoint(params.baseUrl, 'chat/completions');
+  /**
+   * 空闲超时（T7）。与调用方给的 signal **合并**：任一方触发都会断开 fetch，
+   * 但两者的**后果不同** —— 空闲超时报错并可重试，调用方中止是正常结束。
+   */
+  const idleMs = deps.idleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
+  const totalMs = deps.totalTimeoutMs ?? STREAM_TOTAL_TIMEOUT_MS;
+  const clock = createStreamTimeout({ idleMs, totalMs });
+  const signal = params.signal ? AbortSignal.any([params.signal, clock.signal]) : clock.signal;
 
   const body: Record<string, unknown> = {
     model: params.model,
@@ -71,9 +127,13 @@ export async function* streamChat(
         Accept: 'text/event-stream',
       },
       body: JSON.stringify(body),
-      ...(params.signal ? { signal: params.signal } : {}),
+      signal,
     });
   } catch (err) {
+    // 连"响应头都没等到"也在空闲/总限的管辖之内；这一支必须判在 isAbort **之前**，
+    // 否则会被下面的分支当成"用户点了停止"
+    const stuck = stuckError(clock, idleMs, totalMs);
+    if (stuck !== null) throw stuck;
     if (isAbort(err)) {
       yield { type: 'done', reason: 'aborted' };
       return;
@@ -105,6 +165,8 @@ export async function* streamChat(
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      // 续命：只要还在吐数据就不算卡住（变异 M33 摘掉这一行，长流会被空闲超时误杀）
+      clock.beat();
       const text = decoder.decode(value, { stream: true });
       for (const payload of parser.push(text)) {
         const mapped = mapPayload(
@@ -158,6 +220,9 @@ export async function* streamChat(
     for (const ev of emitToolCallsIfAny(toolCalls, wantsTools)) yield ev;
     yield { type: 'done', reason: toolCalls.hasCalls() ? 'tool_calls' : finishReason };
   } catch (err) {
+    // 顺序有讲究：两种超时**必须判在 isAbort 之前**（三者都是 AbortError，混了就等于误报）
+    const stuck = stuckError(clock, idleMs, totalMs);
+    if (stuck !== null) throw stuck;
     if (isAbort(err)) {
       yield { type: 'done', reason: 'aborted' };
       return;
@@ -169,6 +234,7 @@ export async function* streamChat(
     throw makeError('network_error', `流读取中断：${errText(err)}`);
   } finally {
     reader.releaseLock?.();
+    clock.dispose();
   }
 }
 
@@ -357,9 +423,59 @@ export async function listModels(
     .sort();
 }
 
-/** 给 UI 用的默认超时保障：外部 signal 与超时合并 */
-export function withTimeout(signal: AbortSignal | undefined, ms = DEFAULT_TIMEOUT_MS): AbortSignal {
-  const timeout = AbortSignal.timeout(ms);
-  if (!signal) return timeout;
-  return AbortSignal.any([signal, timeout]);
+/**
+ * 一次模型调用的两条时间界限（2026-09-27 外部审查 T7 重写）。
+ *
+ * - **空闲**（`idleMs`）：两次数据之间最长隔多久。这是"上游卡住"的真实特征，
+ *   每次 `beat()` 续命，所以健康但较长的流不会被误杀。
+ * - **总时长**（`totalMs`）：同一次模型调用的上限，兜住"每 50 秒吐一个字地吊着"这种
+ *   既不算卡死也不算健康的流。复核 002 定过"必须保持有界"，这条就是那一界的**正确落点** ——
+ *   它以前挂在**整轮**上（`chat-service` 传 5 分钟总超时进 agent-loop），
+ *   于是连"工具跑了一半"与"用户还在审批弹窗上想"都被算进模型的预算里，属于误伤。
+ *
+ * 为什么要区分 `idleExceeded()` 与 `aborted()`：三者都表现为 `AbortError`，
+ * 混为一谈就会把"上游卡死"显示成"用户点了停止"—— 那是本项目最忌讳的**静默失败**形状。
+ */
+export function createStreamTimeout(input: {
+  idleMs: number;
+  totalMs: number;
+}): {
+  readonly signal: AbortSignal;
+  beat(): void;
+  idleExceeded(): boolean;
+  totalExceeded(): boolean;
+  dispose(): void;
+} {
+  const controller = new AbortController();
+  let idleFired = false;
+  let totalFired = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const arm = (): void => {
+    if (idleFired) return;
+    if (timer !== undefined) clearTimeout(timer);
+    timer = setTimeout(() => {
+      idleFired = true;
+      controller.abort(new Error(`上游 ${Math.round(input.idleMs / 1000)} 秒没有再吐字`));
+    }, input.idleMs);
+    timer.unref?.();
+  };
+  arm();
+  const totalTimer = setTimeout(() => {
+    totalFired = true;
+    controller.abort(new Error(`单次模型调用超过 ${Math.round(input.totalMs / 1000)} 秒`));
+  }, input.totalMs);
+  totalTimer.unref?.();
+
+  return {
+    signal: controller.signal,
+    beat: arm,
+    idleExceeded: () => idleFired,
+    totalExceeded: () => totalFired,
+    dispose() {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+      clearTimeout(totalTimer);
+    },
+  };
 }

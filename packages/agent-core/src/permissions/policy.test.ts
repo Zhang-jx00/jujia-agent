@@ -180,6 +180,9 @@ describe('具名断言：敏感路径优先于只读放行（T1）', () => {
     const d = readSensitive('dontAsk');
     expect(d.action).toBe('deny');
     expect(d.reason).toContain('敏感');
+    // 批复点名（复核 034 R-6）：文案必须说清"被拒绝"而不是"被跳过"
+    // —— 写成"跳过"会诱导模型等着重试、诱导用户以为"稍后会自动补读"
+    expect(d.reason).toContain('不是被跳过');
   });
 
   it.each(['.git/config', 'keys/id_rsa', '.npmrc', '.git-credentials', 'package-lock.json', '.github/workflows/ci.yml'])(

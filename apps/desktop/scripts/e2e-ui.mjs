@@ -114,12 +114,62 @@ if (handoutExeReady) {
 }
 
 /**
+ * 流式假服务（第 26 步要用）。
+ *
+ * 为什么现在就得起来：它要**写进连接的种子文件里**（baseUrl 带端口），而那份文件是
+ * 应用启动前落的 —— 晚起就只能改运行时数据，那不再是"上一个进程留下的连接"。
+ * 为什么必须是个真 HTTP 服务而不是打桩：第 26 步要验的是"流事件按会话分发"，
+ * 只有真的按时间一段一段吐字，才存在"上一条还没说完我就切走了"这个现场。
+ */
+const streamServer = createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => (body += String(c)));
+  req.on('end', () => {
+    let prompt = '';
+    try {
+      const parsed = JSON.parse(body);
+      const msgs = Array.isArray(parsed.messages) ? parsed.messages : [];
+      const lastUser = [...msgs].reverse().find((m) => m && m.role === 'user');
+      prompt = String(lastUser?.content ?? '');
+    } catch {
+      // 解析不出来就按默认档（A）走：这一步测的是事件分发，不是解析健壮性
+    }
+    // 两条都是慢流（A 先结束、B 后结束）：只有这样才存在"A 的事件到达时 B 还在流"这个现场
+    const scene = prompt.includes('STREAM_B') ? 'B' : 'A';
+    const steps = scene === 'B' ? 24 : 16;
+    const usageTokens = scene === 'B' ? 131313 : 424242;
+    const gapMs = 220;
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    void (async () => {
+      try {
+        for (let i = 1; i <= steps; i += 1) {
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: `${scene}_${String(i)}_` } }] })}\n\n`);
+          await new Promise((r) => setTimeout(r, gapMs));
+        }
+        // usage 带一个**专属数字**：于是"别的会话的用量事件掉到当前界面上"在 DOM 里看得见
+        res.write(
+          `data: ${JSON.stringify({ usage: { prompt_tokens: usageTokens, completion_tokens: 7 } })}\n\n`,
+        );
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+      } catch {
+        // 客户端中途断开（比如超时或用户停止）：这条连接本来就该结束，不报告警
+      }
+    })();
+  });
+});
+await new Promise((resolve) => streamServer.listen(0, '127.0.0.1', resolve));
+const streamPort = streamServer.address().port;
+
+/**
  * 预置"上一个进程留下的东西"（6a 会话持久化的被测前提）：
  * 一条连接 + 一个已经写了几轮对话的会话目录。
  * 会话 id 用符合白名单的 uuid 形态；文件按真实格式写（JsonStore 的信封 + JSONL 一行一条），
  * 于是"重启后还在"这一条问的是**应用真的能读盘**，不是它自己刚写的内存。
  */
 const seededConnId = 'e2e-conn-1';
+const seededStreamConnId = 'e2e-stream-1';
 writeFileSync(
   join(dataDir, 'connections.json'),
   JSON.stringify({
@@ -136,6 +186,19 @@ writeFileSync(
           // 真实落盘形态：密钥是 protect 后的结构或 null，这里给 null —— 本步骤永不发问，
           // 只要 CONNECTION_LIST 能安全映射它（少了这个字段，读盘就会炸成"一个连接都没有"）
           secret: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: seededStreamConnId,
+          name: 'e2e 流式假服务',
+          baseUrl: `http://127.0.0.1:${String(streamPort)}/v1`,
+          apiFormat: 'openai-compatible',
+          model: 'e2e-stream-model',
+          // 这条**要真的发问**，所以密钥不能是 null（主进程会直接拒发）。
+          // `scheme:'plain'` 是真实存在的落盘形态（safeStorage 不可用时应用自己就是这么写的），
+          // 值是假的：本地假服务不看 Authorization，而密钥也绝不离开这台机器。
+          secret: { scheme: 'plain', value: 'e2e-local-only' },
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         },
@@ -943,19 +1006,23 @@ try {
   if (direct.total !== 4) fail(`重启后读到的条数不是 4（实际 ${String(direct.total)}）`, JSON.stringify(direct));
   if (!direct.first.includes('E2E_PERSIST_问一')) fail('重启后第一条不是原来那句提问', JSON.stringify(direct));
   /**
-   * 清单文件此刻**还不存在**：本次运行只读不写（没有真正发问，也就没有新会话要落盘）。
-   * 所以这里验的不是"index.json 一定在"，而是"没有缓存也能从目录重建" ——
-   * 清单只是缓存，目录才是事实。这条恰好也覆盖了"用户手动删掉 index.json"的情况。
+   * 清单只是缓存、目录才是事实 —— 这条有两半，都得验（T6③ 补的是后半）：
+   * ① 删掉 `index.json` 之后仍然列得出那个会话（不是"缓存没了就装死"）；
+   * ② 重建之后**要写回磁盘**，否则"缓存"这件事被悄悄取消了：每次列会话都要重扫全目录。
    */
-  if (existsSync(join(dataDir, 'sessions', 'index.json'))) {
-    fail('本轮没有任何写入，却生成了会话清单缓存（清单是写出来的，不是读出来的）');
-  }
+  const indexFile = join(dataDir, 'sessions', 'index.json');
+  rmSync(indexFile, { force: true });
   const listed = await win2.evaluate(async () => await window.jujia.chatList());
   if (!Array.isArray(listed) || listed.length === 0) {
     fail('清单重建失败：chatList() 在 index.json 缺失时列不出磁盘上的会话', JSON.stringify(listed).slice(0, 400));
   }
   if (!listed.some((s) => s.id === seededSession)) fail('重建的清单里没有那个会话目录', JSON.stringify(listed).slice(0, 400));
-  ok('进程死过一次之后：仍是那 4 条，清单缺失也能从目录重建 —— 重启不丢对话');
+  if (!existsSync(indexFile)) {
+    fail('清单重建后没有写回磁盘：下一次列会话还要重扫全目录（缓存被悄悄取消了）');
+  }
+  const writtenBack = readFileSync(indexFile, 'utf8');
+  if (!writtenBack.includes(seededSession)) fail('写回的清单里没有那个会话', writtenBack.slice(0, 400));
+  ok('进程死过一次之后：仍是那 4 条；清单删掉也能从目录重建**并写回** —— 重启不丢对话');
 
   /* ---------------- 只读工具读敏感文件也要过人手（外部审查 T1） ----------------
    *
@@ -1095,6 +1162,61 @@ try {
   await clickDialog2('拒绝');
   ok('「总是允许」压不掉：这里没有 remembered 白名单，每次写钩子配置都过人手');
 
+  /* ---------------- 真·流式对话 + 事件按会话分发（外部审查 T5） ----------------
+   *
+   * 这一步同时补上一个空白：此前 e2e **从没真的发过一次问**（对话链路只在单测里跑过）。
+   * 现在走一遍真的：本地 SSE 服务一段一段吐字 → 界面按事件流画 → 回答落盘。
+   *
+   * 要验的缺陷是：`CHAT_STREAM` 是**全局广播**。切走会话之后，上一条流的事件照样进来 ——
+   * 增量因为 messageId 对不上"看起来没事"，但 `usage` / `done` 不需要 messageId，改得见。
+   * 所以三种载体各盯一条：**用量数字**（usage）、**仍在发送中的状态**（done）、**别人的正文**。
+   */
+  step('真·流式对话走一遍：切走的会话不许改掉当前界面（用量 / 收尾 / 正文三条都盯）');
+  await win2.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await win2.locator('select').first().selectOption(seededStreamConnId);
+  const chatBox = win2.locator('textarea[placeholder^="输入消息"]');
+  const sendNow = async (text) => {
+    await chatBox.fill(text);
+    await win2.locator('button', { hasText: '发送' }).first().click();
+  };
+  const stopVisible = async () => (await win2.locator('button', { hasText: '停止' }).count()) > 0;
+
+  await sendNow('STREAM_A 第一条');
+  if ((await waitText2('A_1_', 12_000)) !== true) {
+    fail('一轮真·流式对话没有把增量画到界面上（对话链路在界面级从没跑通过）', (await body2()).slice(0, 900));
+  }
+  ok('真流式：A 会话的增量已经画出来');
+
+  // 切到全新会话 B（A 此刻还在流，约 3.5 秒才说完）
+  await win2.locator('button', { hasText: '新会话' }).first().click();
+  await sendNow('STREAM_B 第二条');
+  if ((await waitText2('B_1_', 12_000)) !== true) fail('新会话 B 没有开始自己的流', (await body2()).slice(0, 900));
+
+  // 等到 A 说完（A ≈3.5s，B ≈5.3s）：此刻 A 的 done / usage 已经发出来了，而 B 还在流
+  await new Promise((r) => setTimeout(r, 4_200));
+  const during = await body2();
+  if (during.includes('A_')) fail('A 会话的正文掉进了 B 的界面（事件没按会话筛）', during.slice(0, 900));
+  if (during.includes('424242')) fail('A 会话的用量事件改掉了当前界面的 token 行', during.slice(0, 900));
+  if (!(await stopVisible())) fail('A 的 done 把 B 的"正在发送"状态提前收尾了（停止按钮不见了）');
+  ok('A 说完之后：正文、用量、收尾三样都没落到 B 的界面上');
+
+  if ((await waitText2('131313', 15_000)) !== true) {
+    fail('B 自己的用量没出现 —— 闸门口径写反了会把当前会话的事件也筛掉', (await body2()).slice(0, 900));
+  }
+  const afterB = await body2();
+  if (afterB.includes('424242')) fail('A 的用量最终仍然污染了 B', afterB.slice(0, 900));
+  ok('当前会话自己的事件照常到达（B 的用量数字出现在界面上）');
+
+  /** 筛掉的只是**事件**，不是回答：A 的完整内容照常落盘（否则这条修复就成了"切走就丢数据"） */
+  const diskList = await win2.evaluate(async () => await window.jujia.chatList());
+  const aMeta = diskList.find((s) => s.title.includes('STREAM_A'));
+  if (!aMeta) fail('A 会话没出现在清单里（切走之后它的数据不该消失）', JSON.stringify(diskList).slice(0, 400));
+  const aPage = await win2.evaluate(async (id) => await window.jujia.chatHistory({ sessionId: id, limit: 60 }), aMeta.id);
+  const aBlob = JSON.stringify(aPage.messages);
+  if (!aBlob.includes('A_16_')) fail('A 的回答被截断了（丢事件不等于丢数据）', aBlob.slice(0, 500));
+  if (aBlob.includes('B_1_')) fail('B 的内容混进了 A 的历史', aBlob.slice(0, 500));
+  ok('A 的完整回答照常落盘：丢的是事件，不是数据');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -1102,6 +1224,7 @@ try {
 } catch (err) {
   fail('执行过程中抛异常', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
 } finally {
+  streamServer.close();
   if (app !== undefined) await app.close().catch(() => undefined);
   try {
     rmSync(TMP_ROOT, { recursive: true, force: true });
@@ -1112,5 +1235,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 钩子配置写入逐次确认 → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 干净退出');
 process.exit(0);

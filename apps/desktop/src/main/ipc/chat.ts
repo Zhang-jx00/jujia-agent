@@ -95,9 +95,19 @@ export function registerChatIpc(ctx: IpcContext): void {
     const skillCatalog = await skills.refresh(ws.valid ? ws.root : null);
     mcpDebug('[plugins] ' + plugins.summary());
     mcpDebug('[skills] ' + summarizeCatalog(skillCatalog));
-    // 重启后第一次发问：会话不在内存里就从磁盘装回来（6a 的"续上"就走这一步）
+    // 重启后第一次发问：会话不在内存里就从磁盘装回来（6a 的"续上"就走这一步）。
+    // **装不回来不能静默**（外部审查 T6④）：静默回落成"新建会话从零开始"，
+    // 用户看到的是"我明明接着昨天的话聊，它怎么全忘了"，而没有任何地方说为什么。
+    let historyWarning: string | null = null;
     if (typeof sessionId === 'string' && sessionId !== '') {
-      await hydrateSession(sessionId, connectionId).catch(() => undefined);
+      try {
+        await hydrateSession(sessionId, connectionId);
+      } catch (err) {
+        historyWarning = `历史未能恢复，这一轮从空上下文继续（磁盘上的旧记录一字未动）。原因：${
+          err instanceof Error ? err.message : String(err)
+        }`;
+        console.warn('[chat] 会话历史装载失败，已按"空上下文继续"处理：', err);
+      }
     }
     const result = sendMessage(
       {
@@ -119,7 +129,7 @@ export function registerChatIpc(ctx: IpcContext): void {
         skillCatalogText: skills.catalogText(),
       },
     );
-    return chatSendResultSchema.parse({ ...result, accepted: true });
+    return chatSendResultSchema.parse({ ...result, accepted: true, warning: historyWarning });
   });
 
   handle(IPC.CHAT_STOP, async (_e, sessionId: unknown): Promise<boolean> => {

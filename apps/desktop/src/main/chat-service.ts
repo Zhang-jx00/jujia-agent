@@ -6,7 +6,6 @@ import {
   loadProjectContext,
   runAgentTurn,
   sessionStart,
-  withTimeout,
   type ChatMessage,
   type LoopEvent,
   type PermissionMode,
@@ -17,11 +16,13 @@ import {
 } from '@jujia/agent-core';
 import type { StreamEvent } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
+import { createSessionJournal } from './session-journal';
 import { needsEviction, pickEvictionCandidate } from './session-lru';
 import {
   createFileSessionStore,
   toStoredMessage,
   type SessionMeta,
+  type StoredMessage,
   type SessionStore,
   type StoredRole,
 } from './session-store';
@@ -31,14 +32,6 @@ import {
  * （见 memory 模块），这样换工作区就能换上下文，且用户可随时查看/编辑来源文件。
  */
 const BASE_PROMPT = '你是俱佳Agent，一个运行在用户 Windows 桌面上的助手。回答简洁、准确，使用中文。';
-
-/**
- * 单轮对话的整体超时（含流式接收与工具执行）。
- *
- * 复核 002 发现：初版对话链路**没有任何超时**——上游卡住时会永久挂起。
- * 此处保留有界保护；超时被 agent-core 识别为 `timeout` 错误，如实提示而非伪装成网络错误。
- */
-const CHAT_TIMEOUT_MS = 300_000;
 
 /**
  * 单轮内最多允许的模型往返次数（Agent Loop 的熔断上界）。
@@ -62,8 +55,6 @@ interface Session {
   lastUsedAt: number;
   /** 建会话的时刻（ISO），进元信息 */
   createdAt: string;
-  /** 已经落盘的消息条数（不含 system）—— 下一次只追加这个刻度之后的部分 */
-  persistedCount: number;
 }
 
 const sessions = new Map<string, Session>();
@@ -112,26 +103,41 @@ function metaOf(s: Session, messageCount: number): SessionMeta {
 }
 
 /**
+ * 落盘的"追加 + 记账"（T6①②）。计数归这个 journal 所有，不放 `Session` 上 ——
+ * 两个地方各记一份账，迟早会有一份不准。
+ */
+const journal = createSessionJournal({
+  append: (id, messages) => store().append(id, messages),
+  saveMeta: (meta) => store().saveMeta(meta),
+});
+
+/** ChatMessage → 入库形态（`system` 不落盘由 `persistable` 负责过滤） */
+function toStored(m: ChatMessage): StoredMessage {
+  return toStoredMessage(m.role as StoredRole, m.content, new Date(), {
+    ...(m.toolCallId !== undefined ? { toolCallId: m.toolCallId } : {}),
+    ...(m.toolCalls !== undefined
+      ? { toolCalls: m.toolCalls.map((c) => ({ id: c.id, name: c.name, argumentsText: c.argumentsText })) }
+      : {}),
+  });
+}
+
+/**
  * 把本轮新增的消息追加落盘。**只追加完整行**，所以进程中途死最多丢最后一条。
  * 失败不静默：console.warn 报出来（丢历史是可感知的事实，不能假装写成功）。
+ *
+ * 两种失败要分开说（T6①）：**消息没写进去**才是"历史丢了"；
+ * **元信息没写进去**只是"列表里的条数 / 标题旧了一格"，下一轮不会因此重放消息。
  */
 async function flushSession(s: Session): Promise<void> {
   const all = persistable(s);
-  const fresh = all.slice(s.persistedCount);
-  if (fresh.length === 0) return;
   try {
-    await store().record(
-      metaOf(s, all.length),
-      fresh.map((m) =>
-        toStoredMessage(m.role as StoredRole, m.content, new Date(), {
-          ...(m.toolCallId !== undefined ? { toolCallId: m.toolCallId } : {}),
-          ...(m.toolCalls !== undefined
-            ? { toolCalls: m.toolCalls.map((c) => ({ id: c.id, name: c.name, argumentsText: c.argumentsText })) }
-            : {}),
-        }),
-      ),
-    );
-    s.persistedCount = all.length;
+    const out = await journal.flush(s.id, all.map(toStored), (total) => metaOf(s, total));
+    if (out.metaError !== null) {
+      console.warn(
+        `[chat] 会话 ${s.id.slice(0, 8)} 的消息已落盘，但元信息没写进去（清单条数会旧一格，不会重复追加）：`,
+        out.metaError,
+      );
+    }
   } catch (err) {
     console.warn(`[chat] 会话 ${s.id.slice(0, 8)} 的历史没写进去：`, err);
   }
@@ -148,7 +154,8 @@ function evictOldSessions(): void {
     sessions.delete(victim);
     // 6a 起"淘汰 = 从内存卸载"，磁盘上那份还在 —— 运行中的会话由 pickEvictionCandidate 排除在外，
     // 这里再兜一次：真被删掉的这个如果还在写，就把已落盘的部分保住，不动进行中的那一轮
-    if (doomed !== undefined && !doomed.running) void flushSession(doomed);
+    // 记账要等 flush 跑完再丢：先 forget 会让"下一次 flush 以为盘上是空的"，正好重演出 T6① 那个 bug
+    if (doomed !== undefined && !doomed.running) void flushSession(doomed).then(() => journal.forget(doomed.id));
     console.warn(
       `[chat] 会话数达到上限 ${MAX_SESSIONS}，已从内存卸载最久未使用的会话（历史已落盘，重启后仍可继续）`,
     );
@@ -157,6 +164,7 @@ function evictOldSessions(): void {
 
 /** 仅用于测试 */
 export function __resetSessions(): void {
+  for (const id of sessions.keys()) journal.forget(id);
   sessions.clear();
 }
 
@@ -173,7 +181,6 @@ function buildSession(connectionId: string): Session {
     connectionId,
     messages: [{ role: 'system', content: BASE_PROMPT }],
     createdAt: now,
-    persistedCount: 0,
     startedHookFired: false,
     controller: null,
     running: false,
@@ -207,7 +214,6 @@ export async function hydrateSession(sessionId: string, connectionId: string): P
     // system 那条不落盘，回来时重新装配 —— 每轮发送前本来也会按工作区覆盖它
     messages: [{ role: 'system', content: BASE_PROMPT }],
     createdAt: now,
-    persistedCount: loaded.messages.length,
     startedHookFired: true,
     controller: null,
     running: false,
@@ -225,6 +231,8 @@ export async function hydrateSession(sessionId: string, connectionId: string): P
     });
   }
   evictOldSessions();
+  // 记账对齐到盘上已有的条数：下一次 flush 只追加这之后的部分（计数归 journal 所有，见 T6①）
+  journal.restored(sessionId, loaded.messages.length);
   sessions.set(sessionId, session);
   return true;
 }
@@ -370,7 +378,9 @@ export function sendMessage(
           connection: { baseUrl: record.baseUrl, apiKey, model: record.model },
           messages: session.messages,
           maxTurns: MAX_TURNS,
-          signal: withTimeout(controller.signal, CHAT_TIMEOUT_MS),
+          // 只带"用户主动停止"这一个信号。时间界限归 provider 管（空闲 / 单次调用上限），
+          // 因为只有它看得见数据有没有在流；以前这里挂的是盖住整轮的 5 分钟总超时（T7 已纠）。
+          signal: controller.signal,
           emit: (ev: LoopEvent) => {
             if (ev.type === 'text_delta') {
               emit({
@@ -379,6 +389,13 @@ export function sendMessage(
                 messageId,
                 seq: seq++,
                 delta: ev.delta,
+              });
+            } else if (ev.type === 'usage') {
+              emit({
+                type: 'usage',
+                sessionId: session.id,
+                inputTokens: ev.inputTokens,
+                outputTokens: ev.outputTokens,
               });
             } else if (ev.type === 'tool_start') {
               emit({

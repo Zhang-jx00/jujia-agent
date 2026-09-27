@@ -192,6 +192,12 @@ export const chatSendResultSchema = z.object({
   sessionId: z.string(),
   messageId: z.string(),
   accepted: z.boolean(),
+  /**
+   * 这一轮"能继续，但有件事该知道"的提示；null = 一切如常。
+   * 目前只有一个来源：**磁盘上的历史没装回来**（外部审查 T6④）。
+   * 用 `nullable()` 而不是 optional —— 少传一格和"确实没有提示"必须是两件事。
+   */
+  warning: z.string().nullable(),
 });
 export type ChatSendResult = z.infer<typeof chatSendResultSchema>;
 

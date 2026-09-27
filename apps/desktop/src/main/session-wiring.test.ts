@@ -66,3 +66,43 @@ describe('记忆与权限判定之间不给入口（6a 追加验收，防跨会�
     }
   });
 });
+
+describe('落盘记账与"历史没装回来"不许静默（外部审查 T6）', () => {
+  it('chat-service 用 session-journal 管计数，自己不再算"新增了什么"', () => {
+    expect(chatService).toContain("from './session-journal'");
+    expect(chatService).toContain('await journal.flush(s.id, all.map(toStored)');
+    // 计数只剩一处：Session 上不再挂 persistedCount（两处记账迟早对不上）
+    expect(chatService).not.toContain('persistedCount');
+    expect(chatService).not.toContain('store().record(');
+  });
+
+  it('装回来的会话把账对齐到盘上已有条数（否则第一flush就会重放历史）', () => {
+    expect(chatService).toContain('journal.restored(sessionId, loaded.messages.length)');
+  });
+
+  it('hydrate 失败必须带出提示：既 catch 了，也把 warning 送进返回值', () => {
+    expect(chatIpc).toContain('historyWarning');
+    expect(chatIpc).toContain('历史未能恢复，这一轮从空上下文继续');
+    expect(chatIpc).toContain('warning: historyWarning');
+    // 反向锁：以前那行"吞掉错误"的写法不许回来
+    expect(chatIpc).not.toMatch(/hydrateSession\([^)]*\)\.catch\(\(\) => undefined\)/);
+  });
+
+  it('契约里 warning 是 nullable 而不是 optional（"没提示"与"少传一格"必须是两件事）', () => {
+    const here2 = dirname(fileURLToPath(import.meta.url));
+    const contracts = strip(
+      readFileSync(join(here2, '..', '..', '..', '..', 'packages', 'shared-ipc', 'src', 'contracts.ts'), 'utf8'),
+    );
+    const block = contracts.slice(
+      contracts.indexOf('export const chatSendResultSchema'),
+      contracts.indexOf('export type ChatSendResult'),
+    );
+    expect(block).toContain('warning: z.string().nullable()');
+  });
+
+  it('界面真的把这条提示画出来（不是只塞进返回值没人看）', () => {
+    expect(panel).toContain('setHistoryHint(res.warning)');
+    expect(panel).toContain('{historyHint !== null &&');
+    expect(panel).toContain('role="alert"');
+  });
+});

@@ -62,7 +62,14 @@ export type LoopEvent =
       summary: string;
       durationMs: number;
     }
-  | { type: 'turn_end'; turn: number; branch: LoopBranch };
+  | { type: 'turn_end'; turn: number; branch: LoopBranch }
+  /**
+   * 用量：**整轮累计**，不是单次调用的数字。
+   * 一轮里模型可以调好几次工具再回答，逐次上报会让界面只显示最后一段 ——
+   * 用户看到的就是"这一轮一共花了多少"。（2026-09-27 接线：契约与界面早就备着，
+   * 中间这一层把事件丢了，于是界面的 token 行永远不出现。）
+   */
+  | { type: 'usage'; inputTokens: number; outputTokens: number };
 
 export interface LoopResult {
   branch: LoopBranch;
@@ -172,6 +179,8 @@ export async function runAgentTurn(
 
   let turn = 0;
   let fullText = '';
+  let usageIn = 0;
+  let usageOut = 0;
   /** Stop 钩子要求"再走一步"的次数：必须有上限，否则钩子写错就是死循环 */
   let stopContinues = 0;
 
@@ -201,6 +210,10 @@ export async function runAgentTurn(
           turnText += ev.delta;
           fullText += ev.delta;
           params.emit({ type: 'text_delta', delta: ev.delta });
+        } else if (ev.type === 'usage') {
+          usageIn += ev.inputTokens;
+          usageOut += ev.outputTokens;
+          params.emit({ type: 'usage', inputTokens: usageIn, outputTokens: usageOut });
         } else if (ev.type === 'tool_calls') {
           // 按 index 合并：provider 可能一次性给出全部调用，也可能分多次给出；
           // 直接赋值会在「分多次」时丢掉先到的调用（2026-09-18 单测暴露）

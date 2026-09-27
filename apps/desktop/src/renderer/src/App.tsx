@@ -9,6 +9,7 @@ import type { AppInfo, ConfigSnapshot, ConnectionView } from '@jujia/shared-ipc'
 import type { ThemePack } from '@jujia/ui-tokens';
 import { WorkspaceCard } from './features/workspace/WorkspaceCard';
 import { PermissionDialog } from './features/permission/PermissionDialog';
+import { ErrorBoundary } from './ErrorBoundary';
 
 // 懒加载：连接页与对话页不在首屏，拆出去可显著减小初始 bundle（懒加载策略见 PERF-BUDGET）
 const ConnectionsPanel = lazy(() =>
@@ -201,15 +202,16 @@ export function App(): ReactElement {
         {state.phase === 'ready' && tab === 'overview' && (
           <Overview info={state.loaded.info} config={state.loaded.config} />
         )}
-        <Suspense
-          fallback={
-            <div className="jj-skeleton" aria-busy="true">
-              <div className="jj-skeleton-line" />
-              <div className="jj-skeleton-line" />
-              <div className="jj-skeleton-line" />
-            </div>
-          }
-        >
+        <ErrorBoundary key={tab} area={TAB_LABEL[tab]}>
+          <Suspense
+            fallback={
+              <div className="jj-skeleton" aria-busy="true">
+                <div className="jj-skeleton-line" />
+                <div className="jj-skeleton-line" />
+                <div className="jj-skeleton-line" />
+              </div>
+            }
+          >
           {state.phase === 'ready' && tab === 'connections' && (
             <ConnectionsPanel onChanged={setConnections} />
           )}
@@ -235,7 +237,8 @@ export function App(): ReactElement {
               }}
             />
           )}
-        </Suspense>
+          </Suspense>
+        </ErrorBoundary>
       </main>
 
       {/* 权限审批弹窗挂在最外层：任何页面触发的工具调用都能被审批 */}

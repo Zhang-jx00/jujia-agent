@@ -98,8 +98,6 @@ export interface SessionStore {
   load(id: string): Promise<SessionLoad>;
   append(id: string, messages: StoredMessage[]): Promise<void>;
   saveMeta(meta: SessionMeta): Promise<void>;
-  /** 只存"这一轮新增了什么"的批处理入口：追加 + 更新清单 */
-  record(meta: SessionMeta, messages: StoredMessage[]): Promise<void>;
 }
 
 interface IndexFile { sessions: SessionMeta[] }
@@ -146,11 +144,31 @@ export function createSessionStore(sessionsRoot: string): SessionStore {
     await appendFile(join(dir, 'messages.jsonl'), `${body}\n`, 'utf8');
   };
 
-  const upsertIndex = async (meta: SessionMeta): Promise<void> => {
-    const { data } = await index.read();
-    const rest = data.sessions.filter((s) => s.id !== meta.id);
-    await index.write({ sessions: [meta, ...rest].slice(0, 500) });
+  /**
+   * 清单写入**串行化**（外部审查 T6③）：`upsertIndex` 是"读—改—写"，
+   * 两个会话同时落盘时若无序交错，后写的会把前写的覆盖掉（丢的是清单条目，不是消息）。
+   * 关键是把**读也放进临界区**：只串行化写，两次"读到的旧状态"仍然会互相抹掉
+   * —— 这个错误是被并发那条用例当场抓出来的，不是靠想。
+   * 单进程内一条 Promise 链就够；不必引入锁库。
+   */
+  let indexTail: Promise<void> = Promise.resolve();
+
+  /** 把一个动作挂到清单的串行链尾部；返回的 Promise 仍会把错误如实交给调用方 */
+  const onIndexChain = <T>(task: () => Promise<T>): Promise<T> => {
+    const step = indexTail.then(task);
+    indexTail = step.then(
+      () => undefined,
+      () => undefined,
+    );
+    return step;
   };
+
+  const upsertIndex = (meta: SessionMeta): Promise<void> =>
+    onIndexChain(async () => {
+      const { data } = await index.read();
+      const rest = data.sessions.filter((s) => s.id !== meta.id);
+      await index.write({ sessions: [meta, ...rest].slice(0, 500) });
+    });
 
   const saveMeta = async (meta: SessionMeta): Promise<void> => {
     const dir = sessionDir(sessionsRoot, meta.id);
@@ -167,10 +185,21 @@ export function createSessionStore(sessionsRoot: string): SessionStore {
   return {
     list: async () => {
       const { data, source } = await index.read();
-      if (source === 'default' && data.sessions.length === 0) return rebuildIndex(sessionsRoot);
       const known = data.sessions.filter((s) => SESSION_ID.test(s.id));
-      if (known.length > 0) return known.sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
-      return rebuildIndex(sessionsRoot);
+      if (source !== 'default' && known.length > 0) {
+        return known.sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
+      }
+      /**
+       * 缓存缺失 / 损坏 / 一条有效记录都没有 → 以**目录**为准重建，并把结果写回（T6③）。
+       * 以前只重建不写回：于是"用户手删 index.json"之后，每次列会话都要重扫全目录，
+       * 而那份缓存永远不再存在 —— 看似无害，实际是把"目录是事实"偷换成了"每次现算"，
+       * 会话一多就会真的变慢。写回之后这条路径只贵一次。
+       */
+      const rebuilt = await rebuildIndex(sessionsRoot);
+      await onIndexChain(() => index.write({ sessions: rebuilt })).catch((err: unknown) => {
+        console.warn('[sessions] 清单写回失败（下一次列会话会再重建一次）：', err);
+      });
+      return rebuilt;
     },
 
     load: async (id) => {
@@ -215,11 +244,6 @@ export function createSessionStore(sessionsRoot: string): SessionStore {
     },
 
     saveMeta,
-
-    record: async (meta, messages) => {
-      await writeMessages(meta.id, messages);
-      await saveMeta(meta);
-    },
   };
 }
 

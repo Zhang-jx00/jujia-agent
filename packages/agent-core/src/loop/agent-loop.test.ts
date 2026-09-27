@@ -28,7 +28,15 @@ afterEach(async () => {
 });
 
 /** 用脚本化的「每轮返回什么」来伪造 provider */
-function scriptedChat(script: Array<{ text?: string; calls?: Array<{ name: string; args: unknown; id?: string }>; finish?: ProviderEvent }>) {
+function scriptedChat(
+  script: Array<{
+    text?: string;
+    calls?: Array<{ name: string; args: unknown; id?: string }>;
+    /** 这一段的用量（provider 在流尾给的 usage） */
+    usage?: { in: number; out: number };
+    finish?: ProviderEvent;
+  }>,
+) {
   const seenMessages: ChatMessage[][] = [];
   const seenTools: unknown[] = [];
   let turn = 0;
@@ -42,6 +50,9 @@ function scriptedChat(script: Array<{ text?: string; calls?: Array<{ name: strin
     return (async function* () {
       if (step?.text) {
         for (const ch of step.text) yield { type: 'text_delta', delta: ch };
+      }
+      if (step?.usage) {
+        yield { type: 'usage', inputTokens: step.usage.in, outputTokens: step.usage.out };
       }
       if (step?.calls && step.calls.length > 0) {
         let index = 0;
@@ -113,6 +124,37 @@ describe('分支一：final', () => {
     expect(res.text).toBe('你好，我是俱佳Agent');
     expect(events.filter((e) => e.type === 'text_delta')).toHaveLength(12);
     expect(events.at(-1)).toEqual({ type: 'turn_end', turn: 1, branch: 'final' });
+  });
+});
+
+/**
+ * 用量事件（2026-09-27 接线）。
+ *
+ * 契约里的 `usage` 与界面的 token 行都早就存在，中间这一层（Loop）把它丢了 ——
+ * 于是"能看到本轮花了多少 token"这件事**从来没能真的成立过一次**。
+ * 少一层转发不会报错，只会让界面永远少一行：这正是最难发现的一类缺陷。
+ */
+describe('用量事件按整轮累计转发', () => {
+  it('两段调用各给一次 usage → 界面收到的是累计值，而不是最后一段', async () => {
+    const { chat } = scriptedChat([
+      { text: '先调一下', calls: [{ name: 'list_dir', args: { path: '.' } }], usage: { in: 100, out: 5 } },
+      { text: '完成', usage: { in: 200, out: 9 } },
+    ]);
+    const events: LoopEvent[] = [];
+    await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: 'hi' }],
+        maxTurns: 4,
+        emit: (e) => events.push(e),
+      },
+      makeDeps(chat, allow().resolver),
+    );
+    const usage = events.filter((e) => e.type === 'usage');
+    expect(usage).toHaveLength(2);
+    expect(usage[0]).toEqual({ type: 'usage', inputTokens: 100, outputTokens: 5 });
+    // 第二段带的是**整轮累计**：一次回答只报最后一段，会把前面调工具花掉的抹掉
+    expect(usage[1]).toEqual({ type: 'usage', inputTokens: 300, outputTokens: 14 });
   });
 });
 

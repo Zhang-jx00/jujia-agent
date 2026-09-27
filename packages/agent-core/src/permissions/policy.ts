@@ -198,9 +198,11 @@ export function decideGate(ctx: GateContext): GateDecision {
     const why = sensitiveReason(target);
     if (why !== null) {
       if (ctx.mode === 'dontAsk') {
+        // 文案是批复点名的（2026-09-27 复核 034 的 R-6）：必须说清**这次没发生**，
+        // 而不是让用户或模型读成"先跳过了，回头再补" —— 后者会诱发"那我再等等"或重试同一操作。
         return {
           action: 'deny',
-          reason: `目标是敏感路径（${why}），而 dontAsk 模式不提供询问机会，直接拒绝`,
+          reason: `敏感路径读取被直接拒绝，不是被跳过（${why}）；dontAsk 模式不提供询问机会`,
           risk: 'high',
         };
       }

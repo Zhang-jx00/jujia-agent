@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ChatSessionMeta, ConnectionView, StreamEvent } from '@jujia/shared-ipc';
 import { createDeltaBatcher, windowedSlice } from '@jujia/shared/stream-batcher';
+import { belongsToSession } from './stream-routing';
 import { ToolCard } from './ToolCard';
 
 interface Bubble {
@@ -41,6 +42,13 @@ export function ChatPanel({ connections }: Props): ReactElement {
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
+  /**
+   * 与 `sessionId` 同步，但**读得到当下值**：onStream 的回调只订阅一次（见下面的 effect），
+   * 闭包里的 state 会永远停在第一次渲染那一份，用它筛事件就会把当前会话自己的事件也丢掉。
+   */
+  const sessionIdRef = useRef<string | undefined>(undefined);
+  /** 这一轮"能继续，但有件事该知道"（目前唯一来源：磁盘历史没装回来，T6④） */
+  const [historyHint, setHistoryHint] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
   const [toolLines, setToolLines] = useState<ToolLine[]>([]);
@@ -85,6 +93,9 @@ export function ChatPanel({ connections }: Props): ReactElement {
     });
 
     const unsubscribe = window.jujia.onStream((event: StreamEvent) => {
+      // **先筛会话**（外部审查 T5）：这条通道是全局广播。增量因为 messageId 对不上看起来"没事"，
+      // 但 done / error / usage / tool_* 这四支不需要 messageId，切了会话照样把界面改错。
+      if (!belongsToSession(event, sessionIdRef.current)) return;
       if (event.type === 'text_delta') {
         // delta 合批：流式期间每秒可能推几十次增量，每次都 setState 会造成高频重渲染。
         // 合批逻辑抽到 @jujia/shared（纯函数 + 可注入调度器），因此「合批被去掉」这类退化能被测出。
@@ -213,16 +224,31 @@ export function ChatPanel({ connections }: Props): ReactElement {
       }));
   }
 
+  /**
+   * 换一个会话看时**必须一起清掉**的"这一会话专属"状态。
+   *
+   * 为什么现在有这条：事件按会话筛之后（T5），上一个会话的 `done` 不再会落到当前界面上 ——
+   * 那是修复的目的。但反过来，也没人替我们把 `sending` / `usage` 归零了。
+   * 所以换会话的那一刻由我们自己清：**留下的只有这个会话自己的事实**。
+   */
+  function resetView(): void {
+    setSending(false);
+    setUsage(null);
+    setToolLines([]);
+    setHistoryHint(null);
+    setNoteHint(null);
+    setLastError(null);
+  }
+
   /** 继续一个磁盘上的会话（6a 的"重启不丢对话"就落在这里） */
   async function resume(id: string): Promise<void> {
     const page = await window.jujia.chatHistory({ sessionId: id, limit: 120 });
+    resetView();
     setBubbles(toBubbles(page.messages));
-    setToolLines([]);
-    setSessionId(id);
+    selectSession(id);
     setPickId(id);
     setHistoryTotal(page.total);
     setLoadedFrom(page.hasMore);
-    setNoteHint(null);
   }
 
   /**
@@ -267,12 +293,14 @@ export function ChatPanel({ connections }: Props): ReactElement {
     setToolLines([]);
 
     try {
+      setHistoryHint(null);
       const res = await window.jujia.chatSend({
         connectionId,
         text,
         ...(sessionId ? { sessionId } : {}),
       });
-      setSessionId(res.sessionId);
+      selectSession(res.sessionId);
+      setHistoryHint(res.warning);
       setBubbles((prev) => [
         ...prev,
         { id: res.messageId, role: 'assistant', content: '', streaming: true },
@@ -290,6 +318,12 @@ export function ChatPanel({ connections }: Props): ReactElement {
         ];
       });
     }
+  }
+
+  /** 换会话（续上 / 新建 / 用主进程给的 id）的唯一入口：状态与 ref 一起走，不给"只改一处"留机会 */
+  function selectSession(id: string | undefined): void {
+    sessionIdRef.current = id;
+    setSessionId(id);
   }
 
   async function stop(): Promise<void> {
@@ -356,12 +390,12 @@ export function ChatPanel({ connections }: Props): ReactElement {
             type="button"
             className="w2-btn"
             onClick={() => {
-              setSessionId(undefined);
+              resetView();
+              selectSession(undefined);
               setBubbles([]);
               setPickId('');
               setLoadedFrom(0);
               setHistoryTotal(0);
-              setToolLines([]);
             }}
           >
             新会话
@@ -377,6 +411,13 @@ export function ChatPanel({ connections }: Props): ReactElement {
           </span>
         )}
       </div>
+
+      {/* 磁盘历史没装回来时的提示（T6④）：话要说完 —— 旧记录没动、这一轮是从空上下文继续 */}
+      {historyHint !== null && (
+        <p className="p0-err" role="alert">
+          {historyHint}
+        </p>
+      )}
 
       <div className="w2-chat-scroll" ref={scrollerRef}>
         {viewState === 'empty' && (
