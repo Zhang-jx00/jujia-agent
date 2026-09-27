@@ -89,11 +89,34 @@ function pathOf(args: Record<string, unknown>): string | null {
   return typeof p === 'string' ? p : null;
 }
 
+/** 盘符前缀（`C:`）里的冒号不是数据流分隔符，判断 ADS 之前要先剥掉 */
+const DRIVE_PREFIX = /^[a-zA-Z]:[\\/]/;
+
+/**
+ * 把 NTFS 路径拆成「宿主文件」与「流名」。
+ *
+ * 为什么要拆：`.env:$DATA` 的冒号会让 `\.env(\.|$)` 这类**带结尾锚点**的模式失配，
+ * 而它落在 `.env` **这个文件对象**上（NTFS 的一个文件可挂多条数据流）——
+ * 不剥离就等于给敏感清单开了一条"加后缀"的旁路（实测见复核 034 的 E-1）。
+ */
+function splitAds(target: string): { host: string; stream: string | null } {
+  const offset = DRIVE_PREFIX.test(target) ? 2 : 0;
+  const body = target.slice(offset);
+  const idx = body.indexOf(':');
+  if (idx < 0) return { host: target, stream: null };
+  return { host: target.slice(0, offset + idx), stream: body.slice(idx + 1) };
+}
+
 /** 该路径是否属于「必须人工确认」的敏感目标 */
 export function sensitiveReason(target: string): string | null {
+  const { host, stream } = splitAds(target);
   for (const { re, why } of SENSITIVE_PATH_PATTERNS) {
-    if (re.test(target)) return why;
+    // 按**宿主名**匹配，而不是按整串匹配（外部审查 T2）
+    if (re.test(host)) return why;
   }
+  // 清单没命中，但路径带流名：流内容可以远大于"文件名看起来是什么"，
+  // 而且这里到底是不是 ADS 取决于文件系统 —— 不确定就归到要问的一侧（fail closed）
+  if (stream !== null) return '路径含冒号（NTFS 备用数据流形态），流名不构成独立文件';
   return null;
 }
 
@@ -102,13 +125,23 @@ export function sensitiveReason(target: string): string | null {
  *
  * 决策顺序（越靠前的规则越优先，便于用户理解与测试）：
  * 0. **用户规则**（W5c）：deny / ask 绝对生效；allow 在 plan / dontAsk 下让位于会话意图
- * 1. 只读工具 → 放行（不打扰）
- * 2. 高危清单命中 → 询问（任何模式都问）
- * 3. bypassPermissions → 放行（附风险提示）
- * 4. plan / dontAsk → 拒绝写与执行
- * 5. 敏感目标：即使 acceptEdits 也必须问（按参数分级）
+ * 1. 高危清单命中 → 询问（任何模式、任何副作用等级都问，**含只读**）
+ * 2. bypassPermissions → 放行（附风险提示）
+ * 3. plan / dontAsk → 拒绝写与执行（只读仍继续往下走：plan 模式的全部用途就是读）
+ * 4. **敏感目标 → 硬 ask**（dontAsk 下直接拒绝，因为它不提供询问机会）
+ * 5. 只读且可逆 → 放行（不打扰）
  * 6. acceptEdits 且是工作区内、非敏感的写 → 放行
- * 7. 其余写/执行 → 询问
+ * 7. 其余写 → 软 ask；执行 → 硬 ask
+ *
+ * **第 4 条为什么必须在第 5 条之前（2026-09-27 外部审查 T1，严重）**：
+ * 原来"只读放行"排在最前面，于是 `read_file` 读 `.env`、`id_rsa`、`.git-credentials`
+ * 全部静默通过 —— 密钥直接进模型上下文，而模型有外发能力（打开外部程序、执行命令、发请求）。
+ * "只读"防的是**改坏磁盘**，防不了**把东西读出去**，所以敏感路径必须与副作用等级**正交**：
+ * 它是"这个东西能不能被看见"的判断，不是"能不能被改动"的判断。
+ * 同一条重排顺带修好了高危清单：它以前也排在只读放行之后，对只读工具同样是死代码。
+ *
+ * 唯一的两个让路口径与旧版一致：用户自己写下的 `allow` 规则、以及显式开启的 `bypassPermissions` ——
+ * 二者都是**看得见、写下来**的决定，不在这里偷偷推翻它们（真要收紧就在规则表里别写 allow）。
  *
  * **W10g 起本函数才真正接入执行路径**：此前它只被自己的测试调用，
  * 执行器只按 `tool.kind` 询问 —— 也就是说模式、敏感路径、高危清单在运行时全是死代码。
@@ -130,12 +163,7 @@ export function decideGate(ctx: GateContext): GateDecision {
     return { action: 'allow', reason: matched.reason, risk: 'low' };
   }
 
-  // 1) 只读且可逆：不打扰用户
-  if (ctx.kind === 'read') {
-    return { action: 'allow', reason: '只读操作，不修改任何状态', risk: 'low' };
-  }
-
-  // 2) 高危清单：无论模式如何都要人来确认
+  // 1) 高危清单：无论模式与副作用等级如何都要人来确认（含只读工具）
   if (ctx.alwaysAsk?.includes(ctx.toolName)) {
     return {
       action: 'ask',
@@ -145,7 +173,7 @@ export function decideGate(ctx: GateContext): GateDecision {
     };
   }
 
-  // 3) 显式放行模式
+  // 2) 显式放行模式
   if (ctx.mode === 'bypassPermissions') {
     return {
       action: 'allow',
@@ -154,8 +182,8 @@ export function decideGate(ctx: GateContext): GateDecision {
     };
   }
 
-  // 4) 只读类模式：写与执行一律拒绝
-  if (ctx.mode === 'plan' || ctx.mode === 'dontAsk') {
+  // 3) 只读类模式：写与执行一律拒绝。只读**不在这里拒** —— plan 模式就是要让人读着规划
+  if (ctx.kind !== 'read' && (ctx.mode === 'plan' || ctx.mode === 'dontAsk')) {
     const modeName = ctx.mode === 'plan' ? '计划（只读）' : 'dontAsk（拒绝而不询问）';
     return {
       action: 'deny',
@@ -164,10 +192,18 @@ export function decideGate(ctx: GateContext): GateDecision {
     };
   }
 
-  // 5) 敏感目标：即使 acceptEdits 也必须问（按参数分级）
+  // 4) 敏感目标：**先问再说**，acceptEdits 也一样（按参数分级）。
+  //    这一条排在只读放行之前，所以 `read_file` 读 `.env` 现在会弹硬确认（T1 的修复点，变异 M26）
   if (target !== null) {
     const why = sensitiveReason(target);
     if (why !== null) {
+      if (ctx.mode === 'dontAsk') {
+        return {
+          action: 'deny',
+          reason: `目标是敏感路径（${why}），而 dontAsk 模式不提供询问机会，直接拒绝`,
+          risk: 'high',
+        };
+      }
       return {
         action: 'ask',
         reason: `目标是敏感路径（${why}），需人工确认`,
@@ -175,6 +211,11 @@ export function decideGate(ctx: GateContext): GateDecision {
         bypassable: false,
       };
     }
+  }
+
+  // 5) 只读且可逆：到这里才不打扰用户
+  if (ctx.kind === 'read') {
+    return { action: 'allow', reason: '只读操作，不修改任何状态', risk: 'low' };
   }
 
   if (ctx.mode === 'acceptEdits' && ctx.kind === 'write') {

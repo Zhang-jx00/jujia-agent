@@ -1,5 +1,5 @@
 import { ToolError, type StoredTool, type ToolContext, type ToolKind, type ToolOutcome } from './types';
-import { decideGate, type PermissionMode } from '../permissions/policy';
+import { decideGate, type GateDecision, type PermissionMode } from '../permissions/policy';
 import { noopHookRunner, type HookRunner } from '../hooks/types';
 import type { PermissionRule } from '../permissions/rules';
 
@@ -234,7 +234,7 @@ export async function runTool(
         id: newId(),
         toolName: tool.name,
         kind: tool.kind,
-        summary: summarizeRequest(tool, rawArgs),
+        summary: summarizeRequest(tool, rawArgs, gate),
         args: rawArgs,
         paths,
       }),
@@ -391,14 +391,21 @@ function collectPaths(rawArgs: unknown): string[] {
  * 弹窗标题。执行类必须**把命令行本身写进标题**：
  * 只写"run_command · 执行命令"等于让人不看内容就批准 —— 完整参数虽然在 `<details>` 里，
  * 但那是折叠的，而审批这一环的全部价值都在于"人真的看见了要做什么"。
+ *
+ * 末尾带上**策略给出的理由**（2026-09-27，随外部审查 T1 一起补）：此前弹窗只说"这是读取类操作"，
+ * 于是"读普通文件"与"读 `.env`"长得一模一样 —— 用户看不见差别，就只会凭惯性点允许，
+ * 分级判定的价值被弹窗自己抹平了。理由本来就是 `decideGate` 产出的，这里只是把它送到人眼前。
  */
-function summarizeRequest(tool: StoredTool, rawArgs: unknown): string {
+function summarizeRequest(tool: StoredTool, rawArgs: unknown, gate: GateDecision): string {
   const base = `${tool.name} · ${kindLabel(tool.kind)}`;
-  if (tool.kind !== 'exec') return base;
+  const withReason = `${base} —— ${gate.reason}`;
+  if (tool.kind !== 'exec') return withReason;
   const command =
     typeof rawArgs === 'object' && rawArgs !== null ? (rawArgs as { command?: unknown }).command : undefined;
-  if (typeof command !== 'string' || command.trim() === '') return base;
+  if (typeof command !== 'string' || command.trim() === '') return withReason;
   // 截断只为排版（弹窗不该被一条 4000 字的命令撑破），完整值仍可在参数里看到
   const flat = command.replace(/\s+/g, ' ').trim();
-  return flat.length > 200 ? `${base}：${flat.slice(0, 200)}…（完整命令见参数）` : `${base}：${flat}`;
+  return flat.length > 200
+    ? `${base}：${flat.slice(0, 200)}…（完整命令见参数）—— ${gate.reason}`
+    : `${base}：${flat} —— ${gate.reason}`;
 }

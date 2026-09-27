@@ -52,8 +52,16 @@ export function resolveInsideWorkspace(workspaceRoot: string, input: string): st
   if (/^\\\\/.test(raw)) {
     throw new ToolError('path_denied', `拒绝访问设备路径或 UNC 路径：${raw}`);
   }
-  // 备用数据流（ADS）：`file.txt:evil`
-  if (/^[a-zA-Z]:/.test(raw) === false && /:/.test(raw.replace(/^[a-zA-Z]:/, ''))) {
+  // 备用数据流（ADS）：`file.txt:evil`、`C:\work\.env:$DATA`
+  //
+  // 曾经的写法是"以盘符开头的路径整体跳过这条检查"，那是**真洞**（2026-09-27 外部审查 T2）：
+  // 加上盘符就能把流名带进来，而敏感名清单的正则都带结尾锚点（`\.env(\.|$)`），
+  // 后缀一挂就匹配不到 —— 实测：`.env:hidden` 修前判"不敏感"、修后判"敏感"（复核 034 的 E-1）。
+  // 现在只放过盘符本身，**剩下的部分见冒号一律拒**。
+  // （报告里"realpath 会解析回宿主文件"这一句实测不成立：不存在的流直接 ENOENT，
+  //  存在的流原样返回带流名的路径。洞是真的，机理按实测写。）
+  const afterDrive = raw.replace(/^[a-zA-Z]:/, '');
+  if (afterDrive.includes(':')) {
     throw new ToolError('path_denied', `拒绝访问备用数据流（ADS）路径：${raw}`);
   }
   // 尾随点/空格在 Windows 会被静默剥离，是经典绕过手法（`secret.txt.` 等价 `secret.txt`）。

@@ -39,6 +39,9 @@ TEMP_PATTERNS = [
     "*.bak",
     "*.corrupt-*",       # json-store 隔离的损坏文件（保留 30 天可回溯）
     "*.swp",
+    # electron-vite 每次构建留下的临时配置副本（文件名里带毫秒时间戳）。
+    # 曾经有 8 份被误提交进仓库（外部审查 T12）—— 这里补上模式，跑一次就收进 .trash
+    "electron.vite.config.*.mjs",
     ".DS_Store",
     "Thumbs.db",
     "desktop.ini",

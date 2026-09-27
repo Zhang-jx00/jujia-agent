@@ -141,6 +141,26 @@ describe('resolveInsideWorkspace：必须拒绝的越界手法', () => {
     expectDenied(() => resolveInsideWorkspace(root, 'sub/a.txt:evil'));
   });
 
+  it('备用数据流（ADS）：带盘符的绝对路径同样被拒（外部审查 T2）', () => {
+    // 这一条**刻意盯理由**：`C:\work\...` 本身也在工作区之外，只断言 code 的话，
+    // 就算把 ADS 检查整个删掉、越界检查照样会拒它 —— 变异就逃过去了。
+    // 所以断言"是被 ADS 这条拒的"，而不是"反正被拒了"。
+    const reasonOf = (fn: () => unknown): string => {
+      try {
+        fn();
+        return '（未抛错）';
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    };
+    expect(reasonOf(() => resolveInsideWorkspace(root, 'C:\\work\\file.txt:$DATA'))).toContain('备用数据流');
+    expect(reasonOf(() => resolveInsideWorkspace(root, 'C:\\work\\.env:$DATA'))).toContain('备用数据流');
+    // 真实工作区路径 + 流名：Windows 下这就是"带盘符"那一支，POSIX 下冒号也一律 fail closed
+    expectDenied(() => resolveInsideWorkspace(root, `${join(root, 'sub', 'a.txt')}:$DATA`));
+    // 盘符本身的那个冒号不是流分隔符 —— 合法路径不能被误拒
+    expect(() => resolveInsideWorkspace(root, join(root, 'sub', 'a.txt'))).not.toThrow();
+  });
+
   it.each([
     ['尾随点（会被系统剥离）', 'sub/secret.txt.'],
     ['尾随空格（会被系统剥离）', 'sub/secret.txt '],

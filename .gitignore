@@ -26,6 +26,8 @@ npm-debug.log*
 *.tmp
 *.temp
 _generated-*.md
+# electron-vite 构建时留下的临时配置（带毫秒时间戳；外部审查 T12 清掉的正是这批）
+electron.vite.config.*.mjs
 
 # 编辑器 / 系统
 .vscode/*

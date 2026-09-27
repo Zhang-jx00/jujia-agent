@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { emptyHookResult, type HookRunParams, type HookRunResult } from '../hooks/types';
-import { writeFileTool } from './builtin/file-tools';
+import { readFileTool, writeFileTool } from './builtin/file-tools';
 import {
   runTool,
   type PermissionAnswer,
@@ -115,6 +115,42 @@ describe('硬 ask：任何「总是允许」都压不掉', () => {
     expect(asked[0]?.toolName).toBe('write_file');
     expect(res.asked).toBe(true);
     expect(res.outcome.ok).toBe(false); // 用户（这里）拒绝了
+  });
+
+  /**
+   * 外部审查 T1 的**运行时**证据（策略层的对应用例在 `permissions/policy.test.ts`）。
+   * 修之前这条链路是：只读 → 直接放行 → 一句都不问，密钥静默进模型上下文。
+   */
+  it('只读工具读敏感路径也必须问，而且弹窗标题要写清"为什么问"', async () => {
+    const { resolver, asked } = fixedResolver('deny');
+    const res = await runTool(
+      readFileTool as never,
+      { path: join(root, '.env') },
+      ctx(),
+      resolver,
+      { alwaysAllow: new Set(['read_file']) },
+    );
+
+    expect(asked).toHaveLength(1); // 「总是允许」压不掉，而且读也一样
+    expect(res.asked).toBe(true);
+    expect(res.outcome.ok).toBe(false);
+    // 标题里必须看得见理由：只写"read_file · 读取"时，读 .env 与读 README 长得一模一样，
+    // 用户只能凭惯性点允许 —— 分级判定的价值会被弹窗自己抹平
+    expect(asked[0]?.summary).toContain('目标是敏感路径');
+  });
+
+  it('dontAsk 模式读敏感文件：直接拒绝，**连一次都不问**（该模式不给询问机会）', async () => {
+    const { resolver, asked } = fixedResolver('allow_once');
+    const res = await runTool(
+      readFileTool as never,
+      { path: join(root, '.env') },
+      ctx(),
+      resolver,
+      { mode: 'dontAsk' },
+    );
+    expect(asked).toHaveLength(0);
+    expect(res.asked).toBe(false);
+    expect(res.outcome.ok).toBe(false);
   });
 
   it('执行类命令：即使已记住「总是允许」也**必须再问**（按工具名放行 = 放行任意命令）', async () => {

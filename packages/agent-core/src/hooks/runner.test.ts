@@ -56,6 +56,15 @@ const SCRIPTS: Record<string, string> = {
     process.stdout.write(JSON.stringify({hookSpecificOutput:{permissionDecision:'ask'}}));`,
   'big.mjs': `process.stdout.write(JSON.stringify({hookSpecificOutput:{additionalContext:'x'.repeat(50000)}}));`,
   'stderr.mjs': `process.stderr.write('钩子的日志行');process.exit(0);`,
+  // 把**子进程自己看到的**环境报告回来 —— 剔密是否生效，问进程本身最可靠
+  'dump-env.mjs': `
+    process.stdout.write(JSON.stringify({hookSpecificOutput:{additionalContext:JSON.stringify({
+      keys:Object.keys(process.env).sort(),
+      event:process.env.JUJIA_HOOK_EVENT ?? null,
+      ws:process.env.JUJIA_WORKSPACE ?? null,
+      probe:process.env.JUJIA_PROBE_KEY ?? null,
+      proxy:process.env.HTTP_PROXY ?? null,
+    })}}));`,
 };
 
 beforeAll(() => {
@@ -260,6 +269,77 @@ describe('钩子引擎（真子进程）', () => {
     expect((await runner.run(params('PreToolUse'))).ranCount).toBe(1);
     current = { ...current, enabled: false };
     expect((await runner.run(params('PreToolUse'))).ranCount).toBe(0);
+  });
+});
+
+/**
+ * 钩子子进程的环境（外部审查 T3，严重）。
+ *
+ * 为什么单独一组：钩子命令**不过权限门**（它是用户自己写的审批程序，本来就在门外侧），
+ * 所以"子进程能看到哪些环境变量"是这条链上唯一的安全边界。
+ * 此前这里是 `{ ...process.env }` —— 主进程环境里有 API Key，
+ * 而终端与 exec 那两条早就走 `buildTerminalEnv` 剔密了，钩子是唯一漏网的一支。
+ *
+ * 断言方式是**问子进程本人**：让它把自己看到的键名清单原样报告回来。
+ * 只断言 runner 传给 spawn 的 options 是不够的 —— 那等于让被测对象自己交卷。
+ */
+describe('钩子子进程拿不到宿主密钥（与终端 / exec 同一套剔密）', () => {
+  const SECRET_KEYS = [
+    'OPENAI_API_KEY',
+    'DEEPSEEK_TOKEN',
+    'DB_PASSWORD',
+    'AWS_SECRET_ACCESS_KEY',
+    'SSH_PASSWD',
+    'SOME_CREDENTIAL',
+    'BASIC_AUTH',
+    'JUJIA_PROBE_KEY',
+    'ELECTRON_RUN_AS_NODE',
+  ];
+
+  const childEnv = async (): Promise<Record<string, unknown>> => {
+    const runner = createProcessHookRunner({
+      getConfig: () => configWith('PreToolUse', 'dump-env.mjs'),
+      // 注入一份"宿主环境"：既带真值（PATH 之类，否则子进程起不来），也带一批密钥
+      baseEnv: () => {
+        const real = process.env as Record<string, string | undefined>;
+        return {
+          PATH: real['PATH'],
+          SYSTEMROOT: real['SYSTEMROOT'] ?? real['SystemRoot'],
+          TEMP: real['TEMP'],
+          TMP: real['TMP'],
+          HTTP_PROXY: 'http://user:pass@127.0.0.1:8080',
+          ...Object.fromEntries(SECRET_KEYS.map((k) => [k, 'must-not-leak'])),
+        };
+      },
+    });
+    const res = await runner.run(params('PreToolUse'));
+    expect(res.ranCount).toBe(1);
+    return JSON.parse(res.additionalContext[0] ?? '{}') as Record<string, unknown>;
+  };
+
+  it('子进程看到的键名里没有任何 *KEY / *TOKEN / *SECRET / *PASSWORD / *PASSWD / *CREDENTIAL / *AUTH', async () => {
+    const seen = await childEnv();
+    const keys = (seen['keys'] as string[]) ?? [];
+    const leaked = keys.filter((k) => /(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)/i.test(k));
+    expect(leaked).toEqual([]);
+  });
+
+  it('逐个点名：注入的每一把密钥子进程都说自己没有', async () => {
+    const seen = await childEnv();
+    const keys = (seen['keys'] as string[]) ?? [];
+    for (const key of SECRET_KEYS) expect(keys).not.toContain(key);
+    expect(seen['probe']).toBeNull();
+  });
+
+  it('钩子专用变量照常在：事件名 + 工作区（这是剔密之后必须保留的那部分）', async () => {
+    const seen = await childEnv();
+    expect(seen['event']).toBe('PreToolUse');
+    expect(seen['ws']).toBe(dir);
+  });
+
+  it('代理变量只脱敏不删除（删了钩子里的网络就坏了）', async () => {
+    const seen = await childEnv();
+    expect(seen['proxy']).toBe('http://127.0.0.1:8080');
   });
 });
 

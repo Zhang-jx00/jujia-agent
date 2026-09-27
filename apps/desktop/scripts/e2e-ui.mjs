@@ -957,6 +957,144 @@ try {
   if (!listed.some((s) => s.id === seededSession)) fail('重建的清单里没有那个会话目录', JSON.stringify(listed).slice(0, 400));
   ok('进程死过一次之后：仍是那 4 条，清单缺失也能从目录重建 —— 重启不丢对话');
 
+  /* ---------------- 只读工具读敏感文件也要过人手（外部审查 T1） ----------------
+   *
+   * 本轮最要紧的一条行为真值：`read_file` 读 `.env` 曾经**静默放行**（只读排在敏感判定之前），
+   * 密钥就这样进模型上下文，而这个应用有外发能力（打开外部程序 / 执行命令 / 发请求）。
+   * 界面级证据 = 弹窗真的出现 + **拒绝之后内容真的没被读出来**（不是只看权限层的返回值）。
+   *
+   * 用 win2：本步与钩子配置那一步都排在 6a 那次"关掉重开"之后，
+   * 旧窗口上闭包的 helper（waitForText / bodyText / tabButton）已经全部失效。
+   */
+  step('只读工具读敏感文件必须过人手：拒绝就读不到，「总是允许」也压不掉下一次确认');
+  const body2 = async () => await win2.evaluate(() => document.body.innerText);
+  const waitText2 = async (needle, ms = 8_000) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if ((await body2()).includes(needle)) return true;
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    return false;
+  };
+  const clickDialog2 = async (label) => {
+    await win2.locator('button', { hasText: label }).first().click();
+    await win2.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
+  };
+  const dialogOpen2 = async () => (await win2.locator('[role="dialog"][aria-label="权限请求"]').count()) === 0;
+  const toolReadFile = (path) => win2.evaluate(async (p) => await window.jujia.toolRun('read_file', { path: p }), path);
+
+  const secretMarker = 'E2E_T1_SECRET_DO_NOT_LEAK';
+  writeFileSync(join(wsDir, '.env'), `API_TOKEN=${secretMarker}\n`, 'utf8');
+  /**
+   * 锚点里带上**理由**：弹窗标题此刻包含策略给出的原因，
+   * 于是这一步同时断言了"问得对"与"说得清为什么问" ——
+   * 只写"需要你确认："的话，读普通文件被误拦也会绿。
+   */
+  const SENSITIVE_HEAD = '需要你确认：read_file · 读取 —— 目标是敏感路径';
+
+  const deniedRead = toolReadFile('.env');
+  if ((await waitText2(SENSITIVE_HEAD)) !== true) {
+    fail('read_file 读 .env 竟然没弹确认（只读放行仍排在敏感判定之前 —— T1 没修上）', (await body2()).slice(0, 900));
+  }
+  await clickDialog2('拒绝');
+  const t1Denied = await deniedRead;
+  if (t1Denied.ok !== false) fail('用户拒绝了，读取却报成功', JSON.stringify(t1Denied).slice(0, 400));
+  if (JSON.stringify(t1Denied).includes(secretMarker)) {
+    fail('拒绝之后密钥仍然出现在工具结果里', JSON.stringify(t1Denied).slice(0, 400));
+  }
+  ok('拒绝 → 内容没有进上下文（工具结果里没有那把密钥）');
+
+  const alwaysRead = toolReadFile('.env');
+  if ((await waitText2(SENSITIVE_HEAD)) !== true) fail('第二次读敏感文件没有再弹确认');
+  await clickDialog2('本次会话总是允许');
+  const alwaysResult = await alwaysRead;
+  if (alwaysResult.ok !== true) fail('批准后读不到文件', String(alwaysResult.content).slice(0, 300));
+  if (!String(alwaysResult.content).includes(secretMarker)) fail('批准了却没读到内容', String(alwaysResult.content).slice(0, 300));
+  ok('批准 → 才读得到内容');
+
+  const thirdRead = toolReadFile('.env');
+  if ((await waitText2(SENSITIVE_HEAD)) !== true) {
+    fail('「本次会话总是允许」把第三次的确认压掉了 —— 敏感路径绝不允许这样');
+  }
+  await clickDialog2('拒绝');
+  await thirdRead;
+  ok('硬 ask 不被压掉：第三次读仍然过一次人手');
+
+  // 反向：普通文件必须照旧"只读不打扰"，否则这条修复会把审批疲劳放大成橡皮图章
+  writeFileSync(join(wsDir, 'plain-read.txt'), 'E2E_T1_PLAIN\n', 'utf8');
+  const plain = await toolReadFile('plain-read.txt');
+  if (plain.ok !== true || !String(plain.content).includes('E2E_T1_PLAIN')) {
+    fail('普通只读被误拦（"只读不打扰"这条底线要守住）', JSON.stringify(plain).slice(0, 300));
+  }
+  if (!(await dialogOpen2())) fail('读普通文件也弹了确认框 —— 审批疲劳是自己造出来的');
+  ok('反向核对：读普通文件一次弹窗都没有');
+
+  /* ---------------- 钩子配置写入的权限门（外部审查 T4） ----------------
+   *
+   * 为什么这一步值得单独跑：钩子配置里写的是"**将来要执行的命令**"，而钩子子进程
+   * 不过权限门（它本来就是用户自己写的审批程序，在门的外侧）。于是这条通道如果能静默写入，
+   * 渲染层一旦被注入就等于拿到"任意命令 + 宿主环境 + 重启还在"的持久后门。
+   *
+   * 走的是**真界面**：切页签 → 改编辑器里的 JSON → 点「保存并校验」→ 在弹窗上做决定。
+   * 真值仍是磁盘：`hooks.json` 里有没有多出那一行。
+   */
+  step('钩子配置：改一次问一次、拒绝不落盘、批准才落盘，「总是允许」也压不掉下一次');
+  const hooksFile = join(dataDir, 'hooks.json');
+  const saveHooksFromEditor = async (text) => {
+    await win2.locator('nav.app-tabs button', { hasText: '钩子' }).first().click();
+    await win2.locator('textarea.jj-hooks-editor').fill(text);
+    await win2.locator('button', { hasText: '保存并校验' }).first().click();
+  };
+
+  // enabled:false —— 本步只验"写入要不要问"，不让钩子真的参与后续任何一次工具调用
+  const HOOK_MARKER = 'JUJIA_E2E_HOOK_MARKER.mjs';
+  const hooksJson = JSON.stringify(
+    {
+      enabled: false,
+      timeoutMs: 5_000,
+      maxOutputBytes: 4_096,
+      events: { PreToolUse: [{ matcher: '', hooks: [{ type: 'process', command: 'node', args: [HOOK_MARKER] }] }] },
+    },
+    null,
+    2,
+  );
+  const hooksOnDisk = () => (existsSync(hooksFile) ? readFileSync(hooksFile, 'utf8') : null);
+  const ASK_HEAD = '需要你确认：修改钩子配置会以你的宿主环境执行命令';
+
+  const hooksBefore = hooksOnDisk();
+  await saveHooksFromEditor(hooksJson);
+  const askFirst = await waitText2(ASK_HEAD);
+  if (askFirst !== true) fail('保存钩子配置没有弹确认（T4 的口子还在）', (await body2()).slice(0, 900));
+  if (!(await body2()).includes(HOOK_MARKER)) {
+    fail('确认弹窗里看不到要写入的命令 —— 看不到内容的审批等于没有审批', (await body2()).slice(0, 900));
+  }
+  await clickDialog2('拒绝');
+  if (hooksOnDisk() !== hooksBefore) fail('用户明明拒绝了，hooks.json 却被改动（拒绝必须真的不做）');
+  const deniedNote = await waitText2('钩子配置未改动');
+  if (deniedNote !== true) fail('拒绝之后界面没有如实说明配置未改动', (await body2()).slice(0, 900));
+  ok('拒绝 → 磁盘一字未动，界面说明未改动');
+
+  await saveHooksFromEditor(hooksJson);
+  const askSecond = await waitText2(ASK_HEAD);
+  if (askSecond !== true) fail('第二次保存没有再弹确认', (await body2()).slice(0, 900));
+  await clickDialog2('允许一次');
+  const allowedDisk = hooksOnDisk() ?? '';
+  if (!allowedDisk.includes(HOOK_MARKER)) fail('批准了却没写进磁盘（这次写入其实没发生）', allowedDisk.slice(0, 400));
+  const savedNote = await waitText2('已保存');
+  if (savedNote !== true) fail('批准后界面没有报告保存成功', (await body2()).slice(0, 900));
+  ok('批准 → 配置真的落盘（磁盘上有那条命令），界面报告已保存');
+
+  // 第三次点「本次会话总是允许」：硬 ask 不该有白名单可记，第四次仍必须问
+  await saveHooksFromEditor(hooksJson);
+  const askThird = await waitText2(ASK_HEAD);
+  if (askThird !== true) fail('第三次保存没弹确认', (await body2()).slice(0, 900));
+  await clickDialog2('本次会话总是允许');
+  await saveHooksFromEditor(hooksJson);
+  const askFourth = await waitText2(ASK_HEAD);
+  if (askFourth !== true) fail('「总是允许」把第四次的确认压掉了 —— 钩子配置绝不允许这样');
+  await clickDialog2('拒绝');
+  ok('「总是允许」压不掉：这里没有 remembered 白名单，每次写钩子配置都过人手');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -974,5 +1112,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 钩子配置写入逐次确认 → 干净退出');
 process.exit(0);

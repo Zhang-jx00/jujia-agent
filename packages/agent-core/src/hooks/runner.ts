@@ -8,6 +8,7 @@
 import { spawn } from 'node:child_process';
 import { buildArgvCommand, checkArgvSafety } from '../commands/argv';
 import { killProcessTree } from '../commands/process';
+import { buildTerminalEnv } from '../terminal/terminal';
 import {
   emptyHookResult,
   type HookCommandConfig,
@@ -45,6 +46,14 @@ export interface HookRunnerDeps {
    * 缓存会让"我明明删掉了它还在跑"变成灵异事件（权限规则表同理）。
    */
   getConfig: () => HookConfig;
+  /**
+   * 钩子子进程的**基础环境**（默认 `process.env`，测试可注入一份带密钥的字典）。
+   *
+   * 为什么要留这个口子并且刻意不直接读 `process.env`：主进程环境里有 API Key，
+   * 而钩子命令**不过权限门**（它是用户自己写的程序），所以"子进程能看到什么"
+   * 是这里唯一的安全边界 —— 必须能被一条单测问倒，而不是靠人相信 `buildTerminalEnv` 生效了。
+   */
+  baseEnv?: () => Record<string, string | undefined>;
   spawnImpl?: HookSpawnLike;
   platform?: NodeJS.Platform;
   onDebug?: (message: string) => void;
@@ -59,6 +68,11 @@ function toText(chunk: unknown): string {
   if (typeof chunk === 'string') return chunk;
   if (chunk instanceof Uint8Array) return Buffer.from(chunk).toString('utf8');
   return String(chunk);
+}
+
+/** 默认基础环境：主进程环境（剔密由 `buildTerminalEnv` 负责，不在这层） */
+function defaultBaseEnv(): Record<string, string | undefined> {
+  return process.env as Record<string, string | undefined>;
 }
 
 /** 校验 hook 返回的 JSON 结构（非法结构按"失败"处理，不按"拒绝"处理） */
@@ -135,6 +149,12 @@ export function createProcessHookRunner(deps: HookRunnerDeps): HookRunner {
     const spec = buildArgvCommand(hook.command, hook.args ?? [], platform);
     const timeoutMs = hook.timeoutMs ?? config.timeoutMs;
     const limit = config.maxOutputBytes;
+    // 与终端 / exec **同一套**环境装配（剔 `*KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH`、
+    // 清掉 ELECTRON_RUN_AS_NODE、代理只脱敏）—— 变异 M28 咬这一行；
+    // 原来这里是 { ...process.env }，等于把宿主密钥清单交给一个不过权限门的子进程（T3）
+    const env = buildTerminalEnv((deps.baseEnv ?? defaultBaseEnv)(), { workspaceRoot: input.cwd });
+    // 钩子专用变量：告诉钩子自己在哪个事件里（省得靠参数传递），在剔除之后追加
+    env['JUJIA_HOOK_EVENT'] = input.hookEventName;
 
     let child: HookChildLike;
     try {
@@ -143,8 +163,7 @@ export function createProcessHookRunner(deps: HookRunnerDeps): HookRunner {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         shell: false,
-        // 让钩子知道自己在哪个事件里（省得靠参数传递）
-        env: { ...process.env, JUJIA_HOOK_EVENT: input.hookEventName },
+        env,
       });
     } catch (err) {
       return {
