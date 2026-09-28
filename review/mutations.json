@@ -368,6 +368,30 @@
       "find": "          ? '有一个审批请求在主进程等待超时，已自动关闭 —— 那一步没有执行，需要的话请重新发起'",
       "replace": "          ? ''",
       "test": "apps/desktop/src/renderer/src/features/permission/permission-dialog.test.tsx"
+    },
+    {
+      "id": "M47",
+      "desc": "handoff 那一轮只回移交自己那条 tool 消息（同轮其余调用没回复 → 下一轮续聊上游 400，会话历史当场作废）",
+      "file": "packages/agent-core/src/loop/agent-loop.ts",
+      "find": "toolCallId: call.id, content });",
+      "replace": "toolCallId: handoff.id, content });",
+      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
+    },
+    {
+      "id": "M48",
+      "desc": "网页发起的下载不再取消（第三方页面又能静默往本机写文件了）",
+      "file": "apps/desktop/src/main/browser-service.ts",
+      "find": "      item.cancel();",
+      "replace": "      // 变异：不取消，让下载照常进行",
+      "test": "apps/desktop/src/main/browser-wiring.test.ts"
+    },
+    {
+      "id": "M49",
+      "desc": "服务端重定向不再过 origin 锁（302 一次都不走 will-navigate，只走 will-redirect —— 漏挂就是整条底线失效）",
+      "file": "apps/desktop/src/main/browser-service.ts",
+      "find": "next.webContents.on('will-redirect', (event, targetUrl) => {",
+      "replace": "next.webContents.on('will-redirect-not-wired', (event, targetUrl) => {",
+      "test": "apps/desktop/src/main/browser-wiring.test.ts"
     }
   ]
 }

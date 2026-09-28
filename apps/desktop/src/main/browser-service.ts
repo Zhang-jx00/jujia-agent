@@ -60,6 +60,15 @@ export function createBrowserService(deps: BrowserServiceDeps): BrowserService {
   /** 用户**主动**打开的那个 origin；页面自己跳出不去它 */
   let userOrigin: string | null = null;
   let blocked: { url: string; reason: string } | null = null;
+  /**
+   * 接下来那一下失败**是我们自己拦出来的**（拦导航 / 取消下载），不是网页坏了。
+   *
+   * 为什么要单独记：被我们 preventDefault 的导航，Electron 随后会抛一个 `ERR_FAILED (-2)`，
+   * `did-fail-load` 和 `loadURL()` 的 catch 都看得见它 —— 不加这个标记，界面上真实的那句
+   * "跳出用户打开的站点…已被拦下"会立刻被"加载失败 / 加载未完成"盖掉（e2e 实测就是这样红的）。
+   * 一次性：谁消费谁清旗；成功落地或重新发起导航时也会清。
+   */
+  let blockedByUs = false;
   let bounds = { x: 0, y: 0, width: 0, height: 0 };
 
   const alive = (v: WebContentsView | null): v is WebContentsView =>
@@ -116,15 +125,67 @@ export function createBrowserService(deps: BrowserServiceDeps): BrowserService {
     view = next;
 
     // ① 页面发起的导航：协议策略 + 不许跳出用户所选站点
-    next.webContents.on('will-navigate', (event, targetUrl) => {
+    /**
+     * 判档只留一个调用点（外部审查 T11）：`will-navigate` 与 `will-redirect` 两个钩子共用这一段。
+     * `via` 只进日志、不进 `blocked.reason` —— 状态里那句理由必须保持单一来源，
+     * 免得界面同时出现两种说法（e2e 的锚点就是策略原文）。
+     */
+    const guardPageNavigation = (
+      event: { preventDefault: () => void },
+      targetUrl: string,
+      via: string,
+    ): void => {
       const verdict = decideProgrammaticNavigation(userOrigin, targetUrl);
-      if (!verdict.allow) {
-        event.preventDefault();
-        blocked = { url: targetUrl, reason: verdict.reason };
-        console.warn(`[browser] ${verdict.reason}`);
-        emit();
-      }
+      if (verdict.allow) return;
+      event.preventDefault();
+      blocked = { url: targetUrl, reason: verdict.reason };
+      blockedByUs = true;
+      console.warn(`[browser] ${via}被拦：${targetUrl} —— ${verdict.reason}`);
+      emit();
+    };
+
+    next.webContents.on('will-navigate', (event, targetUrl) => {
+      guardPageNavigation(event, targetUrl, '页面跳转');
     });
+
+    /**
+     * **服务端重定向（302 / 301）不走 `will-navigate`**。这不是推测：Electron 44 实测
+     * 一次跨站 302 的事件序列是 `did-start-navigation → will-redirect → did-redirect-navigation
+     * → did-navigate`，`will-navigate` 一次都没响（见复核 038 的探针记录）。
+     * 少挂这一条，"页面不许冒用用户点开的站点"这条底线在任何一个重定向面前整条失效 ——
+     * 而重定向恰恰是**页面最能自己造**的那一跳（它连链接都不用点）。
+     * 链式重定向每一跳各触发一次本事件，所以判定是逐跳的，不是只看第一跳。
+     */
+    next.webContents.on('will-redirect', (event, targetUrl) => {
+      guardPageNavigation(event, targetUrl, '服务端重定向');
+    });
+
+    /**
+     * ②' 下载（外部审查 T11）：**没有这一层时页面可以静默往本机写文件**。
+     * 实测：不挂 `will-download` 时，第三方页面的附件下载不经任何询问就落进系统"下载"目录
+     * （探针里两个 20 字节的 .tmp 就这么出现了，界面和状态一声不响）。
+     * 本项目没有"下载管理"这套产品，所以一律拦下并把理由留在状态里 ——
+     * 要真的下载，请用「用系统浏览器打开」在那一侧存。
+     */
+    const downloadGuard = (
+      _event: Electron.Event,
+      item: Electron.DownloadItem,
+      sender: Electron.WebContents,
+    ): void => {
+      if (sender !== next.webContents) return; // 只管这张网页，别动应用自己的会话
+      const name = item.getFilename();
+      item.cancel();
+      const downloadReason =
+        `网页想保存文件「${name}」，已拦下：内置浏览器不替你往本机写东西。` +
+        '需要下载的话，请用「用系统浏览器打开」在那个页面里存。';
+      blocked = { url: item.getURL(), reason: downloadReason };
+      blockedByUs = true;
+      console.warn(`[browser] 已拦下网页发起的下载：${name}`);
+      emit();
+    };
+    // 监听器挂在**共享的 default session** 上：视图销毁时必须摘掉，否则随每次开合累积
+    const guestSession = next.webContents.session;
+    guestSession.on('will-download', downloadGuard);
 
     // ② 新窗口请求：一律不开。合法的才允许"交给系统浏览器"（由用户决定，不是我们决定）
     next.webContents.setWindowOpenHandler(({ url }) => {
@@ -149,15 +210,25 @@ export function createBrowserService(deps: BrowserServiceDeps): BrowserService {
     next.webContents.on('did-navigate', () => {
       // 成功落地的导航清掉旧的拒绝提示（拒绝提示只在**当下**有意义）
       blocked = null;
+      blockedByUs = false;
       emit();
     });
     next.webContents.on('did-navigate-in-page', () => emit());
     next.webContents.on('page-title-updated', () => emit());
     next.webContents.on('did-fail-load', (_e, code, desc) => {
-      if (code !== -3 /* 主动中止 */) blocked = { url: '', reason: `加载失败（${String(code)} ${desc}）` };
+      if (code === -3 /* 主动中止 */) return;
+      if (blockedByUs) {
+        // 这一条失败就是刚拦下的那一跳的余波：界面上留着的必须是真实理由，不许写成"网页加载失败"
+        blockedByUs = false;
+        emit();
+        return;
+      }
+      blocked = { url: '', reason: `加载失败（${String(code)} ${desc}）` };
       emit();
     });
     next.webContents.on('destroyed', () => {
+      // 会话是共享的：监听器必须跟着这张网页一起走，不然开合十次就有十个 downloadGuard
+      guestSession.off('will-download', downloadGuard);
       if (view === next) {
         view = null;
         userOrigin = null;
@@ -214,12 +285,22 @@ export function createBrowserService(deps: BrowserServiceDeps): BrowserService {
       userOrigin = null;
     }
     blocked = null;
+    blockedByUs = false;
     view.setBounds(bounds);
     view.setVisible(true);
     try {
       await view.webContents.loadURL(decision.url);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (blockedByUs) {
+        // 这一看就是"我们自己拦的"：Electron 抛的是 ERR_FAILED，但用户需要知道的是**为什么**被拦。
+        // 把 loadURL 的报错当理由写进状态，等于把"这条底线起作用了"显示成"这个网页坏了"。
+        blockedByUs = false;
+        emit();
+        // 走 state() 而不是直接读 `blocked`：拦下的那一刻理由是由事件回调写进去的，
+        // 而 TS 的流程分析看不见跨 await 的闭包赋值（会把这里推断成 null / never）
+        return { ok: false, reason: state().blocked?.reason ?? '导航已被拦下', state: state() };
+      }
       // 加载被中止/失败不算越界：把理由回给用户，视图保留（可继续输入别的地址）
       blocked = { url: decision.url, reason: `加载未完成：${message}` };
       emit();

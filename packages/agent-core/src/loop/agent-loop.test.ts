@@ -273,6 +273,111 @@ describe('分支三：handoff', () => {
   });
 });
 
+/**
+ * handoff 与别的调用**同一轮**出现（外部审查 T10）。
+ *
+ * 为什么这条值得单独测：模型可以一次返回多个 tool_calls（并行调用是 OpenAI 兼容端的常规行为），
+ * 而旧的 handoff 分支只给 `handoff` 那一个回 tool 消息 —— assistant 声明了 N 个调用、
+ * 后面只跟 1 条回复，两件事同时坏掉：
+ *   ① 协议硬约束④破了：下一轮续聊时上游按"tool_calls 必须逐 id 有回复"校验 → 400，这个会话再也不能用；
+ *   ② 另外那几个调用**静默消失**：没执行、没告诉模型、也没告诉用户（本项目头号禁区）。
+ * 处置选"补齐"而不是"剥离"，理由写在实现注释里：剥离要改的是"模型说了什么"那条记录本身。
+ */
+describe('handoff 同轮携带其他调用：配对与如实回传（T10）', () => {
+  /** 把"硬约束④"写成可执行的检查，而不是注释：每个 tool_calls id 都要有对应的 tool 回复 */
+  const assertPaired = (messages: ChatMessage[]) => {
+    const answered = new Set<string>();
+    const declared = new Set<string>();
+    for (const m of messages) {
+      if (m.role === 'assistant' && m.toolCalls) {
+        for (const c of m.toolCalls) {
+          declared.add(c.id);
+          // 顺序也是协议的一部分：声明之前不能先出现它的回复
+          expect(answered.has(c.id), `tool 回复出现在它的 tool_calls 声明之前：${c.id}`).toBe(false);
+        }
+      }
+      if (m.role === 'tool' && m.toolCallId !== undefined) answered.add(m.toolCallId);
+    }
+    for (const id of declared) {
+      expect(answered.has(id), `assistant 声明了 ${id}，却没有对应的 tool 消息（上游会 400）`).toBe(true);
+    }
+  };
+
+  const runWith = async (calls: Array<{ name: string; args: unknown }>) => {
+    const { chat } = scriptedChat([
+      { text: '我先做两件事再移交。', calls },
+      { text: '不该走到这里' },
+    ]);
+    const events: LoopEvent[] = [];
+    const res = await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: 'x' }],
+        emit: (e) => events.push(e),
+      },
+      makeDeps(chat, allow().resolver),
+    );
+    return { res, events };
+  };
+
+  it('handoff + 写文件同轮：两个 id 都有回复，未执行那条说清为什么，且磁盘上真的什么都没写', async () => {
+    const { res } = await runWith([
+      { name: 'write_file', args: { path: 'should-not-exist.md', content: 'X' } },
+      { name: HANDOFF_TOOL_NAME, args: { reason: '这一步归上层', target: 'subagent' } },
+    ]);
+
+    expect(res.branch).toBe('handoff');
+    assertPaired(res.messages);
+
+    const toolMsgs = res.messages.filter((m) => m.role === 'tool');
+    expect(toolMsgs.length).toBe(2);
+    const unexecuted = toolMsgs.find((m) => m.content.includes('未执行'));
+    expect(unexecuted, '未执行的调用必须有一条 tool 消息说明').not.toBeUndefined();
+    expect(unexecuted?.content).toContain('write_file');
+    // 真值：不是"界面说没跑"，而是磁盘上确实没有这个文件
+    await expect(stat(join(root, 'should-not-exist.md'))).rejects.toThrow();
+  });
+
+  it('未执行的调用也要在界面上留下痕迹（tool_start / tool_end 成对，且 end 报 ok=false）', async () => {
+    const { events } = await runWith([
+      { name: 'write_file', args: { path: 'silent-drop.md', content: 'X' } },
+      { name: HANDOFF_TOOL_NAME, args: { reason: '这一步归上层' } },
+    ]);
+
+    const starts = events.filter((e) => e.type === 'tool_start');
+    const ends = events.filter((e) => e.type === 'tool_end');
+    // 两个调用都各有起止一对 —— 界面不会"什么都没显示"
+    expect(starts.length).toBe(2);
+    expect(ends.length).toBe(2);
+    const writeFileEnd = ends.find((e) => e.type === 'tool_end' && e.name === 'write_file');
+    expect(writeFileEnd, 'write_file 的收尾事件丢了').not.toBeUndefined();
+    if (writeFileEnd?.type === 'tool_end') {
+      expect(writeFileEnd.ok).toBe(false);
+      expect(writeFileEnd.summary).toContain('未执行');
+    }
+    const handoffEnd = ends.find((e) => e.type === 'tool_end' && e.name === HANDOFF_TOOL_NAME);
+    if (handoffEnd?.type === 'tool_end') expect(handoffEnd.ok).toBe(true);
+  });
+
+  it('反向对照：只有一个 handoff 调用时，回复仍是一条，措辞不变', async () => {
+    const { res } = await runWith([{ name: HANDOFF_TOOL_NAME, args: { reason: '超出范围' } }]);
+    assertPaired(res.messages);
+    const toolMsgs = res.messages.filter((m) => m.role === 'tool');
+    expect(toolMsgs.length).toBe(1);
+    expect(toolMsgs[0]?.content).toContain('移交');
+    expect(toolMsgs[0]?.content).not.toContain('未执行');
+  });
+
+  it('模型连发两个 handoff 调用也不能留下没回复的 id', async () => {
+    const { res } = await runWith([
+      { name: HANDOFF_TOOL_NAME, args: { reason: '甲' } },
+      { name: HANDOFF_TOOL_NAME, args: { reason: '乙' } },
+    ]);
+    assertPaired(res.messages);
+    expect(res.messages.filter((m) => m.role === 'tool').length).toBe(2);
+  });
+});
+
 describe('熔断：maxTurns', () => {
   it('模型反复请求工具 → 在上界处停止（reason=max_turns），不会无限循环', async () => {
     const { chat, turnsUsed } = scriptedChat([

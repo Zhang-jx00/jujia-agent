@@ -270,11 +270,42 @@ export async function runAgentTurn(
         content: turnText,
         toolCalls: calls.map((c) => ({ id: c.id, name: c.name, argumentsText: c.argumentsText })),
       });
-      messages.push({
-        role: 'tool',
-        toolCallId: handoff.id,
-        content: '已记录移交请求，交由上层处理。',
-      });
+      /**
+       * **每一个** tool_call 都要回一条 tool 消息（外部审查 T10）。
+       *
+       * 模型可以一次返回多个调用（并行调用是兼容端的常规行为），而这里以前只回 `handoff` 那一条 ——
+       * 于是同时坏掉两件事：
+       *   ① 破本文件头部的硬约束④：下一轮续聊时上游按"assistant 的每个 tool_call id 都要有回复"校验，
+       *      少一条就是 400，这个会话的历史当场作废；
+       *   ② 其余那几个调用**静默消失**：没执行、没告诉模型、也没告诉用户。
+       *
+       * 处置选**补齐**而不是剥离：剥离要改的是 assistant 那条消息本身 —— 那是"模型请求了什么"的记录，
+       * 把它删成"只问了 handoff"等于把历史改成我们希望的样子，界面与审计跟着一起失真。
+       * 而且"跑不了就用一条 tool 消息把原因说清楚"是本文件已有的成例
+       * （`executeOne` 对 `[tool_not_found]` / `[invalid_args]` 就是这么办的），不是新发明的规矩。
+       */
+      for (const call of calls) {
+        const isHandoffCall = call.name === HANDOFF_TOOL_NAME;
+        const content = isHandoffCall
+          ? '已记录移交请求，交由上层处理。'
+          : `[未执行] 本轮以 handoff 收尾，${call.name} 没有运行（移交优先于其余调用）。` +
+            '若确实需要这个结果，请在移交之后重新发起。';
+        params.emit({
+          type: 'tool_start',
+          callId: call.id,
+          name: call.name,
+          argumentsText: call.argumentsText,
+        });
+        messages.push({ role: 'tool', toolCallId: call.id, content });
+        params.emit({
+          type: 'tool_end',
+          callId: call.id,
+          name: call.name,
+          ok: isHandoffCall,
+          summary: content.slice(0, 120),
+          durationMs: 0,
+        });
+      }
       params.emit({ type: 'turn_end', turn, branch: 'handoff' });
       return { branch: 'handoff', text: fullText, turns: turn, reason: 'handoff', messages };
     }

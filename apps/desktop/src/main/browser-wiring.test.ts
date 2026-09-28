@@ -83,6 +83,38 @@ describe('接线锁：策略确实在运行路径上（不是只活在单测里�
     expect(browserSource).toContain('blocked = { url: targetUrl, reason: verdict.reason }');
   });
 
+  /**
+   * 外部审查 T11 · 服务端重定向。
+   *
+   * 为什么单独锁一条：`will-navigate` 只管"用户或页面主动发起"的那一跳，**服务端 302/301 换页不走它**
+   * （Electron 44 实测，见复核 038：302 只触发 `did-start-navigation` → `will-redirect` →
+   * `did-redirect-navigation` → `did-navigate`，`will-navigate` 一次都没响）。
+   * 只挂 `will-navigate` 的旧接线，等于"用户点开的站点不被页面冒用"这条底线在重定向面前整条失效。
+   */
+  it('服务端重定向也过同一条 origin 锁（302/301 不许绕过）', () => {
+    expect(browserSource).toContain("on('will-redirect'");
+    expect(browserSource).toContain("guardPageNavigation(event, targetUrl, '服务端重定向')");
+  });
+
+  it('origin 判定只有一处：两个钩子共用同一个判档点（不许长出第二份真相）', () => {
+    const hits = browserSource.split('decideProgrammaticNavigation(userOrigin, targetUrl)').length - 1;
+    expect(hits).toBe(1);
+  });
+
+  /**
+   * 外部审查 T11 · 页面静默落盘。
+   * 实测：不挂 `will-download` 时，第三方页面的附件下载**不经任何询问**就写进系统"下载"目录
+   * （探针里两个 20 字节的 .tmp 文件就这么出现了，界面与状态栏一声不响）。
+   * 本项目没有"下载管理"这套产品，所以一律拦下并把理由留在状态里。
+   */
+  it('网页发起的下载被取消，且理由可见、监听器会摘干净', () => {
+    expect(browserSource).toContain("on('will-download'");
+    expect(browserSource).toContain('item.cancel()');
+    expect(browserSource).toContain('blocked = { url: item.getURL(), reason: downloadReason }');
+    // 会话级监听器挂在**共享的 default session** 上：不摘就会随每次开合累积（重复处理 + 泄漏）
+    expect(browserSource).toContain("off('will-download'");
+  });
+
   it('退出时销毁浏览器视图（不留孤儿 webContents）', () => {
     expect(ipcSource).toContain('browser.dispose()');
   });

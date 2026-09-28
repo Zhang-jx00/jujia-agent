@@ -3,7 +3,19 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/out/**', '**/coverage/**', 'scripts/**'],
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/out/**',
+      '**/coverage/**',
+      'scripts/**',
+      // `.tmp/` 是**规定的一次性脚本目录**（探针、变异子集、临时提交说明都写在这儿）；
+      // `.trash/` 是 cleanup.py 的 30 天反悔区，里面**就是要被扫掉的旧源码副本**。
+      // 不收尾这两处，每轮收尾之后 `npm run lint` 都会去审一次性脚本和已删除的文件 ——
+      // 实测：清扫完再跑 lint，报的全是 `.trash` 里的旧副本。
+      '**/.tmp/**',
+      '**/.trash/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

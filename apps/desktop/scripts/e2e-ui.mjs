@@ -14,9 +14,10 @@
  * 退出码：0 = 通过；1 = 失败（打印失败在哪一步、以及界面当时的文本）
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -439,7 +440,9 @@ try {
   /** 本地站点收到过的请求路径（按到达顺序）。外部程序有没有真的来取，问它 */
   const hits = [];
   /** 第二个站点：用来当"跳转目标"。**同主机不同端口 = 不同 origin**，而且不会被 Chromium 改写 */
-  const otherSite = createServer((_req, res) => {
+  const otherSite = createServer((req, res) => {
+    // 目标站点自己也记账：于是"被拦之后到底有没有真的跳过去"问的是**对方的台账**，不是我们的界面文案
+    hits.push(`other ${req.url ?? ''}`);
     res.setHeader('content-type', 'text/html; charset=utf-8');
     res.end(`<html><body><p>${OTHER_MARKER}</p></body></html>`);
   });
@@ -456,6 +459,37 @@ try {
         `<html><head><meta http-equiv="refresh" content="0;url=http://127.0.0.1:${String(otherPort)}/stolen">` +
           `</head><body>waiting-jump</body></html>`,
       );
+      return;
+    }
+    if (req.url === '/redir302') {
+      // **服务端 302**：T11 的那条路 —— 它不走 `will-navigate`，只走 `will-redirect`（实测）。
+      // 目标带一个专属路径，于是"有没有真的跳过去"在目标站点的台账里查得到。
+      res.writeHead(302, { Location: `http://127.0.0.1:${String(otherPort)}/stolen-by-302` });
+      res.end();
+      return;
+    }
+    if (req.url === '/selfredir') {
+      // 反向对照：**同站**重定向必须照常落地。少了这一条，"把所有重定向一律拦掉"也能全绿。
+      res.writeHead(302, { Location: `http://127.0.0.1:${String(portAddr)}/landed-same-origin` });
+      res.end();
+      return;
+    }
+    if (req.url === '/landed-same-origin') {
+      res.end(`<html><head><title>self-redir</title></head><body><p>${MARKER}</p><p>SAME_ORIGIN_REDIRECT_LANDED</p></body></html>`);
+      return;
+    }
+    if (req.url === '/attach') {
+      // 附件响应：浏览器会把它当成**下载**。不拦就会直接往本机"下载"目录写文件（实测：无人问、无声响）。
+      res.setHeader(
+        'content-disposition',
+        'attachment; filename="JUJIA_E2E_SHOULD_NOT_LAND.bin"',
+      );
+      res.setHeader('content-type', 'application/octet-stream');
+      res.end('JUJIA_E2E_DOWNLOAD_PROBE');
+      return;
+    }
+    if (req.url === '/plain-again') {
+      res.end(`<html><body>${MARKER} 普通页面（下载被拦之后应当还停在这里）</body></html>`);
       return;
     }
     // BRIDGE= / NODE= 这两串**只由页面脚本在运行时写出来**（静态 HTML 里只有 probe-pending）。
@@ -550,7 +584,57 @@ try {
   if (afterJump.includes(otherUrl)) ok('理由可见，且 guest 实际仍停在用户打开的站点');
   else fail('被拦理由里没有点出目标站点', afterJump.slice(0, 600));
 
-  step('内置浏览器：file:// 被拒且理由可读（界面级断言）');
+  /**
+   * 同一件底线的事，**第二种做法**（外部审查 T11）：服务端 302。
+   *
+   * 为什么它是独立的一跳：实测 Electron 44 里跨站 302 **一次都不触发 `will-navigate`**，
+   * 只走 `did-start-navigation → will-redirect → did-redirect-navigation → did-navigate`
+   * （探针记录见复核 038）。只挂 `will-navigate` 的旧接线，在任何一个重定向面前等于没有锁 ——
+   * 而重定向恰恰是页面最能自己造的一跳，它连链接都不必点。
+   * 真值仍然是**对方台账**：被拦之后 `/stolen-by-302` 绝不能出现在第二个站点的请求记录里。
+   */
+  await addressBox.fill(`${baseUrl}/redir302`);
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const redirected = await waitForText('跳出用户打开的站点');
+  if (redirected !== true) {
+    fail('服务端 302 跨站没有被拦（多半只挂了 will-navigate，漏了 will-redirect）', String(redirected).slice(0, 800));
+  }
+  if (hits.includes('other /stolen-by-302')) {
+    fail('界面说"拦下了"，目标站点却仍然收到了请求 —— 拦截其实没生效', hits.join(' , ').slice(0, 500));
+  }
+  const guestAfter302 = await win.evaluate(async () => {
+    const r = await window.jujia.browserGetText();
+    return r.ok === true ? String(r.origin) : `__ERR__${r.error}`;
+  });
+  if (guestAfter302.includes(String(otherPort))) {
+    fail(`302 之后 guest 实际已在目标站点（${guestAfter302}）`, String(guestAfter302).slice(0, 300));
+  }
+  ok('服务端 302 逐跳过判档：目标站点一次都没被访问（对方台账为证）');
+
+  /**
+   * 反向对照：**同站**重定向必须照常落地。少了这条，"把所有重定向一律拦掉"也能全绿 ——
+   * 而那种实现会把正常网页全部锁死（协议层是 origin 锁，不是"禁止重定向"）。
+   */
+  await addressBox.fill(`${baseUrl}/selfredir`);
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const sameOriginRead = await win.evaluate(async () => {
+    const deadline = Date.now() + 8_000;
+    for (;;) {
+      const r = await window.jujia.browserGetText();
+      if (r.ok === true && String(r.text).includes('SAME_ORIGIN_REDIRECT_LANDED')) return { ok: true, origin: r.origin };
+      if (Date.now() > deadline) return { ok: false, got: r.ok === true ? String(r.text).slice(0, 120) : `__ERR__${r.error}` };
+      await new Promise((res) => setTimeout(res, 200));
+    }
+  });
+  if (sameOriginRead.ok !== true) {
+    fail('同站 302 被误拦了（origin 锁不该管没换站点的跳转）', JSON.stringify(sameOriginRead).slice(0, 400));
+  }
+  if (sameOriginRead.origin !== baseUrl) {
+    fail('同站重定向落地后的 origin 与用户打开的不是一个', JSON.stringify(sameOriginRead).slice(0, 400));
+  }
+  ok('对照通过：同站重定向照常落地，拦的只是"换站点"');
+
+  step('内置浏览器：file:// 被拒、页面想存文件被拦（理由都读得到）');
   await addressBox.fill('file:///C:/Windows/win.ini');
   await win.locator('button', { hasText: '打开' }).first().click();
   const blockedFile = await waitForText('本地文件协议');
@@ -568,6 +652,49 @@ try {
     fail(`file:// 被"拒绝"之后 guest 实际换了页（当前 origin：${String(guestAfterFile)}）`);
   }
   ok('危险协议被拒、理由可见，且 guest 确实还停在原页面');
+
+  /**
+   * 页面想往本机存文件（外部审查 T11 的另一半）。
+   *
+   * 为什么这是独立的洞：探针实测**不挂 `will-download` 时，第三方页面的附件下载不经任何询问
+   * 就落进系统"下载"目录**（两个 20 字节的 .tmp 就这么出现了，界面与状态一声不响）。
+   * 本项目没有"下载管理"这套产品，所以处置是"一律拦下 + 把理由显示出来"，而不是顺手做一个下载器。
+   *
+   * 断言问两件真值：① 界面有没有说出"拦下了什么文件"；② 那个文件名**在磁盘上不存在**
+   * （只断言文案的话，把 `item.cancel()` 整行删掉这一步照样绿 —— 而那才是真正的那一下）。
+   */
+  const DOWNLOAD_NAME = 'JUJIA_E2E_SHOULD_NOT_LAND.bin';
+  await addressBox.fill(`${baseUrl}/attach`);
+  await win.locator('button', { hasText: '打开' }).first().click();
+  const dlNotice = await waitForText('已拦下');
+  if (dlNotice !== true) fail('网页发起的下载没有被拦下（will-download 可能没挂上）', String(dlNotice).slice(0, 800));
+  const dlBody = await bodyText();
+  if (!dlBody.includes(DOWNLOAD_NAME)) {
+    fail('拦下是拦下了，但没说是哪个文件 —— 用户看不懂发生了什么', dlBody.slice(0, 700));
+  }
+
+  /** 可能落盘的几个目录：系统的"下载"（若存在）+ 本次运行的全部临时目录 */
+  const downloadCandidates = [
+    join(homedir(), 'Downloads'),
+    dataDir,
+    profileDir,
+    wsDir,
+    TMP_ROOT,
+  ];
+  const landed = [];
+  for (const dir of downloadCandidates) {
+    if (!existsSync(dir)) continue;
+    let names = [];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const n of names) if (n.includes(DOWNLOAD_NAME) || n.includes('JUJIA_E2E_SHOULD_NOT_LAND')) landed.push(`${dir}/${n}`);
+  }
+  if (landed.length > 0) fail(`下载被"拦下"之后磁盘上仍有这个文件：${landed.join(' , ')}`);
+  const listable = downloadCandidates.filter((d) => existsSync(d)).length;
+  ok(`网页的下载被取消、理由点名了文件名，且磁盘上没有任何一处出现该文件（查了 ${String(listable)} 个目录）`);
 
 
   /* ---------------------------- git 接线（M8） ----------------------------
