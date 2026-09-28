@@ -657,13 +657,25 @@ try {
    * 页面想往本机存文件（外部审查 T11 的另一半）。
    *
    * 为什么这是独立的洞：探针实测**不挂 `will-download` 时，第三方页面的附件下载不经任何询问
-   * 就落进系统"下载"目录**（两个 20 字节的 .tmp 就这么出现了，界面与状态一声不响）。
+   * 就落进系统"下载"目录**（两个 20 字节的 .tmp 就这么出现了，界面和状态一声不响）。
    * 本项目没有"下载管理"这套产品，所以处置是"一律拦下 + 把理由显示出来"，而不是顺手做一个下载器。
    *
-   * 断言问两件真值：① 界面有没有说出"拦下了什么文件"；② 那个文件名**在磁盘上不存在**
-   * （只断言文案的话，把 `item.cancel()` 整行删掉这一步照样绿 —— 而那才是真正的那一下）。
+   * 磁盘这一半**差点写成假断言**（校准实验当场揭穿的，见复核 038）：
+   * 最初按附件文件名 `JUJIA_E2E_SHOULD_NOT_LAND.bin` 去扫 —— 而 Chromium 未取消时落盘的名字是
+   * `<随机 uuid>.tmp`，那条扫描**永远为空**，把 `item.cancel()` 删掉也不会红。
+   * 现在改成**目录快照前后对比**：只要那个目录里多出一个新文件（叫什么名字都算），这一步就红。
    */
   const DOWNLOAD_NAME = 'JUJIA_E2E_SHOULD_NOT_LAND.bin';
+  const downloadsDir = join(homedir(), 'Downloads');
+  const snapshotDownloads = () => {
+    try {
+      return existsSync(downloadsDir) ? new Set(readdirSync(downloadsDir)) : null;
+    } catch {
+      return null;
+    }
+  };
+  const beforeDownload = snapshotDownloads();
+
   await addressBox.fill(`${baseUrl}/attach`);
   await win.locator('button', { hasText: '打开' }).first().click();
   const dlNotice = await waitForText('已拦下');
@@ -672,29 +684,19 @@ try {
   if (!dlBody.includes(DOWNLOAD_NAME)) {
     fail('拦下是拦下了，但没说是哪个文件 —— 用户看不懂发生了什么', dlBody.slice(0, 700));
   }
-
-  /** 可能落盘的几个目录：系统的"下载"（若存在）+ 本次运行的全部临时目录 */
-  const downloadCandidates = [
-    join(homedir(), 'Downloads'),
-    dataDir,
-    profileDir,
-    wsDir,
-    TMP_ROOT,
-  ];
-  const landed = [];
-  for (const dir of downloadCandidates) {
-    if (!existsSync(dir)) continue;
-    let names = [];
-    try {
-      names = readdirSync(dir);
-    } catch {
-      continue;
+  // 界面上那个文件名不是我们写死的漂亮话：它来自 Electron 的 DownloadItem，
+  // 而 DownloadItem 的名字来自服务端响应的 Content-Disposition —— 是**对面给的**
+  await win.waitForTimeout(1_500);
+  const afterDownload = snapshotDownloads();
+  if (beforeDownload === null || afterDownload === null) {
+    ok('下载被拦、理由点名了文件名（磁盘对照跳过：这台机器读不到系统"下载"目录，如实标注）');
+  } else {
+    const freshFiles = [...afterDownload].filter((n) => !beforeDownload.has(n));
+    if (freshFiles.length > 0) {
+      fail(`下载被"拦下"之后，系统"下载"目录里还是多出了文件：${freshFiles.join(' , ')}`);
     }
-    for (const n of names) if (n.includes(DOWNLOAD_NAME) || n.includes('JUJIA_E2E_SHOULD_NOT_LAND')) landed.push(`${dir}/${n}`);
+    ok(`下载被拦、理由点名了文件名，且系统"下载"目录前后快照对比**一个新文件都没多**`);
   }
-  if (landed.length > 0) fail(`下载被"拦下"之后磁盘上仍有这个文件：${landed.join(' , ')}`);
-  const listable = downloadCandidates.filter((d) => existsSync(d)).length;
-  ok(`网页的下载被取消、理由点名了文件名，且磁盘上没有任何一处出现该文件（查了 ${String(listable)} 个目录）`);
 
 
   /* ---------------------------- git 接线（M8） ----------------------------
