@@ -26,6 +26,21 @@ export const IPC = {
   /** main → renderer：流式事件推送 */
   CHAT_STREAM: 'chat:stream',
 
+  /* ---------------- 6b：会话压缩与「结束记要点」 ----------------
+   *
+   * 三条规矩决定通道形状：
+   * - **阈值只提示**：`COMPACT_STATUS` 只回答"该不该问用户"，主进程没有任何自动压缩路径；
+   * - **落盘前必须预览**：`PREVIEW` 与 `APPLY` 是两次调用，第一次**什么都不写**；
+   * - **B 不在退出时写盘**：`CHAT_END` 只记账，`PENDING_RESOLVE` 才是唯一能进长期记忆的那一下。
+   */
+  CHAT_COMPACT_STATUS: 'chat:compact-status',
+  CHAT_COMPACT_PREVIEW: 'chat:compact-preview',
+  CHAT_COMPACT_APPLY: 'chat:compact-apply',
+  CHAT_END: 'chat:end',
+  CHAT_PENDING_LIST: 'chat:pending-list',
+  CHAT_PENDING_PREVIEW: 'chat:pending-preview',
+  CHAT_PENDING_RESOLVE: 'chat:pending-resolve',
+
   /* ---------------- W3：工作区与权限 ---------------- */
   /** 工作区：读取当前 / 弹出目录选择 / 清除 */
   WORKSPACE_GET: 'workspace:get',

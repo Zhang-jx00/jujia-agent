@@ -1,11 +1,19 @@
+import { app } from 'electron';
 import {
   IPC,
   chatHistoryQuerySchema,
   chatSendResultSchema,
+  compactApplySchema,
   connectionInputSchema,
+  pendingPreviewSchema,
+  pendingResolveSchema,
   testResultSchema,
   type ChatSendResult,
+  type CompactApplyResult,
+  type CompactPreviewResult,
   type ConnectionView,
+  type PendingPreviewResult,
+  type PendingResolveResult,
   type TestResult,
 } from '@jujia/shared-ipc';
 import { listModels } from '@jujia/agent-core';
@@ -16,7 +24,21 @@ import {
   resolveConnection,
   updateConnection,
 } from '../connections-store';
-import { historyPage, hydrateSession, listSessions, sendMessage, stopMessage } from '../chat-service';
+import {
+  compactPreview,
+  compactApply,
+  compactStatus,
+  historyPage,
+  hydrateSession,
+  listSessions,
+  markAllResidentEnded,
+  markSessionEnded,
+  pendingNotePreview,
+  pendingNoteResolve,
+  pendingNotesList,
+  sendMessage,
+  stopMessage,
+} from '../chat-service';
 import { getWorkspaceInfo } from '../workspace';
 import { summarizeCatalog } from '@jujia/agent-core';
 import type { IpcContext } from './context';
@@ -149,5 +171,114 @@ export function registerChatIpc(ctx: IpcContext): void {
     if (!parsed.success) return { messages: [], total: 0, hasMore: 0 };
     const { sessionId, ...page } = parsed.data;
     return historyPage(sessionId, page);
+  });
+
+  /* ---------------- 6b：压缩与「结束记要点」（详见 chat-service 末尾那一段） ---------------- */
+
+  /** 只回答"该不该问用户一句"；主进程没有任何因阈值自动压缩的路径 */
+  handle(IPC.CHAT_COMPACT_STATUS, async (_e, sessionId: unknown) => {
+    if (typeof sessionId !== 'string' || sessionId === '') return null;
+    return compactStatus(sessionId);
+  });
+
+  /** 生成摘要给人看 —— 这一步**什么都不写** */
+  handle(IPC.CHAT_COMPACT_PREVIEW, async (_e, sessionId: unknown): Promise<CompactPreviewResult> => {
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      return { ok: false, summary: '', truncated: false, willCover: 0, error: '缺少会话标识' };
+    }
+    const r = await compactPreview(sessionId);
+    return r.ok === true
+      ? { ok: true, summary: r.summary, truncated: r.truncated, willCover: r.willCover, error: '' }
+      : { ok: false, summary: '', truncated: false, willCover: 0, error: r.error };
+  });
+
+  /** 用户在预览上点了「就按这版存」才会到这里 */
+  handle(IPC.CHAT_COMPACT_APPLY, async (_e, payload: unknown): Promise<CompactApplyResult> => {
+    const parsed = compactApplySchema.safeParse(payload);
+    if (!parsed.success) {
+      return { ok: false, compactedThrough: 0, error: '请求形态不合法，未做任何改动' };
+    }
+    const r = await compactApply(parsed.data.sessionId, parsed.data.summary);
+    return {
+      ok: r.ok,
+      compactedThrough: r.compactedThrough,
+      error: r.error ?? '',
+    };
+  });
+
+  /** 显式结束会话：只记一笔待办，**不调模型、不写长期记忆** */
+  handle(IPC.CHAT_END, async (_e, sessionId: unknown): Promise<PendingResolveResult> => {
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      return { ok: false, error: '缺少会话标识' };
+    }
+    const r = await markSessionEnded(sessionId);
+    return { ok: r.ok, error: r.error ?? '' };
+  });
+
+  handle(IPC.CHAT_PENDING_LIST, async () => pendingNotesList());
+
+  /**
+   * 退出时给"有内容、还没记过要点"的驻留会话留账（报备 §四 / 批复④）。
+   *
+   * **为什么挂在 `will-quit` 而不是 `before-quit`，是探针量出来的**
+   * （`.tmp/probe-quit3.mjs`：`window-all-closed → before-quit → will-quit → quit`）：
+   * 原先在 `before-quit` 里"发射后不管"地异步写，`quit` 紧接着就把进程带走了 ——
+   * 那次 tmp→fsync→rename 的写入**一次都没落到盘上**（探针对照组实测），
+   * 于是"下次启动补问"这件事静默地永远不会发生。e2e 第 30 步第一次跑就是这样红的。
+   *
+   * 所以这里 `preventDefault()` 停一下，等写完（或等满预算）再强制退出。
+   * 预算必须有上界：**宁可丢这笔账，也不能让应用关不掉**；丢了要说出来，不许静默。
+   */
+  let ledgerFlushStarted = false;
+  app.on('will-quit', (event) => {
+    if (ledgerFlushStarted) return;
+    ledgerFlushStarted = true;
+    event.preventDefault();
+    const settled = markAllResidentEnded().then(
+      () => 'done' as const,
+      (err: unknown) => {
+        console.warn('[chat] 退出留账失败（下次启动不会有补问提示）：', err);
+        return 'error' as const;
+      },
+    );
+    const budget = new Promise<'timeout'>((resolve) => {
+      setTimeout(() => resolve('timeout'), 1_000);
+    });
+    void Promise.race([settled, budget]).then((outcome) => {
+      if (outcome === 'timeout') {
+        console.warn('[chat] 退出留账没在 1 秒内写完，放弃等待：下次启动不会有补问提示');
+      }
+      app.exit(0);
+    });
+  });
+
+  /** 补问时的预览：同样不落盘；连接由主进程按会话记录决定，渲染层不传 */
+  handle(IPC.CHAT_PENDING_PREVIEW, async (_e, payload: unknown): Promise<PendingPreviewResult> => {
+    const parsed = pendingPreviewSchema.safeParse(payload);
+    if (!parsed.success) return { ok: false, text: '', error: '请求形态不合法，未做任何改动' };
+    const r = await pendingNotePreview(parsed.data.sessionId);
+    return r.ok === true ? { ok: true, text: r.text, error: '' } : { ok: false, text: '', error: r.error };
+  });
+
+  /**
+   * 唯一能把要点写进长期记忆的那一下。
+   * 工作区根目录**由这里现取**而不是信渲染层传来的值 —— 渲染层报一个路径过来就写一个路径，
+   * 等于把"记忆写到哪儿"交给网页级的输入决定（与自选程序路径只能走对话框是同一条原则）。
+   */
+  handle(IPC.CHAT_PENDING_RESOLVE, async (_e, payload: unknown): Promise<PendingResolveResult> => {
+    const parsed = pendingResolveSchema.safeParse(payload);
+    if (!parsed.success) return { ok: false, error: '请求形态不合法，未做任何改动' };
+    if (parsed.data.workspaceRoot !== null) {
+      return { ok: false, error: '请求里带了工作区路径：这一路由主进程决定，渲染层不传' };
+    }
+    const info = await getWorkspaceInfo();
+    const root = info.root && info.valid ? info.root : null;
+    const r = await pendingNoteResolve({
+      sessionId: parsed.data.sessionId,
+      action: parsed.data.action,
+      text: parsed.data.text,
+      workspaceRoot: root,
+    });
+    return { ok: r.ok, error: r.error ?? '' };
   });
 }

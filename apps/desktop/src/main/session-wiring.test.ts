@@ -71,8 +71,12 @@ describe('落盘记账与"历史没装回来"不许静默（外部审查 T6）',
   it('chat-service 用 session-journal 管计数，自己不再算"新增了什么"', () => {
     expect(chatService).toContain("from './session-journal'");
     expect(chatService).toContain('await journal.flush(s.id, all.map(toStored)');
-    // 计数只剩一处：Session 上不再挂 persistedCount（两处记账迟早对不上）
-    expect(chatService).not.toContain('persistedCount');
+    // 计数只剩一处：Journal 持有。`Session` 上不许再挂一份，读也必须走 `journal.persistedCount(...)`
+    // （6b 的水印就用这个坐标 —— 它是"落盘行号"的唯一权威，另算一个数就会有两套坐标）
+    expect(chatService).not.toMatch(/(^\s*|[,{])persistedCount\??\s*:/m);
+    const everyRead = chatService.match(/persistedCount/g) ?? [];
+    const viaJournal = chatService.match(/journal\.persistedCount\(/g) ?? [];
+    expect(everyRead.length).toBe(viaJournal.length);
     expect(chatService).not.toContain('store().record(');
   });
 

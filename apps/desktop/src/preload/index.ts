@@ -4,6 +4,10 @@ import {
   IPC,
   appInfoSchema,
   chatSendResultSchema,
+  compactApplySchema,
+  compactApplyResultSchema,
+  compactPreviewResultSchema,
+  compactStatusSchema,
   chatHistoryPageSchema,
   chatHistoryQuerySchema,
   chatSessionMetaSchema,
@@ -19,6 +23,11 @@ import {
   mcpApprovalPlanSchema,
   mcpServerViewSchema,
   permissionDecisionSchema,
+  pendingNotesViewSchema,
+  pendingPreviewSchema,
+  pendingPreviewResultSchema,
+  pendingResolveSchema,
+  pendingResolveResultSchema,
   permissionExpiredSchema,
   permissionRequestSchema,
   permissionRuleInputSchema,
@@ -33,6 +42,12 @@ import {
   type ChatHistoryQuery,
   type ChatSessionMeta,
   type ChatSendResult,
+  type CompactApplyResult,
+  type CompactPreviewResult,
+  type CompactStatusView,
+  type PendingNotesView,
+  type PendingPreviewResult,
+  type PendingResolveResult,
   type ConfigSnapshot,
   type ConnectionInput,
   type ConnectionView,
@@ -488,6 +503,57 @@ const api = {
   async gitCommit(message: string): Promise<GitActionResultView> {
     const parsed = gitCommitSchema.parse({ message });
     return gitActionResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_COMMIT, parsed));
+  },
+
+  /* -------------------- 6b：会话压缩与「结束记要点」 -------------------- *
+   * 产出侧一律过一遍 schema：这条边跨进程，主进程改了形状而渲染层没跟上时，
+   * 宁可在这里炸，也不要让界面拿 undefined 当"没有内容"。
+   */
+
+  /** 问一句"到阈值了吗"（只提示，不压） */
+  async chatCompactStatus(sessionId: string): Promise<CompactStatusView | null> {
+    const raw = await ipcRenderer.invoke(IPC.CHAT_COMPACT_STATUS, sessionId);
+    if (raw === null) return null;
+    return compactStatusSchema.parse(raw);
+  },
+
+  /** 生成摘要预览：**这一步不落盘** */
+  async chatCompactPreview(sessionId: string): Promise<CompactPreviewResult> {
+    return compactPreviewResultSchema.parse(await ipcRenderer.invoke(IPC.CHAT_COMPACT_PREVIEW, sessionId));
+  },
+
+  /** 用户点「就按这版存」之后才调它 */
+  async chatCompactApply(sessionId: string, summary: string): Promise<CompactApplyResult> {
+    const parsed = compactApplySchema.parse({ sessionId, summary });
+    return compactApplyResultSchema.parse(await ipcRenderer.invoke(IPC.CHAT_COMPACT_APPLY, parsed));
+  },
+
+  /** 显式结束会话：只记一笔待办 */
+  async chatEnd(sessionId: string): Promise<PendingResolveResult> {
+    return pendingResolveResultSchema.parse(await ipcRenderer.invoke(IPC.CHAT_END, sessionId));
+  },
+
+  async chatPendingList(): Promise<PendingNotesView> {
+    return pendingNotesViewSchema.parse(await ipcRenderer.invoke(IPC.CHAT_PENDING_LIST));
+  },
+
+  /** 只要会话 id：用哪条连接生成要点，由主进程按会话记录决定（批复⑤） */
+  async chatPendingPreview(sessionId: string): Promise<PendingPreviewResult> {
+    const parsed = pendingPreviewSchema.parse({ sessionId });
+    return pendingPreviewResultSchema.parse(await ipcRenderer.invoke(IPC.CHAT_PENDING_PREVIEW, parsed));
+  },
+
+  /**
+   * 唯一能进长期记忆的那一下。
+   * 故意**不收工作区路径**：写哪儿由主进程按当前工作区决定，渲染层没有发言权。
+   */
+  async chatPendingResolve(
+    sessionId: string,
+    action: 'remember' | 'skip' | 'never',
+    text: string,
+  ): Promise<PendingResolveResult> {
+    const parsed = pendingResolveSchema.parse({ sessionId, action, text, workspaceRoot: null });
+    return pendingResolveResultSchema.parse(await ipcRenderer.invoke(IPC.CHAT_PENDING_RESOLVE, parsed));
   },
 };
 

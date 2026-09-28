@@ -164,6 +164,54 @@ await new Promise((resolve) => streamServer.listen(0, '127.0.0.1', resolve));
 const streamPort = streamServer.address().port;
 
 /**
+ * 6b 用的"回显假服务"。
+ *
+ * 为什么还要第三个服务：6b 的真值是**发给模型的那份 messages**，不是界面上写了什么。
+ * 界面自述可以骗人（"已压缩"三个字是渲染层自己拼的），主进程发出去什么只有对面知道 ——
+ * 所以这里把收到的内容摘要成一行回吐回来，让 DOM 里那句话成为"模型确实只看到摘要 + 最近几条"的证据。
+ *
+ * 三种回包，按 prompt 开头分流（对应 agent-core 里两个 prompt 构造器的首句）：
+ * ① 压缩摘要：固定串，含四类事实的关键字（人名 / 路径 / 数字 / 决定），事后要在系统提示里认出它；
+ * ② 结束要点：同样固定（≤500 字、单行，够 appendNote 收）；
+ * ③ 普通对话：回一行体检报告 —— 收到几条非 system 消息、system 里有没有摘要串、最早那条原文的开头。
+ */
+const SUMMARY_6B =
+  'E2E6B摘要 人名：老张 ｜ 路径：src/main/index.ts ｜ 阈值：64KB ｜ 决定：用甲方案，否决乙方案 ｜ 未决：等外审批复';
+const NOTE_6B = 'E2E6B要点 决定用甲方案（src/main/index.ts），未决：等外审批复';
+const echoServer = createServer((req, res) => {
+  let raw = '';
+  req.on('data', (c) => (raw += String(c)));
+  req.on('end', () => {
+    let content = 'ECHO n=?';
+    try {
+      const parsed = JSON.parse(raw);
+      const msgs = Array.isArray(parsed.messages) ? parsed.messages : [];
+      const last = String([...msgs].reverse().find((m) => m && m.role === 'user')?.content ?? '');
+      if (last.includes('上下文压缩')) content = SUMMARY_6B;
+      else if (last.includes('压成**一条**记忆')) content = NOTE_6B;
+      else {
+        const systemText = msgs
+          .filter((m) => m && m.role === 'system')
+          .map((m) => String(m.content ?? ''))
+          .join('\n');
+        const rest = msgs.filter((m) => m && m.role !== 'system');
+        const head = `${String(rest[0]?.content ?? '').slice(0, 14).replace(/\s+/g, ' ')}`;
+        content = `ECHO n=${String(rest.length)} sum=${systemText.includes('E2E6B摘要') ? 1 : 0} head=${head}`;
+      }
+    } catch {
+      // 解析不出来仍回一行：让调用方看见"服务活着但没读懂"，而不是挂在那儿
+    }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+  });
+});
+await new Promise((resolve) => echoServer.listen(0, '127.0.0.1', resolve));
+const echoPort = echoServer.address().port;
+
+/**
  * 预置"上一个进程留下的东西"（6a 会话持久化的被测前提）：
  * 一条连接 + 一个已经写了几轮对话的会话目录。
  * 会话 id 用符合白名单的 uuid 形态；文件按真实格式写（JsonStore 的信封 + JSONL 一行一条），
@@ -171,6 +219,7 @@ const streamPort = streamServer.address().port;
  */
 const seededConnId = 'e2e-conn-1';
 const seededStreamConnId = 'e2e-stream-1';
+const seededEchoConnId = 'e2e-6b-1';
 writeFileSync(
   join(dataDir, 'connections.json'),
   JSON.stringify({
@@ -199,6 +248,17 @@ writeFileSync(
           // 这条**要真的发问**，所以密钥不能是 null（主进程会直接拒发）。
           // `scheme:'plain'` 是真实存在的落盘形态（safeStorage 不可用时应用自己就是这么写的），
           // 值是假的：本地假服务不看 Authorization，而密钥也绝不离开这台机器。
+          secret: { scheme: 'plain', value: 'e2e-local-only' },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: seededEchoConnId,
+          name: 'e2e 回显假服务',
+          baseUrl: `http://127.0.0.1:${String(echoPort)}/v1`,
+          apiFormat: 'openai-compatible',
+          model: 'e2e-echo-model',
+          // 与流式那条同理：真的发问，所以给一个本地-only 的假密钥（永不外发）
           secret: { scheme: 'plain', value: 'e2e-local-only' },
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -1426,6 +1486,238 @@ try {
   if (!existsSync(join(wsDir, t9FileB))) fail('B 批准了、界面也说执行了，磁盘上却没有文件');
   ok('排队的 B 不受影响：照常能批，批准后真的落盘');
 
+  /* ---------------- 6b：会话压缩（A）与「结束记要点」（B） ----------------
+   *
+   * 真值全部只看磁盘与"模型收到了什么"，不看界面自述：
+   * ① 到阈值只是提示 —— 提示条出现的那一刻，summary.md 必须还不存在；
+   * ② 预览不落盘、「先不存」不落盘，点「就按这版存」之后 summary.md 才出现，且原始 jsonl 一字未少；
+   * ③ 压缩之后发给模型的历史真的换成了"摘要 + 最近几条"（回显服务把收到的内容体检回来）。
+   */
+  step('6b 压缩：到阈值只提示、预览与「先不存」都不落盘、点存才写 summary.md（原始记录一字不少）');
+  await win2.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await win2.locator('select').first().selectOption(seededEchoConnId);
+  // 开一个干净的会话来测：上一步把焦点留在流式会话 B 上，直接发问会写进 B 的历史里
+  await win2.locator('button', { hasText: '新会话' }).first().click();
+  const box6b = win2.locator('textarea[placeholder^="输入消息"]');
+  /** 一轮真发问并等回显落地（回显服务即时吐字，没有流式那一档的时间） */
+  const ask6b = async (text, needle) => {
+    await box6b.fill(text);
+    await win2.locator('button', { hasText: '发送' }).first().click();
+    if ((await waitText2(needle, 15_000)) !== true) {
+      fail(`这一问没有拿到预期回显（${needle}）`, (await body2()).slice(0, 500));
+    }
+  };
+  await ask6b(`E2E6B_START ${'x'.repeat(66_000)}`, 'ECHO n=1 sum=0');
+  ok('第一问真的走通了回显服务：此时还没有摘要，体检报告 sum=0');
+
+  const list6b = await win2.evaluate(async () => await window.jujia.chatList());
+  const s6b = list6b.find((s) => s.title.includes('E2E6B_START'));
+  if (!s6b) fail('6b 会话没出现在清单里（后面的断言会全部失去对象）', JSON.stringify(list6b).slice(0, 300));
+  const sessDir6b = join(dataDir, 'sessions', s6b.id);
+  const summaryFile6b = join(sessDir6b, 'summary.md');
+  const jsonl6b = join(sessDir6b, 'messages.jsonl');
+  const linesOf = (p) => readFileSync(p, 'utf8').split('\n').filter(Boolean).length;
+
+  if ((await waitText2('要不要把早先的内容压成要点摘要')) !== true) {
+    fail('未压缩内容已过 64KB 却没有提示（阈值那一半没生效）', (await body2()).slice(0, 700));
+  }
+  if (existsSync(summaryFile6b)) fail('只是到了阈值就自己压了 —— 批复③明写"阈值只提示，绝不动手"');
+  ok('阈值只提示：提示条出来了，盘上什么都没有');
+
+  await win2.locator('button', { hasText: '压缩此会话' }).first().click();
+  if ((await waitText2(SUMMARY_6B)) !== true) {
+    fail('点了「压缩此会话」没出预览摘要', (await body2()).slice(0, 700));
+  }
+  if (existsSync(summaryFile6b)) fail('预览这一步竟然落了盘（落点只能是一个字节都不写）');
+  await win2.locator('button', { hasText: '先不存' }).first().click();
+  if ((await waitText2('没存。发给模型的上下文一点没变')) !== true) {
+    fail('点「先不存」之后界面没给出"什么都没做"的回执', (await body2()).slice(0, 700));
+  }
+  if (existsSync(summaryFile6b)) fail('「先不存」之后盘上出现了 summary.md');
+  ok('预览只是给人看：两条不存的分支都不留任何磁盘痕迹');
+
+  const jsonlBefore = linesOf(jsonl6b);
+  await win2.locator('button', { hasText: '压缩此会话' }).first().click();
+  if ((await waitText2(SUMMARY_6B)) !== true) fail('第二次预览没出来', (await body2()).slice(0, 700));
+  await win2.locator('button', { hasText: '就按这版存' }).first().click();
+  if ((await waitText2('已压缩到第')) !== true) {
+    fail('点了「就按这版存」界面没给出压缩回执', (await body2()).slice(0, 700));
+  }
+  if (!existsSync(summaryFile6b)) fail('说已压缩，磁盘上却没有 summary.md');
+  if (!readFileSync(summaryFile6b, 'utf8').includes(SUMMARY_6B)) fail('summary.md 里不是预览那版内容');
+  const meta6b = JSON.parse(readFileSync(join(sessDir6b, 'session.meta.json'), 'utf8')).data;
+  if (meta6b.compactedThrough < jsonlBefore) {
+    fail(`水印没推进到预览承诺的那一条：meta=${String(meta6b.compactedThrough)} 盘上=${String(jsonlBefore)}`);
+  }
+  if (linesOf(jsonl6b) !== jsonlBefore) fail('压缩动了原始 jsonl 的行数（承诺是"一字不删"）');
+  if ((await waitText2(`已压缩至第 ${String(meta6b.compactedThrough)} 条`)) !== true) {
+    fail('磁盘与元信息都变了，界面上却没有"已压缩"标识', (await body2()).slice(0, 700));
+  }
+  ok('存下这一版：summary.md 落地、水印推进、原始记录一行没少，界面标识与盘上数字对得上');
+
+  /** ③ 发给模型的那份真的换了：体检报告 sum=1（摘要在系统提示里），且 tail 只剩水印之后那几条 */
+  await ask6b('E2E6B_压缩后的一问', 'ECHO n=1 sum=1');
+  ok('压缩之后：模型看到的是"摘要 + 这一条"，那 66KB 原文没再发第二遍');
+
+  /* ---------------- 6b-B：结束会话 → 预览 → 才写进长期记忆 ---------------- */
+  step('6b 结束记要点：「记」在看过预览之前点不动，看过才落 NOTES.md；文档页签能直接打开它');
+  const notesOf6b = () => (existsSync(notesFile) ? readFileSync(notesFile, 'utf8') : '');
+  const noteLines = (txt) => txt.split(NOTE_6B).length - 1;
+  const notesBefore6b = notesOf6b();
+  /** 提示条里可能同时挂着好几个会话（流式那一步留下的），所有点击都按标题锁到本会话那一行上 */
+  const bandItem = (which, title) =>
+    which.locator('div.p0-card > div', { hasText: title }).first();
+
+  await win2.locator('button', { hasText: '结束并记要点' }).first().click();
+  if ((await waitText2('还没记要点')) !== true) {
+    fail('点了「结束并记要点」没出现待记提示', (await body2()).slice(0, 700));
+  }
+  const row6b = bandItem(win2, 'E2E6B_START');
+  const rememberBtn6b = row6b.locator('button', { hasText: /^记$/ });
+  if ((await rememberBtn6b.isDisabled()) !== true) {
+    fail('还没预览就能点「记」—— 追加验收④要求"确认后才落盘"');
+  }
+  if (notesOf6b() !== notesBefore6b) fail('只是结了个束，NOTES.md 就变了');
+  await row6b.locator('button', { hasText: '看摘要再决定' }).click();
+  if ((await waitText2(NOTE_6B)) !== true) {
+    fail('点了「看摘要再决定」没给出要写进去的那一行', (await body2()).slice(0, 700));
+  }
+  if (notesOf6b() !== notesBefore6b) fail('预览这一步就写进了 NOTES.md');
+  ok('补问界面先给预览：没看过之前「记」是灰的，看过之后 NOTES.md 也还没动');
+
+  await row6b.locator('button', { hasText: /^记$/ }).click();
+  if ((await waitText2('要点已写进长期记忆')) !== true) {
+    fail('点「记」之后没有回执', (await body2()).slice(0, 700));
+  }
+  if (noteLines(notesOf6b()) !== noteLines(notesBefore6b) + 1) {
+    fail('NOTES.md 没有恰好多出一行', notesOf6b().slice(-400));
+  }
+  if (!notesOf6b().includes(NOTE_6B)) fail('多出来那一行不是预览里看过的那一条', notesOf6b().slice(-400));
+  if ((await bandItem(win2, 'E2E6B_START').count()) !== 0) {
+    fail('记完了账还挂着 —— 同一件事下次启动还会再问一遍');
+  }
+  ok('确认之后才落盘：NOTES.md 恰好多出预览那一行，账也划掉了');
+
+  /* ---------------- 6b-B：退出留账 → 下次启动补问 ----------------
+   *
+   * 这一步同时回答一个只有真跑一次才知道答案的问题：`before-quit` 不会等异步，
+   * 那本账到底写没写上。重启之后"补问"能出现，就是它写上了的证据。
+   *
+   * 「查看长期记忆」那个入口留到重启之后验（win3 上）：同一份 NOTES.md，
+   * 重启后还看得见 = 既证明写进了磁盘，也证明它不是内存里的余温。
+   */
+  step('6b 退出留账：关掉应用再重开，账真的在、补问真的出现，刚记过的会话不会被问第二遍');
+  // S1：记过要点**之后又多聊了一句** —— 这一批是新内容，退出时该被再问一次
+  await win2.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await ask6b('E2E6B_记完之后又多聊了一句', 'ECHO n=3 sum=1');
+  /**
+   * S2：记过要点、之后一个字都没再多 —— **不该**被问第二遍。
+   * 分成两条会话来当正反样本，是因为账上的标题取的是"首条用户消息的前 40 字"（不是最后那句）：
+   * 同一个会话既当"该问"又当"不该问"的对照，两个断言会互相打脸。
+   */
+  await win2.locator('button', { hasText: '新会话' }).first().click();
+  await ask6b('E2E6B_记过就不再问 这条记完没再聊', 'ECHO n=1 sum=0');
+  await win2.locator('button', { hasText: '结束并记要点' }).first().click();
+  if ((await waitText2('E2E6B_记过就不再问')) !== true) {
+    fail('S2 结束之后没进待记提示条', (await body2()).slice(0, 700));
+  }
+  await bandItem(win2, 'E2E6B_记过就不再问').locator('button', { hasText: '看摘要再决定' }).click();
+  if ((await waitText2(NOTE_6B)) !== true) fail('S2 的预览没出来', (await body2()).slice(0, 700));
+  await bandItem(win2, 'E2E6B_记过就不再问').locator('button', { hasText: /^记$/ }).click();
+  if ((await waitText2('要点已写进长期记忆')) !== true) {
+    fail('S2 点了「记」没有回执', (await body2()).slice(0, 700));
+  }
+  const ledgerFile = join(dataDir, 'pending-notes.json');
+  if (readFileSync(ledgerFile, 'utf8').includes('E2E6B_记过就不再问')) {
+    fail('还没退出呢，账上就出现了这一笔');
+  }
+  if (noteLines(notesOf6b()) !== 2) {
+    fail(`两条会话各记一行，NOTES.md 里应该有 2 行本轮要点（实际 ${String(noteLines(notesOf6b()))}）`);
+  }
+  /*
+   * 关闭方式必须是**用户真的会用的那一条**（点窗口右上角 ✕），不是 Playwright 的 `app.close()`：
+   * 前者走 `window-all-closed → app.quit() → before-quit → will-quit`，后者直接把进程带走。
+   * 而"退出留账"这一步第一次跑就是这样红的 —— 红的不是关闭方式，是主进程：
+   * 写在 `before-quit` 里的那次异步落盘从来没到过磁盘（探针 .tmp/probe-quit3.mjs 两个对照组实测），
+   * 现在改成 `will-quit` + preventDefault 等写完（预算 1 秒）再强退。两种关闭方式都要验才成立：
+   * Playwright 的 `app.close()` 仍然不带退出事件序列，所以这一步用真实路径，
+   * 而"进程被强杀时丢的只是这本待办账、原始对话一字不丢"由上面的证据链兜住。
+   */
+  const closedByUser = app.waitForEvent('close', { timeout: 20_000 }).catch(() => undefined);
+  // 页面正在关掉，`evaluate` 的返回值拿不到是正常现象 —— 我们要的是"窗口真的关了"，不是返回值
+  await win2.evaluate(() => window.close()).catch(() => undefined);
+  await closedByUser;
+  app = undefined;
+  app = await electron.launch({
+    executablePath: electronPath,
+    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`],
+    env,
+  });
+  const win3 = await app.firstWindow();
+  await win3.waitForSelector('body', { timeout: 15_000 });
+  const body3 = async () => await win3.evaluate(() => document.body.innerText);
+  const waitText3 = async (needle, ms = 10_000) => {
+    try {
+      await win3.waitForFunction((n) => document.body.innerText.includes(n), needle, { timeout: ms });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!existsSync(ledgerFile)) {
+    fail('退出时那本账没写上磁盘：那次异步写入被进程退出截断了（补问从此永远不会出现）');
+  }
+  const ledgerRaw = readFileSync(ledgerFile, 'utf8');
+  if (!ledgerRaw.includes('E2E6B_START')) {
+    fail('记过要点之后又多聊了内容的会话，退出时没被留账（该问的没问）', ledgerRaw.slice(0, 600));
+  }
+  if (ledgerRaw.includes('E2E6B_记过就不再问')) {
+    fail('刚记过、之后一个字没多的会话又被记了一笔（不该问的问了）', ledgerRaw.slice(0, 600));
+  }
+  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  if ((await waitText3('E2E6B_START')) !== true) {
+    fail('重启后没给出补问提示条', (await body3()).slice(0, 700));
+  }
+  const band3 = await body3();
+  if (band3.includes('E2E6B_记过就不再问')) {
+    fail('刚记过要点的会话在补问条里又出现了一遍（记过的内容不该问第二遍）', band3.slice(0, 900));
+  }
+  ok('退出留账真的写上了：记过之后有新内容的被问，刚记过没新内容的没被问第二遍');
+
+  const row3 = bandItem(win3, 'E2E6B_START');
+  await row3.locator('button', { hasText: '看摘要再决定' }).click();
+  if ((await waitText3(NOTE_6B)) !== true) {
+    fail('重启后补问的预览出不来（会话没能从磁盘装回来？）', (await body3()).slice(0, 700));
+  }
+  const notesCountBefore3 = noteLines(notesOf6b());
+  if (notesCountBefore3 !== 2) {
+    fail(`NOTES.md 里本轮要点应是 2 行（预期 2，实际 ${String(notesCountBefore3)}）`);
+  }
+  await row3.locator('button', { hasText: '不记' }).click();
+  if ((await waitText3('这条没写进长期记忆')) !== true) {
+    fail('点「不记」没有回执', (await body3()).slice(0, 700));
+  }
+  if (noteLines(notesOf6b()) !== 2) fail('点了「不记」，NOTES.md 却多了一行');
+  ok('补问的预览同样不落盘；「不记」只清账 —— 每一步都有磁盘证据');
+
+  /** 追加验收⑦：不用猜路径就有直达入口，而且看得见内容（在**重启之后**的窗口里验，顺带证明它真在盘上） */
+  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  await win3.locator('button', { hasText: '查看长期记忆' }).first().click();
+  if ((await waitText3(NOTE_6B)) !== true) {
+    fail('「查看长期记忆」没能把 NOTES.md 打开给人看', (await body3()).slice(0, 700));
+  }
+  const docsShown6b = await win3.locator('.jj-docs-body').innerText();
+  /**
+   * 这里认的是**渲染之后**的样子：`- 2026-09-28: E2E_PERSIST_答一：…` 在 Markdown 里
+   * 那一对下划线成了斜体标记，所以界面文本是"PERSIST"而不是"E2E_PERSIST_"。
+   * 盘上那行原文一字没改（前一步已按原文比对过），丢下划线的只是查看器 —— 写在这里是为了
+   * 不让下一个读脚本的人以为"长期记忆存坏了"。
+   */
+  if (!docsShown6b.includes('叫俱佳Agent') || !docsShown6b.includes('PERSIST')) {
+    fail('打开的不是那份长期记忆（早先记进去的条目应该也在里面）', docsShown6b.slice(0, 400));
+  }
+  ok('补偿条件①：长期记忆有一个不用猜路径的入口，重启之后内容照样看得见');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -1434,6 +1726,7 @@ try {
   fail('执行过程中抛异常', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
 } finally {
   streamServer.close();
+  echoServer.close();
   if (app !== undefined) await app.close().catch(() => undefined);
   try {
     rmSync(TMP_ROOT, { recursive: true, force: true });
@@ -1444,5 +1737,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ 干净退出');
 process.exit(0);

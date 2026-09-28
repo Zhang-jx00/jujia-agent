@@ -72,3 +72,46 @@ describe('红线：写入只能由人显式点，不许跟着消息走', () => {
     expect(gate).toContain("b.content !== ''");
   });
 });
+
+/**
+ * 6b 起的**第三个**写入口（报备 §四，批复④已准）。
+ *
+ * 原来这一句锁的是"全仓只有两处写：界面按钮 + `append_note` 工具"。第三处出现时
+ * 不许把那句话擦掉继续跑绿 —— 那正是这条锁存在的意义，所以改成把新出处一起钉住：
+ * `chat-service.pendingNoteResolve` 里的那一次 `appendNote` 必须
+ * ① 真的走 `appendNote`（= 过路径守卫），不走第二条自造写文件路径；
+ * ② 只在 `action === 'remember'` 那一条支上，且在"预览文本为空就拒"之后 ——
+ *    这两条一起成立，才等于"永远发生在人点了「记」并且看过内容之后"。
+ */
+const chatServiceSource = read(['chat-service.ts']);
+
+describe('6b 第三个写入口：退出后补问的「记」', () => {
+  it('长期记忆的写函数仍然只有这三处调用者', () => {
+    const callers = [memorySource, toolSource, chatServiceSource].reduce(
+      (acc, src) => acc + [...src.matchAll(/\bappendNote\(/g)].length,
+      0,
+    );
+    // memory.ts 里是定义 + 工具里 1 次 + chat-service 里 1 次 = 3；多一个就是长了第四个入口
+    expect(callers).toBe(3);
+  });
+
+  it('这一处仍在 pendingNoteResolve 里面，且走的是 appendNote（不是自己拼路径写文件）', () => {
+    const at = chatServiceSource.indexOf('await appendNote(');
+    expect(at).toBeGreaterThan(-1);
+    const owner = chatServiceSource.lastIndexOf('export async function', at);
+    expect(chatServiceSource.slice(owner, owner + 60)).toContain('pendingNoteResolve');
+    expect(chatServiceSource).not.toContain('writeFileSync');
+  });
+
+  it('「记」之前必须先有非空预览文本：空文本直接拒，等于没看过就不能写', () => {
+    const body = chatServiceSource.slice(
+      chatServiceSource.indexOf('export async function pendingNoteResolve'),
+    );
+    const guardAt = body.indexOf("if (body === '') return");
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeLessThan(body.indexOf('await appendNote('));
+    // 三个动作分支都在写入之前返回：never / skip 碰不到 appendNote
+    expect(body.indexOf("args.action === 'never'")).toBeLessThan(guardAt);
+    expect(body.indexOf("args.action === 'skip'")).toBeLessThan(guardAt);
+  });
+});

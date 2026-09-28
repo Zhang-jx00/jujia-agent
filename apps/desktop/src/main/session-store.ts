@@ -1,5 +1,5 @@
-import { appendFile, mkdir, readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { appendFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { JsonStore } from '@jujia/shared';
 import { getDataRoot } from './paths';
 
@@ -56,6 +56,11 @@ export interface SessionLoad {
   messages: StoredMessage[];
   /** 读到最后一条残缺行时被丢弃的字节数（0 = 文件完好） */
   droppedTailBytes: number;
+  /**
+   * 压缩水印（**落盘行号**，见 `docs/DESIGN-COMPACT.md` §一）。
+   * 读不到元信息时按 0 处理：那是 6a 留下的旧数据，不是错误。
+   */
+  compactedThrough: number;
 }
 
 /** 会话 id → 目录。**校验只有这一处**：任何"拿 id 拼路径"的代码都算绕过。 */
@@ -69,6 +74,15 @@ export function sessionDir(sessionsRoot: string, id: string): string {
 /** 会话根目录 → 单条消息文件路径（同样只经 `sessionDir`） */
 export function messagesFile(sessionsRoot: string, id: string): string {
   return join(sessionDir(sessionsRoot, id), 'messages.jsonl');
+}
+
+/**
+ * 摘要文件路径（6b）。**与 `messages.jsonl` 分家**是刻意的：
+ * 压缩只往前走水印、只重写这个文件，原始记录一行都不动 —— "可回溯"这句承诺靠的就是它。
+ * 依旧只经 `sessionDir`，所以会话 id 白名单在这里同样生效。
+ */
+export function summaryFile(sessionsRoot: string, id: string): string {
+  return join(sessionDir(sessionsRoot, id), 'summary.md');
 }
 
 /** 入库前的最后一道整形：压成单行、限长并**如实标注**截断 */
@@ -98,6 +112,15 @@ export interface SessionStore {
   load(id: string): Promise<SessionLoad>;
   append(id: string, messages: StoredMessage[]): Promise<void>;
   saveMeta(meta: SessionMeta): Promise<void>;
+  /** 读摘要；**没写过就返回空串**（不抛 —— 首次压缩前这是常态） */
+  readSummary(id: string): Promise<string>;
+  /** 写摘要。空白内容**直接抛**：那等于把已有要点抹成空白（批复③点名的底线） */
+  writeSummary(id: string, text: string): Promise<void>;
+  /**
+   * 摘要文件落盘的时间（ISO 串）；没写过返回空串。
+   * 只给界面当"这一版摘要是啥时候存下的"用 —— 数据不另存一份，文件的 mtime 就是事实。
+   */
+  summaryStoredAt(id: string): Promise<string>;
 }
 
 interface IndexFile { sessions: SessionMeta[] }
@@ -205,7 +228,22 @@ export function createSessionStore(sessionsRoot: string): SessionStore {
     load: async (id) => {
       const path = messagesFile(sessionsRoot, id);
       const raw = await readFile(path, 'utf8').catch(() => '');
-      if (raw === '') return { messages: [], droppedTailBytes: 0 };
+      // 水印取自元信息；读不出、字段缺失、或是旧数据 → 一律按 0（未压缩）处理，不猜
+      let compactedThrough = 0;
+      if (raw !== '') {
+        const metaRaw = await readFile(join(sessionDir(sessionsRoot, id), 'session.meta.json'), 'utf8').catch(() => '');
+        if (metaRaw !== '') {
+          try {
+            const parsed = JSON.parse(metaRaw) as { data?: SessionMeta };
+            const m = parsed.data ?? (parsed as SessionMeta);
+            const n = m?.compactedThrough;
+            if (typeof n === 'number' && Number.isFinite(n) && n > 0) compactedThrough = Math.floor(n);
+          } catch {
+            // 元信息坏了不影响消息本身：按未压缩继续，摘要段自然不会被注入
+          }
+        }
+      }
+      if (raw === '') return { messages: [], droppedTailBytes: 0, compactedThrough: 0 };
       const lines = raw.split('\n').filter((l) => l.trim() !== '');
       const messages: StoredMessage[] = [];
       let droppedTailBytes = 0;
@@ -236,11 +274,35 @@ export function createSessionStore(sessionsRoot: string): SessionStore {
         }
         messages.push(parsed);
       }
-      return { messages, droppedTailBytes };
+      return { messages, droppedTailBytes, compactedThrough };
     },
 
     append: async (id, messages) => {
       await writeMessages(id, messages);
+    },
+
+    readSummary: async (id) => {
+      // 路径只经 summaryFile → sessionDir：非法 id 在这里就抛，不会变成一次任意路径读
+      const file = summaryFile(sessionsRoot, id);
+      const raw = await readFile(file, 'utf8').catch(() => '');
+      return raw.trim();
+    },
+
+    writeSummary: async (id, text) => {
+      const file = summaryFile(sessionsRoot, id);
+      const body = text.trim();
+      if (body === '') {
+        throw new Error('[sessions] 空摘要不落盘：它会覆盖已有的要点（要覆盖必须给出新内容）');
+      }
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, `${body}\n`, 'utf8');
+    },
+
+    summaryStoredAt: async (id) => {
+      // 路径校验照旧（非法 id 在这里抛），文件不存在才是"没压缩过"
+      const file = summaryFile(sessionsRoot, id);
+      const info = await stat(file).catch(() => null);
+      return info === null ? '' : info.mtime.toISOString();
     },
 
     saveMeta,

@@ -242,6 +242,97 @@ export const chatSessionMetaSchema = z.object({
 export type ChatSessionMeta = z.infer<typeof chatSessionMetaSchema>;
 
 /* ------------------------------------------------------------------ *
+ * 6b：会话压缩与「结束记要点」
+ *
+ * 三条约定写在类型上，而不是散在注释里：
+ * - **失败与"没有内容"都要能区分**：`ok` 是唯一的判定字段，`error` 空串表示"没出错"，
+ *   这样渲染层不需要靠"summary 是不是空"去猜失败原因（猜错就会把失败显示成成功）；
+ * - 所有对象 `.strict()`：跨进程的载荷多一个字段就该被发现，而不是被无声吞掉；
+ * - 摘要与要点的正文字数上限在纯函数里已截过，这里只兜住异常大的输入。
+ * ------------------------------------------------------------------ */
+
+/** 压缩状态：界面据此决定要不要提示，**主进程自己不因阈值动手** */
+export const compactStatusSchema = z
+  .object({
+    shouldPrompt: z.boolean(),
+    reason: z.string(),
+    compactedThrough: z.number().int().nonnegative(),
+    rounds: z.number().int().nonnegative(),
+    bytes: z.number().int().nonnegative(),
+    /** 未压缩部分的消息条数 */
+    messages: z.number().int().nonnegative(),
+    totalMessages: z.number().int().nonnegative(),
+    /** 这一版摘要落盘的时间（ISO 串）；'' = 还没压缩过。必填：漏了要在 preload 就炸，别静默少一块标识 */
+    summaryStoredAt: z.string(),
+  })
+  .strict();
+export type CompactStatusView = z.infer<typeof compactStatusSchema>;
+
+export const compactPreviewResultSchema = z
+  .object({
+    ok: z.boolean(),
+    summary: z.string().max(4_000),
+    truncated: z.boolean(),
+    /** 存下去之后水印会推进到第几条（落盘行号） */
+    willCover: z.number().int().nonnegative(),
+    error: z.string(),
+  })
+  .strict();
+export type CompactPreviewResult = z.infer<typeof compactPreviewResultSchema>;
+
+export const compactApplySchema = z
+  .object({ sessionId: z.string().min(1), summary: z.string().max(4_000) })
+  .strict();
+export const compactApplyResultSchema = z
+  .object({
+    ok: z.boolean(),
+    compactedThrough: z.number().int().nonnegative(),
+    error: z.string(),
+  })
+  .strict();
+export type CompactApplyResult = z.infer<typeof compactApplyResultSchema>;
+
+/** 一笔"这个会话结束了还没记要点"的账 */
+export const pendingNoteItemSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    title: z.string(),
+    markedAt: z.string(),
+  })
+  .strict();
+export type PendingNoteItem = z.infer<typeof pendingNoteItemSchema>;
+
+export const pendingNotesViewSchema = z
+  .object({
+    items: z.array(pendingNoteItemSchema),
+    neverAsk: z.boolean(),
+  })
+  .strict();
+export type PendingNotesView = z.infer<typeof pendingNotesViewSchema>;
+
+/**
+ * 补问预览只要会话 id：用哪条连接由主进程按会话自己的记录决定（批复⑤），
+ * 渲染层连"花谁的钱写这份摘要"都说了不算 —— 它选的可能是另一条连接。
+ */
+export const pendingPreviewSchema = z.object({ sessionId: z.string().min(1) }).strict();
+export const pendingPreviewResultSchema = z
+  .object({ ok: z.boolean(), text: z.string().max(4_000), error: z.string() })
+  .strict();
+export type PendingPreviewResult = z.infer<typeof pendingPreviewResultSchema>;
+
+export const pendingResolveSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    action: z.enum(['remember', 'skip', 'never']),
+    text: z.string().max(4_000),
+    /** 长期记忆写在选定工作区下；没选就是 null，不能猜 */
+    workspaceRoot: z.string().nullable(),
+  })
+  .strict();
+export const pendingResolveResultSchema = z.object({ ok: z.boolean(), error: z.string() }).strict();
+export type PendingResolveResult = z.infer<typeof pendingResolveResultSchema>;
+
+/* ------------------------------------------------------------------ *
  * W3：工作区与权限审批
  * ------------------------------------------------------------------ */
 

@@ -1,11 +1,20 @@
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import {
+  appendNote,
   assembleSystemPrompt,
+  buildCompactPrompt,
+  buildNotePrompt,
+  buildSummarySection,
+  capSummary,
   createDefaultRegistry,
+  decideCompactPrompt,
   loadNotes,
   loadProjectContext,
+  measureContext,
   runAgentTurn,
   sessionStart,
+  streamChat,
   type ChatMessage,
   type LoopEvent,
   type PermissionMode,
@@ -16,6 +25,9 @@ import {
 } from '@jujia/agent-core';
 import type { StreamEvent } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
+import { getDataRoot } from './paths';
+import { buildModelHistory, mergeTurnResult } from './model-history';
+import { createPendingNotes, shouldAskAgain, type PendingNotes } from './pending-notes';
 import { createSessionJournal } from './session-journal';
 import { needsEviction, pickEvictionCandidate } from './session-lru';
 import {
@@ -55,6 +67,12 @@ interface Session {
   lastUsedAt: number;
   /** 建会话的时刻（ISO），进元信息 */
   createdAt: string;
+  /**
+   * 压缩水印：**落盘行号**，不是内存数组下标（6b · 报备 §一，批复②）。
+   * 用下标会错：第 0 条是不落盘的 system 提示，重启后两套坐标对不上，
+   * 而 `session-journal` 正是按落盘条数记账的。
+   */
+  compactedThrough: number;
 }
 
 const sessions = new Map<string, Session>();
@@ -98,7 +116,7 @@ function metaOf(s: Session, messageCount: number): SessionMeta {
     createdAt: s.createdAt,
     lastUsedAt: new Date(s.lastUsedAt).toISOString(),
     messageCount,
-    compactedThrough: 0,
+    compactedThrough: s.compactedThrough,
   };
 }
 
@@ -186,6 +204,7 @@ function buildSession(connectionId: string): Session {
     running: false,
     alwaysAllow: new Set<string>(),
     lastUsedAt: Date.now(),
+    compactedThrough: 0,
   };
   sessions.set(session.id, session);
   return session;
@@ -219,6 +238,7 @@ export async function hydrateSession(sessionId: string, connectionId: string): P
     running: false,
     alwaysAllow: new Set<string>(),
     lastUsedAt: Date.now(),
+    compactedThrough: loaded.compactedThrough,
   };
   for (const m of loaded.messages) {
     session.messages.push({
@@ -316,7 +336,33 @@ export function sendMessage(
     try {
       const { record, apiKey } = await resolveConnection(connectionId);
 
-      // W8：按工作区动态装配系统提示（项目指令 → 长期记忆）
+      /**
+       * 6b：摘要段与本轮真正发出去的窗口。
+       *
+       * 两处"宁可退化成没压缩"的判断合起来是一条：**摘要与窗口要么一起生效，要么都不生效。**
+       * - 水印 > 0 但摘要文件读不出来 → 不窄化（窄化了模型就既看不到摘要也看不到原文）；
+       * - 摘要在、水印还没推进（写盘与推进之间崩掉）→ 不注入摘要（那描述的是"0 条之前"）。
+       */
+      const summaryText = await store()
+        .readSummary(session.id)
+        .catch((err: unknown) => {
+          console.warn(
+            '[compact] 摘要读不出来，本轮按未压缩继续:',
+            err instanceof Error ? err.message : String(err),
+          );
+          return '';
+        });
+      const summarySection =
+        session.compactedThrough > 0
+          ? buildSummarySection({
+              summary: summaryText,
+              through: session.compactedThrough,
+              sessionId: session.id,
+            })
+          : '';
+      const effectiveThrough = summarySection === '' ? 0 : session.compactedThrough;
+
+      // W8：按工作区动态装配系统提示（项目指令 → 长期记忆 → 会话摘要）
       // 每一层都标注来源，便于用户核查「模型为什么这么说」。
       if (deps.workspaceRoot !== null) {
         try {
@@ -328,6 +374,9 @@ export function sendMessage(
             base: BASE_PROMPT,
             project: project.text,
             notes: notes.text,
+            // ②"有出处"：段头要写明条数，用户数得出来才算数
+            notesCount: notes.lines,
+            sessionSummary: summarySection,
           });
           const first = session.messages[0];
           if (first && first.role === 'system') {
@@ -348,6 +397,12 @@ export function sendMessage(
           role: 'system',
           content: '当前尚未选择工作区，所有文件类工具都不可用。若用户要求读写文件，请提示其先在「概览」页选择工作区。',
         });
+        // 没工作区也要能压缩：这一支不经过 assembleSystemPrompt，摘要补在这里。
+        // 从常量重拼而不是往末尾追加 —— 每轮追加一次会把系统提示越攒越长。
+        const firstSystem = session.messages[0];
+        if (firstSystem?.role === 'system' && summarySection !== '') {
+          firstSystem.content = `${BASE_PROMPT}\n\n${summarySection}`;
+        }
       }
 
       // W5d-b：SessionStart 钩子 —— 只在会话第一轮触发一次（此时 messages 里还没有任何对话内容）。
@@ -373,10 +428,12 @@ export function sendMessage(
         }
       }
 
+      // 发给模型的只是**窗口**：内存与磁盘上的完整记录一条都不动（见 model-history.ts 的注释）
+      const outbound = buildModelHistory(session.messages, effectiveThrough);
       const result = await runAgentTurn(
         {
           connection: { baseUrl: record.baseUrl, apiKey, model: record.model },
-          messages: session.messages,
+          messages: outbound,
           maxTurns: MAX_TURNS,
           // 只带"用户主动停止"这一个信号。时间界限归 provider 管（空闲 / 单次调用上限），
           // 因为只有它看得见数据有没有在流；以前这里挂的是盖住整轮的 5 分钟总超时（T7 已纠）。
@@ -434,8 +491,9 @@ export function sendMessage(
         },
       );
 
-      // 用 loop 返回的完整消息序列替换会话历史（含 assistant 的 tool_calls 与 tool 结果）
-      session.messages = result.messages;
+      // 用 loop 返回的部分**只接回本轮新增**（含 assistant 的 tool_calls 与 tool 结果）。
+      // 直接整体赋值等于把窗口当成历史 —— 被压缩掉的旧消息会从内存里消失，journal 的按条数记账随之错位。
+      session.messages = mergeTurnResult(session.messages, outbound, result.messages);
 
       if (result.reason === 'error' && result.error) {
         resolved = 'error';
@@ -485,4 +543,256 @@ export function stopMessage(sessionId: string): boolean {
   if (!session?.controller) return false;
   session.controller.abort();
   return true;
+}
+
+/* ======================= 6b：会话压缩与「结束记要点」 ======================= *
+ *
+ * 这一层只做编排。判断、坐标、prompt 文本全在**已经单测过**的纯模块里：
+ * `agent-core/context/compaction.ts`（阈值 / 水印 / 注入段 / prompt）、`model-history.ts`（窗口与接回）、
+ * `pending-notes.ts`（待记要点的账）。`chat-service` 依赖 electron、进不了 vitest，
+ * 所以这里的每一句都保持"一句话能核对"，运行期行为交给 e2e 第 29、30 步问真值。
+ *
+ * 三条硬规矩（都来自已批的报备）：
+ * - **压缩只由人发起**：本文件没有任何"到阈值就自动压"的路径，阈值只产出一句提示；
+ * - **摘要与水印要么一起生效要么都不生效**：写盘失败就把水印退回原值；
+ * - **B 永远不在退出时写盘**：退出只记一笔待办，下次启动问过、看过预览，才进长期记忆。
+ */
+
+/** 一次性模型调用：只收文本、**不带 tools 字段**（不给工具 = 摘要轮没有顺手改文件的能力） */
+async function completeOnce(connectionId: string, prompt: string): Promise<string> {
+  const { record, apiKey } = await resolveConnection(connectionId);
+  let text = '';
+  for await (const ev of streamChat({
+    baseUrl: record.baseUrl,
+    apiKey,
+    model: record.model,
+    messages: [{ role: 'user', content: prompt }],
+  })) {
+    if (ev.type === 'text_delta') text += ev.delta;
+  }
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+export interface CompactStatus {
+  /** 到阈值了 —— 界面**只提示**，不自动压 */
+  shouldPrompt: boolean;
+  reason: string;
+  compactedThrough: number;
+  rounds: number;
+  bytes: number;
+  /** 未压缩的消息条数 */
+  messages: number;
+  /** 落盘总条数（水印的坐标系就是它） */
+  totalMessages: number;
+  /** 这一版摘要落盘的时间（ISO）；'' = 还没写过摘要 */
+  summaryStoredAt: string;
+}
+
+export async function compactStatus(sessionId: string): Promise<CompactStatus | null> {
+  const s = sessions.get(sessionId);
+  if (s === undefined) return null;
+  const shape = measureContext(s.messages, s.compactedThrough);
+  const verdict = decideCompactPrompt(shape);
+  return {
+    shouldPrompt: verdict.shouldPrompt,
+    reason: verdict.reason,
+    compactedThrough: s.compactedThrough,
+    rounds: shape.rounds,
+    bytes: shape.uncompressedBytes,
+    messages: shape.uncompressedMessages,
+    totalMessages: journal.persistedCount(s.id),
+    // 一次 stat 换"这版摘要是啥时候存下的"，比再持久化一个时间字段少一个真相来源
+    summaryStoredAt: await store()
+      .summaryStoredAt(s.id)
+      .catch(() => ''),
+  };
+}
+
+export type CompactPreview =
+  | { ok: true; summary: string; truncated: boolean; willCover: number }
+  | { ok: false; error: string };
+
+/** 生成摘要给人看 —— **这一步什么都不写**：落盘只发生在 compactApply 之后 */
+export async function compactPreview(sessionId: string): Promise<CompactPreview> {
+  const s = sessions.get(sessionId);
+  if (s === undefined) return { ok: false, error: '这个会话当前没打开，先在对话页选回它' };
+  if (s.running) return { ok: false, error: '这个会话正在生成回答，等它说完再压缩' };
+  const prompt = buildCompactPrompt(s.messages, s.compactedThrough);
+  if (prompt === '') return { ok: false, error: '没有需要压缩的新内容，本次什么都没做' };
+  // 失败不区分原因也不谎报：只说"没生成"，并明确什么都没改
+  const text = await completeOnce(s.connectionId, prompt).catch(() => '');
+  if (text === '') {
+    return { ok: false, error: '摘要没生成（无密钥 / 超时 / 额度不足都可能）。原始记录与水印都没动' };
+  }
+  const capped = capSummary(text);
+  return {
+    ok: true,
+    summary: capped.text,
+    truncated: capped.truncated,
+    willCover: journal.persistedCount(s.id),
+  };
+}
+
+/** 用户看过预览并点了「就按这版存」之后才到这里 */
+export async function compactApply(
+  sessionId: string,
+  summary: string,
+): Promise<{ ok: boolean; compactedThrough: number; error?: string }> {
+  const s = sessions.get(sessionId);
+  if (s === undefined) return { ok: false, compactedThrough: 0, error: '这个会话当前没打开' };
+  const body = summary.trim();
+  if (body === '') {
+    return { ok: false, compactedThrough: s.compactedThrough, error: '空摘要不会被保存：那等于把早先的事实抹成空白' };
+  }
+  const through = journal.persistedCount(s.id);
+  const previous = s.compactedThrough;
+  if (through <= previous) {
+    return { ok: false, compactedThrough: previous, error: '没有比上次更新的内容可压，水印没动' };
+  }
+  try {
+    await store().writeSummary(s.id, body);
+    s.compactedThrough = through;
+    await store().saveMeta(metaOf(s, through));
+  } catch (err) {
+    // 半状态不留：摘要没写成 / 元信息没推进，就退回"未压缩"，模型照旧看原文
+    s.compactedThrough = previous;
+    return {
+      ok: false,
+      compactedThrough: previous,
+      error: `保存失败：${err instanceof Error ? err.message : String(err)}，已退回压缩前的状态`,
+    };
+  }
+  return { ok: true, compactedThrough: through };
+}
+
+/** 待记要点的账（进程级懒建，与 session store 同一个理由：模块加载期不能碰 electron 路径） */
+let pendingRef: PendingNotes | null = null;
+
+/**
+ * 本进程里"这条账已经处理过了"的凭据：会话 id → 处理当时已落盘几条。
+ * 只在内存里，不落盘 —— 它管的是"这一次运行别问第二遍"，跨进程的事实仍在 pending-notes.json。
+ */
+const notedThrough = new Map<string, number>();
+
+function pendingNotes(): PendingNotes {
+  if (pendingRef === null) pendingRef = createPendingNotes(join(getDataRoot(), 'pending-notes.json'));
+  return pendingRef;
+}
+
+export function __setPendingNotesForTests(injected: PendingNotes | null): void {
+  pendingRef = injected;
+}
+
+/** 用户显式「结束并记要点」：只记账，不写盘、不调模型 */
+export async function markSessionEnded(sessionId: string): Promise<{ ok: boolean; error?: string }> {
+  const s = sessions.get(sessionId);
+  if (s === undefined) return { ok: false, error: '这个会话当前没打开' };
+  const firstUser = persistable(s).find((m) => m.role === 'user');
+  if (firstUser === undefined) {
+    // 空会话没东西可记：明确说出来，别留一条下次会追问的空账
+    return { ok: false, error: '这个会话还没有对话内容，没有要记的要点' };
+  }
+  const title = firstUser.content.slice(0, 40);
+  await pendingNotes().mark(s.id, title);
+  return { ok: true };
+}
+
+/** 退出时给每个"有内容、且记过之后又多聊了东西"的驻留会话留一笔账（绝不调模型） */
+export async function markAllResidentEnded(): Promise<number> {
+  let marked = 0;
+  for (const s of sessions.values()) {
+    if (s.running) continue; // 正在生成的等它落完盘，那轮由用户自己结束
+    const all = persistable(s);
+    if (!all.some((m) => m.role === 'user')) continue;
+    const total = journal.persistedCount(s.id);
+    // 这一屏话刚记过要点（或用户明说"不记"），别再问第二遍 —— 除非之后又聊出了新内容
+    if (!shouldAskAgain(notedThrough.get(s.id) ?? -1, total)) continue;
+    const title = all.find((m) => m.role === 'user')?.content.slice(0, 40) ?? '（无标题）';
+    await pendingNotes().mark(s.id, title);
+    marked += 1;
+  }
+  return marked;
+}
+
+export interface PendingNotesView {
+  items: { sessionId: string; title: string; markedAt: string }[];
+  neverAsk: boolean;
+}
+
+export async function pendingNotesList(): Promise<PendingNotesView> {
+  const ledger = pendingNotes();
+  return { items: await ledger.list(), neverAsk: await ledger.neverAsk() };
+}
+
+/**
+ * 补问时先给预览：这一步也不写盘。
+ *
+ * 用哪条连接**由会话自己决定**（批复⑤："摘要用会话当前那条连接"），不接受渲染层指定：
+ * 界面顶部选中的连接完全可能不是这个会话当初用的那条 —— 那就变成"用另一条连接、另一份额度"
+ * 去替这段对话写总结，而且 `hydrateSession` 还会把这个连接名写进会话里。
+ */
+export async function pendingNotePreview(
+  sessionId: string,
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  let connectionId = sessions.get(sessionId)?.connectionId ?? '';
+  if (connectionId === '') {
+    const metas = await store().list().catch(() => []);
+    const meta = metas.find((m) => m.id === sessionId);
+    if (meta === undefined) return { ok: false, error: '这个会话读不出来了（磁盘上没有它）' };
+    connectionId = meta.connectionId;
+  }
+  await hydrateSession(sessionId, connectionId);
+  const s = sessions.get(sessionId);
+  if (s === undefined) return { ok: false, error: '这个会话读不出来了（磁盘上没有它）' };
+  const prompt = buildNotePrompt(persistable(s));
+  if (prompt === '') return { ok: false, error: '这个会话没有可记的内容' };
+  const text = await completeOnce(s.connectionId, prompt).catch(() => '');
+  if (text === '') {
+    return { ok: false, error: '要点没生成（无密钥 / 超时 / 额度不足都可能）。什么都没写' };
+  }
+  return { ok: true, text: capSummary(text).text };
+}
+
+/**
+ * 用户点「记」之后才落长期记忆；点「不记 / 不再问」只清账。
+ *
+ * 三条分支都会留下"这一屏话已经处理过了"的凭据（`notedHere`），否则退出时
+ * `markAllResidentEnded` 会把刚处理完的会话重新记上一笔、下次启动再问一遍。
+ * 「记」按**当时的落盘条数**留底：之后又聊出新的，才值得再问；
+ * 「不记 / 不再问」是就这一整段话说的，本进程内不再因为它追问。
+ */
+const NOTE_DONE_FOREVER = Number.MAX_SAFE_INTEGER;
+
+export async function pendingNoteResolve(args: {
+  sessionId: string;
+  action: 'remember' | 'skip' | 'never';
+  text: string;
+  workspaceRoot: string | null;
+}): Promise<{ ok: boolean; error?: string }> {
+  const ledger = pendingNotes();
+  if (args.action === 'never') {
+    await ledger.setNeverAsk(true);
+    await ledger.clear(args.sessionId);
+    notedThrough.set(args.sessionId, NOTE_DONE_FOREVER);
+    return { ok: true };
+  }
+  if (args.action === 'skip') {
+    await ledger.clear(args.sessionId);
+    notedThrough.set(args.sessionId, NOTE_DONE_FOREVER);
+    return { ok: true };
+  }
+  if (args.workspaceRoot === null) {
+    return { ok: false, error: '还没选工作区：长期记忆没有可写的地方（先在「概览」页选目录）' };
+  }
+  const body = args.text.trim();
+  if (body === '') return { ok: false, error: '要点是空的，没有写进去' };
+  try {
+    await appendNote(args.workspaceRoot, body);
+  } catch (err) {
+    // 路径守卫拒绝时必须说出来 —— 静默失败就是"用户点了记，账上却少了"
+    return { ok: false, error: `没写进去：${err instanceof Error ? err.message : String(err)}` };
+  }
+  await ledger.clear(args.sessionId);
+  notedThrough.set(args.sessionId, journal.persistedCount(args.sessionId));
+  return { ok: true };
 }

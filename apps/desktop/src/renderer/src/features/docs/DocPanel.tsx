@@ -43,12 +43,17 @@ export function DocPanel(): ReactElement {
 
   const blocks = useMemo(() => (content === null ? [] : parseMarkdown(content)), [content]);
 
-  const open = useCallback(async (): Promise<void> => {
-    const target = path.trim();
+  /** 长期记忆的固定位置（补偿条件①"看得到"的落点；路径由主进程的路径守卫把守，不在工作区内会被拒） */
+  const NOTES_PATH = '.jujia/NOTES.md';
+
+  /** `override` 给「查看长期记忆」这类预置入口用：不依赖 setPath 之后的重渲染时机 */
+  const open = useCallback(async (override?: string): Promise<void> => {
+    const target = (override ?? path).trim();
     if (target === '') {
       setMessage({ kind: 'error', text: '请先输入工作区内的文件路径' });
       return;
     }
+    setPath(target);
     setBusy(true);
     setMessage(null);
     try {
@@ -105,6 +110,15 @@ export function DocPanel(): ReactElement {
         />
         <button type="button" className="jj-btn jj-transition" onClick={() => void open()} disabled={busy}>
           打开
+        </button>
+        {/* 补偿条件①"看得到"：不让人靠猜路径去找那份每轮都注入给模型的长期记忆 */}
+        <button
+          type="button"
+          className="jj-btn jj-transition"
+          onClick={() => void open(NOTES_PATH)}
+          disabled={busy}
+        >
+          查看长期记忆
         </button>
       </header>
 

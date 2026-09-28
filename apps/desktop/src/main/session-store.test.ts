@@ -202,3 +202,96 @@ describe('清单只是缓存', () => {
     expect((await store.list()).map((m) => m.id).sort()).toEqual([ID, other].sort());
   });
 });
+
+/**
+ * 摘要文件的存储层（铺设计划 6b · 报备 `docs/DESIGN-COMPACT.md` §一~§二，批复②批准）。
+ *
+ * 三条"错了就伤用户数据"的底线：
+ * ① 摘要与原始 jsonl 是**两个文件** —— 压缩永远不许动原始记录（可回溯是承诺）；
+ * ② 空摘要**不许落盘**（覆盖了旧摘要 = 把早先事实抹成空白）；
+ * ③ 会话 id 的白名单在摘要路径上同样生效 —— 否则 `../../x` 就成了任意路径写。
+ */
+describe('summary.md：压缩产物的落盘', () => {
+  it('没写过摘要时读到空串（不抛异常，也不建文件）', async () => {
+    const store = createSessionStore(root);
+    expect(await store.readSummary(ID)).toBe('');
+  });
+
+  it('写完换实例读回 —— 重启后仍知道压到了哪一条', async () => {
+    const store = createSessionStore(root);
+    await record(store, meta(ID), [toStoredMessage('user', '早先的话')]);
+    await store.writeSummary(ID, '- 决定：用 A 方案\n- 待办：补测试');
+    const reopened = createSessionStore(root);
+    expect(await reopened.readSummary(ID)).toContain('决定：用 A 方案');
+  });
+
+  it('写摘要**不动原始 jsonl 一行**（原始记录不删是承诺）', async () => {
+    const store = createSessionStore(root);
+    const msgs = [toStoredMessage('user', '一'), toStoredMessage('assistant', '二')];
+    await record(store, meta(ID), msgs);
+    const before = (await readFile(messagesFile(root, ID), 'utf8')).split('\n').filter(Boolean).length;
+    await store.writeSummary(ID, '要点');
+    const after = (await readFile(messagesFile(root, ID), 'utf8')).split('\n').filter(Boolean).length;
+    expect(after).toBe(before);
+    expect((await store.load(ID)).messages).toHaveLength(2);
+  });
+
+  it('空白摘要被拒绝落盘，且已有摘要原样保留（绝不用空覆盖）', async () => {
+    const store = createSessionStore(root);
+    await record(store, meta(ID), [toStoredMessage('user', '一')]);
+    await store.writeSummary(ID, '上一版的要点');
+    await expect(store.writeSummary(ID, '   \n ')).rejects.toThrow();
+    expect(await store.readSummary(ID)).toBe('上一版的要点');
+  });
+
+  it('非法会话 id 不能借摘要路径写出目录外', async () => {
+    const store = createSessionStore(root);
+    await expect(store.writeSummary('../escape', '越界')).rejects.toThrow();
+    await expect(store.readSummary('../escape')).rejects.toThrow();
+  });
+
+  /**
+   * 「已压缩至第 N 条」这块标识要能给出处置时间（报备 §五）。
+   * 取的是**摘要文件的落盘时间**而不是新加一个持久字段：写摘要与推进水印必须同一次成功，
+   * 所以文件的 mtime 就是用户认可这一版摘要的时刻 —— 再加一份时间就是第二个真相，
+   * 两处不一致时没人知道该信谁。
+   */
+  it('摘要落盘时间：没写过就是空串，写过就是可解析的时间', async () => {
+    const store = createSessionStore(root);
+    await record(store, meta(ID), [toStoredMessage('user', '一')]);
+    expect(await store.summaryStoredAt(ID)).toBe('');
+    await expect(store.summaryStoredAt('../escape')).rejects.toThrow();
+
+    const startedAt = Date.now();
+    await store.writeSummary(ID, '要点');
+    const stamp = await store.summaryStoredAt(ID);
+    const at = Date.parse(stamp);
+    expect(Number.isNaN(at)).toBe(false);
+    expect(at).toBeGreaterThanOrEqual(startedAt - 2000);
+  });
+});
+
+/**
+ * 水印要能从盘上读回来（6b · 报备 §一，批复②批准）。
+ * 坐标系是**落盘行号**：主进程重建"发给模型的历史"时只能信这一个数，
+ * 内存数组下标里有不落盘的 system，重启后必然错位。
+ */
+describe('load() 一并给出水印', () => {
+  it('元信息里写着压缩到哪一条，load 就报哪一个数', async () => {
+    const store = createSessionStore(root);
+    await record(store, meta(ID, { compactedThrough: 2 }), [
+      toStoredMessage('user', '一'),
+      toStoredMessage('user', '二'),
+      toStoredMessage('user', '三'),
+    ]);
+    const loaded = await store.load(ID);
+    expect(loaded.compactedThrough).toBe(2);
+    expect(loaded.messages).toHaveLength(3);
+  });
+
+  it('旧数据里没有这个字段时按 0 处理，不抛也不猜', async () => {
+    const store = createSessionStore(root);
+    await record(store, meta(ID), [toStoredMessage('user', '一')]);
+    expect((await store.load(ID)).compactedThrough).toBe(0);
+  });
+});

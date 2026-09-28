@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import type { ChatSessionMeta, ConnectionView, StreamEvent } from '@jujia/shared-ipc';
+import type {
+  ChatSessionMeta,
+  CompactStatusView,
+  ConnectionView,
+  PendingNoteItem,
+  StreamEvent,
+} from '@jujia/shared-ipc';
 import { createDeltaBatcher, windowedSlice } from '@jujia/shared/stream-batcher';
 import { belongsToSession } from './stream-routing';
 import { ToolCard } from './ToolCard';
@@ -70,6 +76,26 @@ export function ChatPanel({ connections }: Props): ReactElement {
   const [historyTotal, setHistoryTotal] = useState(0);
   const [saved, setSaved] = useState<ChatSessionMeta[]>([]);
   const [pickId, setPickId] = useState('');
+
+  /**
+   * 6b 的界面态。
+   *
+   * A（压缩）：`compactInfo` 是"该不该问一句"，`compactDraft` 是**预览**（还没落盘的那一份）。
+   * B（结束记要点）：`pendingNotes` 是上次退出留下的待办账，`pendingDraft` 同样只是预览。
+   * 两处的"预览"都刻意不写盘 —— 点存才走 apply。
+   */
+  const [compactInfo, setCompactInfo] = useState<CompactStatusView | null>(null);
+  const [compactDraft, setCompactDraft] = useState<{
+    summary: string;
+    truncated: boolean;
+    willCover: number;
+  } | null>(null);
+  const [compactBusy, setCompactBusy] = useState(false);
+  const [compactHint, setCompactHint] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [pendingNotes, setPendingNotes] = useState<PendingNoteItem[]>([]);
+  const [pendingDraft, setPendingDraft] = useState<{ sessionId: string; text: string } | null>(null);
+  const [pendingBusy, setPendingBusy] = useState(false);
+  const [pendingHint, setPendingHint] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -281,6 +307,148 @@ export function ChatPanel({ connections }: Props): ReactElement {
           ? 'empty'
           : 'ready';
 
+  /* ---------------- 6b：压缩（A）与「结束记要点」（B） ---------------- */
+
+  /** 会话切换、或一轮跑完之后重新问一次状态（阈值判定只在主进程算，界面不复制规则） */
+  useEffect(() => {
+    setCompactDraft(null);
+    setCompactHint(null);
+    if (sessionId === undefined) {
+      setCompactInfo(null);
+      return;
+    }
+    if (sending) return;
+    let cancelled = false;
+    void window.jujia.chatCompactStatus(sessionId).then((s) => {
+      if (!cancelled) setCompactInfo(s);
+    }, () => {
+      // 问不到状态不是错：只是这一轮不提示。下一轮结束还会再问，静默失败才是问题
+      if (!cancelled) setCompactInfo(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, sending]);
+
+  /** 上次退出攒下的待办账：开机问一次，用户说过「不再问」就永不再弹 */
+  useEffect(() => {
+    let cancelled = false;
+    void window.jujia.chatPendingList().then((v) => {
+      if (cancelled || v.neverAsk) return;
+      setPendingNotes(v.items);
+    }, () => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function askCompact(): Promise<void> {
+    if (sessionId === undefined) return;
+    setCompactBusy(true);
+    setCompactHint(null);
+    try {
+      const r = await window.jujia.chatCompactPreview(sessionId);
+      if (!r.ok) {
+        setCompactHint({ kind: 'err', text: r.error });
+        return;
+      }
+      setCompactDraft({ summary: r.summary, truncated: r.truncated, willCover: r.willCover });
+    } finally {
+      setCompactBusy(false);
+    }
+  }
+
+  /** 「先不存」：只把预览丢掉 —— 磁盘与水印从这一刻起也没被动过 */
+  function discardCompact(): void {
+    setCompactDraft(null);
+    setCompactHint({ kind: 'ok', text: '没存。发给模型的上下文一点没变。' });
+  }
+
+  async function applyCompact(): Promise<void> {
+    if (sessionId === undefined || compactDraft === null) return;
+    setCompactBusy(true);
+    try {
+      const r = await window.jujia.chatCompactApply(sessionId, compactDraft.summary);
+      setCompactDraft(null);
+      setCompactHint(
+        r.ok
+          ? { kind: 'ok', text: `已压缩到第 ${String(r.compactedThrough)} 条，原始记录一字未删（在磁盘上可查）` }
+          : { kind: 'err', text: r.error },
+      );
+      setCompactInfo(await window.jujia.chatCompactStatus(sessionId));
+    } finally {
+      setCompactBusy(false);
+    }
+  }
+
+  async function endSessionAndRemember(): Promise<void> {
+    if (sessionId === undefined) return;
+    setPendingBusy(true);
+    // 上一笔的回执不能留在原地：留着它，这一笔无论成败都像"已经办过了"
+    setPendingHint(null);
+    try {
+      const r = await window.jujia.chatEnd(sessionId);
+      if (!r.ok) {
+        setPendingHint({ kind: 'err', text: r.error });
+        return;
+      }
+      const list = await window.jujia.chatPendingList();
+      setPendingNotes(list.items);
+      setPendingHint({ kind: 'ok', text: '这个会话算结束了。要点先看着，看过再决定写不写进长期记忆。' });
+    } finally {
+      setPendingBusy(false);
+    }
+  }
+
+  async function previewPendingNote(item: PendingNoteItem): Promise<void> {
+    setPendingBusy(true);
+    setPendingHint(null);
+    try {
+      const r = await window.jujia.chatPendingPreview(item.sessionId);
+      if (!r.ok) {
+        setPendingHint({ kind: 'err', text: r.error });
+        return;
+      }
+      setPendingDraft({ sessionId: item.sessionId, text: r.text });
+    } finally {
+      setPendingBusy(false);
+    }
+  }
+
+  async function resolvePendingNote(
+    item: PendingNoteItem,
+    action: 'remember' | 'skip' | 'never',
+  ): Promise<void> {
+    setPendingBusy(true);
+    // 上一笔的回执不能留在这一次的动作上：那会让"没写进去"看起来像"写进去了"
+    setPendingHint(null);
+    try {
+      const r = await window.jujia.chatPendingResolve(
+        item.sessionId,
+        action,
+        pendingDraft?.sessionId === item.sessionId ? pendingDraft.text : '',
+      );
+      setPendingDraft(null);
+      if (!r.ok) {
+        setPendingHint({ kind: 'err', text: r.error });
+        return;
+      }
+      const list = await window.jujia.chatPendingList();
+      setPendingNotes(list.items);
+      setPendingHint({
+        kind: 'ok',
+        text:
+          action === 'remember'
+            ? '要点已写进长期记忆（.jujia/NOTES.md，可在「文档」页签点「查看长期记忆」核对）'
+            : action === 'never'
+              ? '好，以后不再问这件事'
+              : '这条没写进长期记忆',
+      });
+    } finally {
+      setPendingBusy(false);
+    }
+  }
+
   async function send(): Promise<void> {
     const text = input.trim();
     if (!text || !connectionId) return;
@@ -405,6 +573,32 @@ export function ChatPanel({ connections }: Props): ReactElement {
         {historyTotal > 0 && (
           <span className="p0-subtitle">{`共 ${String(historyTotal)} 条（重启后仍在磁盘上）`}</span>
         )}
+        {/*
+          「已压缩至第 N 条」= 这一版摘要**覆盖了到哪一条**（报备 §五）。
+          水印是落盘行号，所以这里说的"N 条"和上面"共 N 条"是同一个坐标系 —— 用户拿两个数能对上账。
+        */}
+        {compactInfo !== null && compactInfo.compactedThrough > 0 && (
+          <span
+            className="w2-chip"
+            title={`早先 ${String(compactInfo.compactedThrough)} 条已折成摘要注入；原始记录共 ${String(
+              compactInfo.totalMessages,
+            )} 条，仍一字不删地存在磁盘上${compactInfo.summaryStoredAt === '' ? '' : `（摘要存于 ${new Date(
+              compactInfo.summaryStoredAt,
+            ).toLocaleString()}）`}`}
+          >
+            {`已压缩至第 ${String(compactInfo.compactedThrough)} 条`}
+          </span>
+        )}
+        {sessionId !== undefined && (
+          <button
+            type="button"
+            className="w2-btn"
+            disabled={pendingBusy || sending}
+            onClick={() => void endSessionAndRemember()}
+          >
+            结束并记要点
+          </button>
+        )}
         {usage && (
           <span className="p0-subtitle">
             tokens: 入 {usage.input} / 出 {usage.output}
@@ -416,6 +610,131 @@ export function ChatPanel({ connections }: Props): ReactElement {
       {historyHint !== null && (
         <p className="p0-err" role="alert">
           {historyHint}
+        </p>
+      )}
+
+      {/*
+        6b-A：阈值**只提示**（报备 §二 / 批复③）。
+        这一条上没有任何写盘动作 —— 唯一的落盘入口是预览卡上的「就按这版存」。
+      */}
+      {compactInfo !== null && compactInfo.shouldPrompt && compactDraft === null && (
+        <div className="p0-card" role="status">
+          <p className="p0-warn">{compactInfo.reason}</p>
+          <div className="w2-actions">
+            <button
+              type="button"
+              className="w2-btn-primary"
+              disabled={compactBusy || sending}
+              onClick={() => void askCompact()}
+            >
+              {compactBusy ? '正在生成摘要…' : '压缩此会话'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 预览：落盘前必须过人的眼（批复④）。主进程这一步一个字节都不写 */}
+      {compactDraft !== null && (
+        <div className="p0-card" role="group" aria-label="压缩预览">
+          <p className="p0-subtitle">
+            {`这版摘要会顶替发给模型的早先原文（存到第 ${String(
+              compactDraft.willCover,
+            )} 条为止）。磁盘上的原始记录一字不删，现在还没写盘。`}
+          </p>
+          {compactDraft.truncated && <p className="p0-warn">摘要过长已截断</p>}
+          <pre className="jj-pre">{compactDraft.summary}</pre>
+          <div className="w2-actions">
+            <button
+              type="button"
+              className="w2-btn-primary"
+              disabled={compactBusy}
+              onClick={() => void applyCompact()}
+            >
+              就按这版存
+            </button>
+            <button type="button" className="w2-btn" disabled={compactBusy} onClick={discardCompact}>
+              先不存
+            </button>
+            <button
+              type="button"
+              className="w2-btn"
+              disabled={compactBusy}
+              onClick={() => void askCompact()}
+            >
+              {compactBusy ? '正在生成摘要…' : '重新生成一次'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {compactHint !== null && (
+        <p className={compactHint.kind === 'ok' ? 'jj-ok' : 'p0-err'} role="status">
+          {compactHint.text}
+        </p>
+      )}
+
+      {/*
+        6b-B：上次退出攒下的"还没记要点"。退出当场不写盘也不调模型（报备 §四 / 批复④），
+        补问时同样必须先预览 —— 「记」在看过内容之前是点不动的。
+      */}
+      {pendingNotes.length > 0 && (
+        <div className="p0-card" role="group" aria-label="待记要点">
+          <p className="p0-warn">{`有 ${String(
+            pendingNotes.length,
+          )} 个会话结束了还没记要点。要不要写进长期记忆，先看一眼要写什么。`}</p>
+          {pendingNotes.map((item) => (
+            <div key={item.sessionId}>
+              <span className="p0-subtitle">{`《${item.title}》`}</span>
+              {pendingDraft?.sessionId === item.sessionId && (
+                <>
+                  <p className="p0-subtitle">
+                    这一行会追加进 .jujia/NOTES.md，并在之后的每次会话里注入给模型：
+                  </p>
+                  <pre className="jj-pre">{pendingDraft.text}</pre>
+                </>
+              )}
+              <div className="w2-actions">
+                <button
+                  type="button"
+                  className="w2-btn"
+                  disabled={pendingBusy}
+                  onClick={() => void previewPendingNote(item)}
+                >
+                  {pendingBusy ? '正在生成要点…' : '看摘要再决定'}
+                </button>
+                <button
+                  type="button"
+                  className="w2-btn-primary"
+                  disabled={pendingBusy || pendingDraft?.sessionId !== item.sessionId}
+                  onClick={() => void resolvePendingNote(item, 'remember')}
+                >
+                  记
+                </button>
+                <button
+                  type="button"
+                  className="w2-btn"
+                  disabled={pendingBusy}
+                  onClick={() => void resolvePendingNote(item, 'skip')}
+                >
+                  不记
+                </button>
+                <button
+                  type="button"
+                  className="w2-btn"
+                  disabled={pendingBusy}
+                  onClick={() => void resolvePendingNote(item, 'never')}
+                >
+                  不再问
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pendingHint !== null && (
+        <p className={pendingHint.kind === 'ok' ? 'jj-ok' : 'p0-err'} role="status">
+          {pendingHint.text}
         </p>
       )}
 
