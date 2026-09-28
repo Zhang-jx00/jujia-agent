@@ -65,6 +65,7 @@
 │                                COVERAGE-MATRIX / HOOKS / SKILLS / PLUGINS / TEST-POLICY /
 │                                PERF-BUDGET / SETUP-TERMINAL / ARCH-CLOUD-IDE / LEARNING-MAP /
 │                                UX-AUDIT / DEPENDENCY-LICENSES / CHANGELOG-ARCHIVE / HANDOVER(本文)
+│                                DESIGN-SESSIONS(6a 报备，已批已交付) / DESIGN-COMPACT(6b 报备，待批)
 ├─ review/                       REVIEW-LOG.md（复核台账）、TRACK-SWEEP-1.md（全项目排查报告）、
 │                                REVIEW-LOG-ARCHIVE.md、mutations.json（变异定义）、EVALUATION 已删
 ├─ knowledge/                    统一知识库（README.md 是四层体系导航：地图→来源→矩阵→发现→报告→卡片）
@@ -321,8 +322,9 @@
 **P1 第二批已交付（`v0.42.0-外审3`：T9 两半 + T19 修复 + T21 分节）**，
 **P1 第三批（收尾批）已交付（`v0.43.0-外审4`：T10 handoff 逐 id 配对 + T11 重定向逐跳过判 / 网页下载一律拦下）**
 —— **P1 到此走完**。
-**下一轮 = 轨道铺设计划 6b**（compact / 自动摘要 / 注入隔离界面），开工前需**轻量报备**摘要 prompt 设计与
-注入段格式（含补偿条件③"记忆 ≠ 指令"的验收写法）。新变异编号从 **M50** 起（M47–M49 已被收尾批占用）。
+**下一轮 = 轨道铺设计划 6b**（compact / 自动摘要 / 注入隔离界面）。**报备稿已交、等批后才施工**：
+`docs/DESIGN-COMPACT.md`（含批复点名的摘要 prompt 设计与注入段格式，末尾附"需要点的七条"）。
+新变异编号从 **M50** 起（M47–M49 已被收尾批占用）。
 **并行队列**：外部审查 P2（T13–T16）已登记在 `docs/TRACK-ROADMAP.md` §二，
 其中 T16 标的是"**未核实**"，接手时先逐条读源码核实再动手，不许把报告的说法当既成事实 ——
 两轮下来报告已有**两处失实**（ADS 的 realpath 机理、T8 的 `json-store` 已有实现），队列里都按实测写了结论。
