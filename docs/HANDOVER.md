@@ -65,7 +65,7 @@
 │                                COVERAGE-MATRIX / HOOKS / SKILLS / PLUGINS / TEST-POLICY /
 │                                PERF-BUDGET / SETUP-TERMINAL / ARCH-CLOUD-IDE / LEARNING-MAP /
 │                                UX-AUDIT / DEPENDENCY-LICENSES / CHANGELOG-ARCHIVE / HANDOVER(本文)
-│                                DESIGN-SESSIONS(6a 报备，已批已交付) / DESIGN-COMPACT(6b 报备，待批)
+│                                DESIGN-SESSIONS(6a 报备，已批已交付) / DESIGN-COMPACT(6b 报备，已批已交付) / DESIGN-T22-TAB-STATE(T22 报备，待批)
 ├─ review/                       REVIEW-LOG.md（复核台账）、TRACK-SWEEP-1.md（全项目排查报告）、
 │                                REVIEW-LOG-ARCHIVE.md、mutations.json（变异定义）、EVALUATION 已删
 ├─ knowledge/                    统一知识库（README.md 是四层体系导航：地图→来源→矩阵→发现→报告→卡片）
@@ -326,8 +326,10 @@
 报备稿 `docs/DESIGN-COMPACT.md` 七条全批 + 两条追加验收（④补问也要先预览、⑦e2e 从界面打开 NOTES.md），
 状态已改写为"已批已交付"，并**在原地记下两处与报备的出入**（§二 触发点 3 没做、§五 的"生成时间"取文件 mtime）。
 新变异 **M50–M55** 已占用（累计 55 项），**下一轮新变异从 M56 起**。
-**下一轮候选（等批复）**：① 6b 复核意见的落地；② **T22**（切走「对话」页签再切回来会丢连接与会话选择 ——
-本轮设计 e2e 时撞上，已登记在 `docs/TRACK-ROADMAP.md` §二，未修）；③ 挂账的 perf 规范采样（等"机器空闲"）。
+**下一轮 = T22 修复（批复已排优先）**：切走「对话」页签再切回来会丢连接与会话选择、下一条消息悄悄开新会话。
+**报备已交、等批后才施工**：`docs/DESIGN-T22-TAB-STATE.md`（机制选"保持挂载"、四个方案的取舍、错误态与滚动两条边界规则、e2e 两步 + 红绿配对，末尾七条开关）。
+**T22 之后的序列（批复给定）**：M19 轻量 IDE（文件树 + 编辑器 + diff，PDF 查看入口挂这里）→ M9 画布 → M8 push。
+挂账不变：perf 规范采样（等"机器空闲"）· T13–T16 · T18。
 **并行队列**：外部审查 P2（T13–T16）已登记在 `docs/TRACK-ROADMAP.md` §二，
 其中 T16 标的是"**未核实**"，接手时先逐条读源码核实再动手，不许把报告的说法当既成事实 ——
 两轮下来报告已有**两处失实**（ADS 的 realpath 机理、T8 的 `json-store` 已有实现），队列里都按实测写了结论。

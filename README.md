@@ -62,7 +62,8 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 | 工作怎么分类与记录（轨道计划） | [docs/TRACK-PLANS.md](docs/TRACK-PLANS.md) |
 | 开发必须遵守的工作协议（29 条，逐条有出处） | [docs/WORK-PROTOCOL.md](docs/WORK-PROTOCOL.md) |
 | 会话持久化的数据布局**报备稿**（五开关已批，6a 已交付 `v0.38.0-铺设6a`） | [docs/DESIGN-SESSIONS.md](docs/DESIGN-SESSIONS.md) |
-| 会话压缩与自动摘要**报备稿**（待批，未动工） | [docs/DESIGN-COMPACT.md](docs/DESIGN-COMPACT.md) |
+| 会话压缩与自动摘要**报备稿**（七条已批，已交付 `v0.44.0-铺设6b`） | [docs/DESIGN-COMPACT.md](docs/DESIGN-COMPACT.md) |
+| 切走页签不丢对话连接的**报备稿**（待批，未动工） | [docs/DESIGN-T22-TAB-STATE.md](docs/DESIGN-T22-TAB-STATE.md) |
 | 排期、里程碑编号与修复队列（路线图） | [docs/TRACK-ROADMAP.md](docs/TRACK-ROADMAP.md) |
 | 全项目排查记录 | [review/TRACK-SWEEP-1.md](review/TRACK-SWEEP-1.md) |
 | 第三方依赖与许可证 | [docs/DEPENDENCY-LICENSES.md](docs/DEPENDENCY-LICENSES.md) |
