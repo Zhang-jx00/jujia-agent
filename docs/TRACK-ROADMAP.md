@@ -129,6 +129,7 @@
 | T14 | CI 补门：`license:check` 进 CI；`mut` 做成 `workflow_dispatch` 独立 workflow | 轻 | ⬜ 未做 |
 | T15 | `argv.ts` 的 `SHELL_METACHAR` 缺 `% ^ !` → `run_command` 经 shell 时 `%VAR%` 展开可绕过"元字符一律拒绝"的承诺 | 轻 | ⬜ 未做（补字符表 **或** 修正承诺表述，二选一） |
 | T19 | **审批弹窗对所有 ask 都显示「本次会话总是允许」**，但 `permissionRequestSchema` 里没有 `bypassable` —— 硬 ask（执行类 / 敏感路径 / 高危清单 / 钩子配置）上这个按钮**只兑现"这一次"**，用户却以为以后都不问了 | 中 | ⬜ **登记待裁决**（`v0.41.0-组件测试1` 写组件测试时发现）。两种处置任选：① 载荷带上 `bypassable`，硬 ask 时**不渲染**该按钮；② 按钮文案改成不承诺未来的说法。**不要在实现里顺手改** —— 这动的是审批语义 |
+| T21 | `docs/DEPENDENCY-LICENSES.md` 的开头写"便于第三方审阅**我们分发了什么**"，但扫描对象是整个 `node_modules`（含 eslint / typescript / jsdom 等**只开发不随包分发**的依赖）—— 清单本身没有 dev/prod 之分 | 轻 | ⬜ **登记待裁决**（`v0.41.0-组件测试1` 修作用域包记名时发现）。两种处置任选：① 扫描时区分 `dependencies` / `devDependencies` 闭包，只把随应用分发的写进"分发清单"，其余单列一节"仅开发用";② 把开头那句改成"本仓所有依赖的许可证"（承诺与实现对齐）。**不要**为了好看直接把 dev 项删掉 —— 那会把真实存在的许可证义务抹掉 |
 | T20 | `license-check` 按**目录名**记账，作用域包被写成尾巴（`@testing-library/react` 记成 `react`），既写错第三方清单名字，又与同名包互相吞掉 | 轻 | ✅ `v0.41.0-组件测试1`（改用 package.json 的 `name`；重跑后 500 个包、130 个作用域包按真名入列，0 硬拒绝 / 0 未声明）|
 | T16 | 待核实清单（provider 四项 / git-service 词法守卫与 symlink / 终端 Map 无上限 / `CHAT_SEND` 长度 / TerminalPanel 双 PTY / MCP 重连与 `alive` 误报 / `SKILL.md` 信任级 / 分页口径差 1 / 气泡 key 跨页重复 / path-guard 注释宣称 8.3 短名但无实现 + `forWrite` 死参数） | 逐条核实后定 | ⬜ **未核实**（不许把"报告说的"当"已核实的"） |
 
