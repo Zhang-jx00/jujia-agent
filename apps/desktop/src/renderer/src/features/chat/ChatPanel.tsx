@@ -34,6 +34,12 @@ interface ToolLine {
 
 interface Props {
   connections: ConnectionView[];
+  /**
+   * 这个面板此刻可不可见（T22）。
+   * 面板常驻之后，`display:none` 期间 `scrollTop` / `scrollHeight` 读不到 ——
+   * 滚动位置实际会丢，所以切回来要按"原本贴底就贴底"补一次。
+   */
+  active?: boolean;
 }
 
 /**
@@ -43,7 +49,7 @@ interface Props {
  * 2. 流式期间输入框保持可用（知识卡片 004：流式 UI 预算），停止按钮随时可点；
  * 3. 卸载时取消订阅，避免窗口重载后回调堆积。
  */
-export function ChatPanel({ connections }: Props): ReactElement {
+export function ChatPanel({ connections, active = true }: Props): ReactElement {
   const [connectionId, setConnectionId] = useState<string>('');
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [input, setInput] = useState('');
@@ -218,6 +224,21 @@ export function ChatPanel({ connections }: Props): ReactElement {
     });
     return () => cancelAnimationFrame(raf);
   }, [bubbles, toolLines]);
+
+  /**
+   * 切回对话页时补一次滚动（T22 报备 §三 第一条）。
+   * 常驻期间元素被 `hidden`（= `display:none`），布局不成立 → `scrollTop` / `scrollHeight` 读不到，
+   * 所以回来时位置是真的丢了。口径与上面那条完全一致：**原本贴底才贴底，用户上滚过就不抢**。
+   */
+  useEffect(() => {
+    if (!active || !stickToBottomRef.current) return;
+    const el = scrollerRef.current;
+    if (!el) return;
+    const raf = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [active]);
 
   /** 长列表窗口化（纯逻辑在 @jujia/shared）：只渲染末尾 N 条，避免上万个 DOM 节点拖垮滚动 */
   const windowed = windowedSlice(bubbles, windowSize);

@@ -17,6 +17,12 @@ import { failureView } from './error-fallback';
 interface Props {
   area: string;
   children: ReactNode;
+  /**
+   * 出错时通知外面一声（可选）。T22 用它在对话页常驻之后补回"逃生口"：
+   * 常驻面板不再随页签重挂，所以由调用侧记住"它这一轮是坏的"，
+   * 等用户离开这一页时把它的 key 换掉 —— 下次进来就是一次干净的重挂。
+   */
+  onError?: () => void;
 }
 
 interface State {
@@ -33,6 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
   override componentDidCatch(err: Error, info: ErrorInfo): void {
     // 界面上是给人看的截断版，控制台留全量：少了这一份，线上问题就只能靠猜
     console.error(`[ui]「${this.props.area}」渲染失败：`, err, info.componentStack);
+    this.props.onError?.();
   }
 
   private readonly reset = (): void => {

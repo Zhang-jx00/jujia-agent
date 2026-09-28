@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { AppInfo, ConfigSnapshot, ConnectionView } from '@jujia/shared-ipc';
 /**
@@ -10,6 +10,7 @@ import type { ThemePack } from '@jujia/ui-tokens';
 import { WorkspaceCard } from './features/workspace/WorkspaceCard';
 import { PermissionDialog } from './features/permission/PermissionDialog';
 import { ErrorBoundary } from './ErrorBoundary';
+import { KeepAlive } from './KeepAlive';
 
 // 懒加载：连接页与对话页不在首屏，拆出去可显著减小初始 bundle（懒加载策略见 PERF-BUDGET）
 const ConnectionsPanel = lazy(() =>
@@ -49,6 +50,15 @@ const DocPanel = lazy(() =>
 );
 
 /** 兜底样式包改为在启动时从动态导入的模块里取，见下方 useEffect（首屏不加载 ui-tokens） */
+
+/** 懒加载面板的骨架屏：对话页常驻那份与其余页签共享那份都用它（两处各写一遍迟早会漂） */
+const PANEL_FALLBACK = (
+  <div className="jj-skeleton" aria-busy="true">
+    <div className="jj-skeleton-line" />
+    <div className="jj-skeleton-line" />
+    <div className="jj-skeleton-line" />
+  </div>
+);
 
 interface Loaded {
   info: AppInfo;
@@ -105,6 +115,19 @@ export function App(): ReactElement {
   const [tab, setTab] = useState<Tab>('overview');
   const [connections, setConnections] = useState<ConnectionView[]>([]);
   /**
+   * 对话页的**重挂轮次**（T22 报备 §二 第三条）。
+   *
+   * 对话页从此常驻（不随切页签卸载），于是 `ErrorBoundary key={tab}` 那条"换页签即重挂、
+   * 坏页面自动重来一次"的逃生口也一并消失了。规矩：**正常态保持、错误态重挂** ——
+   * 错误态本来就没有正常内容可保，而"重来一次"正是用户此刻唯一想要的。
+   * 所以离开对话页时若它处于错误态，就把它这一轮的 key 换掉。
+   */
+  const [chatEpoch, setChatEpoch] = useState(0);
+  const chatBrokenRef = useRef(false);
+  const markChatBroken = useCallback((): void => {
+    chatBrokenRef.current = true;
+  }, []);
+  /**
    * 当前样式包。
    * 启动时由**动态导入**的模块解析后填入；解析完成前为 null（外观页显示骨架屏）。
    * 这样首屏完全不依赖 ui-tokens。
@@ -126,6 +149,14 @@ export function App(): ReactElement {
       alive = false;
     };
   }, []);
+
+  /** 离开对话页时：若它这一轮是坏的，就把它的重挂轮次 +1（下次进来是一次干净的重挂） */
+  useEffect(() => {
+    if (tab === 'chat') return;
+    if (!chatBrokenRef.current) return;
+    chatBrokenRef.current = false;
+    setChatEpoch((n) => n + 1);
+  }, [tab]);
 
   // 启动即应用已保存的外观。
   // 关键：**动态导入** ui-tokens —— 它不参与首屏渲染，因此首帧不等待它。
@@ -202,20 +233,26 @@ export function App(): ReactElement {
         {state.phase === 'ready' && tab === 'overview' && (
           <Overview info={state.loaded.info} config={state.loaded.config} />
         )}
+        {/*
+          对话页常驻（T22 报备 §二，批复①）：切页签只切可见性、**不卸载** ——
+          流订阅与面板自己那 24 个 state 都留着，所以"流式中切走再切回"能接回现有流。
+          首次激活前不挂载，所以首屏 chunk 与启动时间线不受影响（懒加载性质没丢）。
+          它用**自己的**错误边界与稳定 key：`key={tab}` 那套会把它重挂、状态照样丢。
+        */}
+        {state.phase === 'ready' && (
+          <KeepAlive active={tab === 'chat'}>
+            <ErrorBoundary key={`chat-${String(chatEpoch)}`} area={TAB_LABEL.chat} onError={markChatBroken}>
+              <Suspense fallback={PANEL_FALLBACK}>
+                <ChatPanel connections={connections} active={tab === 'chat'} />
+              </Suspense>
+            </ErrorBoundary>
+          </KeepAlive>
+        )}
         <ErrorBoundary key={tab} area={TAB_LABEL[tab]}>
-          <Suspense
-            fallback={
-              <div className="jj-skeleton" aria-busy="true">
-                <div className="jj-skeleton-line" />
-                <div className="jj-skeleton-line" />
-                <div className="jj-skeleton-line" />
-              </div>
-            }
-          >
+          <Suspense fallback={PANEL_FALLBACK}>
           {state.phase === 'ready' && tab === 'connections' && (
             <ConnectionsPanel onChanged={setConnections} />
           )}
-          {state.phase === 'ready' && tab === 'chat' && <ChatPanel connections={connections} />}
           {state.phase === 'ready' && tab === 'terminal' && (
             <TerminalPanel workspaceRoot={state.loaded.config.config.workspace} />
           )}

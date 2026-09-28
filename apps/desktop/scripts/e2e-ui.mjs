@@ -1718,6 +1718,86 @@ try {
   }
   ok('补偿条件①：长期记忆有一个不用猜路径的入口，重启之后内容照样看得见');
 
+  /* ---------------- T22：切走页签不丢对话的连接与会话选择 ----------------
+   *
+   * 报备 §四的两步，都用**重启之后**那个窗口（win3）验 —— 上一步已经把它带起来了。
+   * 选择保持看**磁盘真值**（回显条数 + jsonl 行数 + 会话清单条数），不看界面自述。
+   */
+  step('T22 切页签不丢对话：连接与会话选择都留着，下一条消息还落在原会话（磁盘真值）');
+  /*
+   * 先切回对话页：上一步结束时停在「文档」，而对话面板现在是**挂着但隐藏**的 ——
+   * `locator` 不看 innerText 的可见性规则，会先命中那份隐藏的 select（第一次跑就是这么红的：
+   * "element is not visible" 卡了 30 秒）。常驻面板带来的这条测试纪律写在这里：
+   * **凡是要操作对话页控件的地方，先把页签切到对话页**。
+   */
+  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  const boxT22 = win3.locator('textarea[placeholder^="输入消息"]');
+  const askT22 = async (text, needle) => {
+    await boxT22.fill(text);
+    await win3.locator('button', { hasText: '发送' }).first().click();
+    if ((await waitText3(needle, 15_000)) !== true) {
+      fail(`这一问没有拿到预期回显（${needle}）`, (await body3()).slice(0, 500));
+    }
+  };
+  await win3.locator('select').first().selectOption(seededEchoConnId);
+  /*
+   * 这一步**不假设**面板里有会话：重启之后对话面板是全新的（`sessionId` 未定义时连「新会话」都不渲染）。
+   * 有就重置一下，没有就直接发 —— 两种状态都对，断言的是"发出去之后落在哪"。
+   */
+  const newChatT22 = win3.locator('button', { hasText: '新会话' });
+  if ((await newChatT22.count()) > 0) await newChatT22.first().click();
+  await askT22('T22_切页签前的第一问', 'ECHO n=1 sum=0');
+
+  const listT22 = await win3.evaluate(async () => await window.jujia.chatList());
+  const sT22 = listT22.find((s) => s.title.includes('T22_切页签前'));
+  if (!sT22) fail('T22 会话没出现在清单里', JSON.stringify(listT22).slice(0, 300));
+  const jsonlT22 = join(dataDir, 'sessions', sT22.id, 'messages.jsonl');
+  const linesT22 = () => readFileSync(jsonlT22, 'utf8').split('\n').filter(Boolean).length;
+  const beforeLinesT22 = linesT22();
+  const beforeListT22 = listT22.length;
+
+  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+
+  const backT22 = await body3();
+  if (!backT22.includes('T22_切页签前的第一问')) {
+    fail('切回来之后之前的问答不见了（面板被卸载过）', backT22.slice(0, 700));
+  }
+  if (!backT22.includes(`会话 ${sT22.id.slice(0, 8)}`)) {
+    fail('切回来之后当前会话不是原来那个（会话选择被重置）', backT22.slice(0, 700));
+  }
+  const connT22 = await win3.locator('select').first().inputValue();
+  if (connT22 !== seededEchoConnId) {
+    fail(`切回来之后连接选择回到了默认（当前 ${connT22}，应为 ${seededEchoConnId}）`);
+  }
+
+  await askT22('T22_切页签后的第二问', 'ECHO n=3 sum=0');
+  if (linesT22() !== beforeLinesT22 + 2) {
+    fail(`第二问没有落回原会话：行数 ${String(beforeLinesT22)} → ${String(linesT22())}（应为 +2）`);
+  }
+  const afterListT22 = await win3.evaluate(async () => await window.jujia.chatList());
+  if (afterListT22.length !== beforeListT22) {
+    fail(`悄悄多出了新会话：${String(beforeListT22)} → ${String(afterListT22.length)}`);
+  }
+  ok('切走再切回：连接与会话选择都留着、视图恢复，第二问落回原会话且没有新建会话（磁盘为证）');
+
+  step('T22 流式中切走再切回：订阅没随页签卸载，后续增量照常到达');
+  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await win3.locator('select').first().selectOption(seededStreamConnId);
+  await win3.locator('button', { hasText: '新会话' }).first().click();
+  await boxT22.fill('STREAM_A T22 切走验证');
+  await win3.locator('button', { hasText: '发送' }).first().click();
+  if ((await waitText3('A_1_', 12_000)) !== true) {
+    fail('流没有开始（假服务的头两段没到）', (await body3()).slice(0, 700));
+  }
+  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  if ((await waitText3('A_16_', 15_000)) !== true) {
+    fail('切回来之后这一轮没有走完 —— 订阅随页签卸载了（T22 要修的正是这个）', (await body3()).slice(0, 900));
+  }
+  ok('流式中切走 2 秒再切回：后续增量照常到达，整轮走完（订阅一直在）');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -1737,5 +1817,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → 干净退出');
 process.exit(0);

@@ -440,6 +440,46 @@
       "find": "    event.preventDefault();",
       "replace": "    // 变异：不停这一拍，进程按原节奏退出",
       "test": "apps/desktop/src/main/compact-wiring.test.ts"
+    },
+    {
+      "id": "M56",
+      "desc": "非激活就卸载：切走页签仍会把对话面板卸掉（T22 要修的正是这个，流订阅随之退订）",
+      "file": "apps/desktop/src/renderer/src/KeepAlive.tsx",
+      "find": "  if (!everActive) return null;",
+      "replace": "  if (!active) return null;",
+      "test": "apps/desktop/src/renderer/src/KeepAlive.test.tsx"
+    },
+    {
+      "id": "M57",
+      "desc": "隐藏不生效：容器不再带 hidden，切走的页面仍然占位显示（状态在、但界面变成两页叠着）",
+      "file": "apps/desktop/src/renderer/src/KeepAlive.tsx",
+      "find": "<div hidden={!active} style={{ height: '100%' }}>",
+      "replace": "<div style={{ height: '100%' }}>",
+      "test": "apps/desktop/src/renderer/src/KeepAlive.test.tsx"
+    },
+    {
+      "id": "M58",
+      "desc": "懒加载性质被破坏：没激活过的面板也直接挂载（首屏 chunk 与启动时间线跟着变）",
+      "file": "apps/desktop/src/renderer/src/KeepAlive.tsx",
+      "find": "const [everActive, setEverActive] = useState(active);",
+      "replace": "const [everActive, setEverActive] = useState(true);",
+      "test": "apps/desktop/src/renderer/src/KeepAlive.test.tsx"
+    },
+    {
+      "id": "M59",
+      "desc": "对话页的边界又吃回页签 key：常驻之后仍随切页签重挂，状态照样丢（这处不处理就会把修复悄悄抵消）",
+      "file": "apps/desktop/src/renderer/src/App.tsx",
+      "find": "key={`chat-${String(chatEpoch)}`}",
+      "replace": "key={tab}",
+      "test": "apps/desktop/src/main/tab-state-wiring.test.ts"
+    },
+    {
+      "id": "M60",
+      "desc": "切回来的滚动补一次失效：依赖数组写成空，切回时再也不触发（写法在、行为没了）",
+      "file": "apps/desktop/src/renderer/src/features/chat/ChatPanel.tsx",
+      "find": "}, [active]);",
+      "replace": "}, []);",
+      "test": "apps/desktop/src/main/tab-state-wiring.test.ts"
     }
   ]
 }
