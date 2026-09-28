@@ -2,10 +2,36 @@
 
 > 由 `npm run license:check` 生成。**不要手改**——重新运行即可更新。
 > 规则：强 copyleft（GPL/AGPL/SSPL）= 硬拒绝；LGPL/MPL/CC-BY = 需声明义务；其余按各自许可。
+> 归类看 SPDX 表达式的**任意位置**（`Apache-2.0 AND LGPL-3.0-or-later` 也算需声明），不只看开头。
 
-**汇总**：共 500 个去重依赖。
+> **本表覆盖整个 `node_modules`（共 500 个去重依赖），分两节**：
+> **§A 随安装包分发**（14 个 —— copyleft 的关注点全在这一节）；
+> **§B 仅构建期 · 不随包分发**（486 个 —— 按开源合规惯例保留声明即可，不删条目）。
+> 划分口径：`package-lock.json` 每条的 `dev` 标记（npm 安装时算出来的可达性，peer / optional 都算过）。
+> 唯一一条手动覆盖：`electron` —— 见脚本注释。判不准的条目一律留在 §A。
 
-## MIT（384 个）
+## §A 随安装包分发（14 个）
+
+### MIT（14 个）
+
+- @jujia/agent-core@0.0.1
+- @jujia/desktop@0.42.0
+- @jujia/shared@0.0.1
+- @jujia/shared-ipc@0.0.1
+- @jujia/ui-tokens@0.0.1
+- @xterm/addon-fit@0.11.0
+- @xterm/xterm@6.0.0
+- electron@44.4.2
+- node-addon-api@7.1.1
+- node-pty@1.1.0
+- react@19.3.0
+- react-dom@19.3.0
+- scheduler@0.28.0
+- zod@3.25.76
+
+## §B 仅构建期 · 不随包分发（486 个）
+
+### MIT（370 个）
 
 - @asamuzakjp/css-color@7.1.2
 - @asamuzakjp/dom-selector@9.2.2
@@ -61,8 +87,6 @@
 - @jridgewell/resolve-uri@3.1.2
 - @jridgewell/sourcemap-codec@1.6.0
 - @jridgewell/trace-mapping@0.3.31
-- @jujia/agent-core@0.0.1
-- @jujia/desktop@0.40.0
 - @esbuild/win32-x64@0.25.12
 - @rolldown/pluginutils@1.0.0-rc.3
 - @vitejs/plugin-react@5.2.0
@@ -70,9 +94,6 @@
 - esbuild@0.25.12
 - magic-string@0.30.21
 - vite@7.3.6
-- @jujia/shared@0.0.1
-- @jujia/shared-ipc@0.0.1
-- @jujia/ui-tokens@0.0.1
 - @keyv/bigmap@1.3.1
 - @keyv/serialize@1.1.1
 - @malept/flatpak-bundler@0.4.0
@@ -124,8 +145,6 @@
 - @vitest/mocker@5.0.1
 - @vitest/spy@5.0.1
 - @xmldom/xmldom@0.8.15
-- @xterm/addon-fit@0.11.0
-- @xterm/xterm@6.0.0
 - acorn@8.18.0
 - acorn-jsx@5.3.2
 - agent-base@7.1.4
@@ -196,7 +215,6 @@
 - dmg-builder@26.15.3
 - dom-accessibility-api@0.5.16
 - dunder-proto@1.0.1
-- electron@44.4.2
 - @types/node@24.13.5
 - undici-types@7.18.2
 - electron-builder@26.15.3
@@ -287,12 +305,10 @@
 - nanoid@3.3.19
 - natural-compare@1.4.0
 - node-abi@4.35.0
-- node-addon-api@7.1.1
 - node-api-version@0.2.1
 - node-gyp@12.4.0
 - undici@6.28.1
 - node-int64@0.4.0
-- node-pty@1.1.0
 - node-releases@2.0.56
 - normalize-url@6.1.0
 - object-keys@1.1.1
@@ -327,8 +343,6 @@
 - qified@0.10.1
 - hookified@2.2.0
 - quick-lru@5.1.1
-- react@19.3.0
-- react-dom@19.3.0
 - react-is@17.0.2
 - react-refresh@0.18.0
 - read-binary-file-arch@1.0.6
@@ -342,7 +356,6 @@
 - rolldown@1.2.9
 - rollup@4.63.3
 - safe-buffer@5.1.2
-- scheduler@0.28.0
 - semver-compare@1.0.0
 - serialize-error@7.0.1
 - shebang-command@2.0.0
@@ -390,9 +403,8 @@
 - xmlchars@2.2.0
 - yargs@17.7.3
 - yocto-queue@0.1.0
-- zod@3.25.76
 
-## ISC（41 个）
+### ISC（41 个）
 
 - semver@6.3.1
 - minimatch@3.1.5
@@ -436,7 +448,7 @@
 - yallist@3.1.1
 - yargs-parser@21.1.1
 
-## Apache-2.0（26 个）
+### Apache-2.0（26 个）
 
 - @eslint/config-array@0.23.5
 - @eslint/config-helpers@0.7.0
@@ -465,7 +477,7 @@
 - typescript@6.0.3
 - xml-name-validator@5.0.0
 
-## BSD-2-Clause（14 个）
+### BSD-2-Clause（14 个）
 
 - @electron/osx-sign@1.3.3
 - @electron/windows-sign@1.2.2
@@ -482,7 +494,7 @@
 - uri-js@4.4.1
 - webidl-conversions@8.0.1
 
-## BSD-3-Clause（12 个）
+### BSD-3-Clause（12 个）
 
 - asn1js@3.0.10
 - bytestreamjs@2.0.1
@@ -497,7 +509,7 @@
 - sprintf-js@1.1.3
 - tough-cookie@6.0.2
 
-## BlueOak-1.0.0（9 个）
+### BlueOak-1.0.0（9 个）
 
 - lru-cache@11.5.3
 - isexe@3.1.5
@@ -509,53 +521,53 @@
 - tar@7.5.22
 - yallist@5.0.0
 
-## MIT-0（2 个）
+### MIT-0（2 个）
 
 - @csstools/color-helpers@6.1.2
 - @csstools/css-syntax-patches-for-csstree@1.1.14
 
-## MPL-2.0（2 个）
+### MPL-2.0（2 个）
 
 - lightningcss@1.33.0
 - lightningcss-win32-x64-msvc@1.33.0
 
-## Apache-2.0 AND LGPL-3.0-or-later AND MIT（1 个）
+### Apache-2.0 AND LGPL-3.0-or-later AND MIT（1 个）
 
 - @img/sharp-wasm32@0.35.4
 
-## Apache-2.0 AND LGPL-3.0-or-later（1 个）
+### Apache-2.0 AND LGPL-3.0-or-later（1 个）
 
 - @img/sharp-win32-x64@0.35.4
 
-## Python-2.0（1 个）
+### Python-2.0（1 个）
 
 - argparse@2.0.1
 
-## CC-BY-4.0（1 个）
+### CC-BY-4.0（1 个）
 
 - caniuse-lite@1.0.30001810
 
-## CC0-1.0（1 个）
+### CC0-1.0（1 个）
 
 - mdn-data@2.27.1
 
-## WTFPL OR ISC（1 个）
+### WTFPL OR ISC（1 个）
 
 - sanitize-filename@1.6.4
 
-## WTFPL（1 个）
+### WTFPL（1 个）
 
 - truncate-utf8-bytes@1.0.2
 
-## 0BSD（1 个）
+### 0BSD（1 个）
 
 - tslib@2.8.1
 
-## (MIT OR CC0-1.0)（1 个）
+### (MIT OR CC0-1.0)（1 个）
 
 - type-fest@0.13.1
 
-## (WTFPL OR MIT)（1 个）
+### (WTFPL OR MIT)（1 个）
 
 - utf8-byte-length@1.0.5
 

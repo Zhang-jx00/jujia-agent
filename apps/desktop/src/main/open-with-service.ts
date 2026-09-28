@@ -203,6 +203,8 @@ export function createOpenWithService(deps: OpenWithDeps): OpenWithService {
       summary: openRequestSummary(target, { url: finalUrl, ...(exePath !== null ? { exePath } : {}) }),
       args: { target, url: finalUrl, ...(exePath !== null ? { exePath } : {}) },
       paths: [],
+      // 外发档位永远是硬 ask：false 由自证保证（上面那行 assert 不通过就到不了这里）
+      bypassable: gate.bypassable,
     };
     const answer = await deps.resolvePermission(request);
     const decision = typeof answer === 'string' ? answer : answer.decision;

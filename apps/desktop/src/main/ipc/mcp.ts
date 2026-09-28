@@ -1,8 +1,10 @@
 import {
   IPC,
+  mcpApprovalPlanSchema,
   mcpApproveResultSchema,
   mcpConnectResultSchema,
   mcpServerViewSchema,
+  type McpApprovalPlan,
   type McpConnectResult,
 } from '@jujia/shared-ipc';
 import { z } from 'zod';
@@ -45,6 +47,12 @@ export function registerMcpIpc(ctx: IpcContext): void {
     const { id, choice } = (payload ?? {}) as { id?: unknown; choice?: unknown };
     if (typeof id !== 'string' || id === '') throw new Error('缺少服务端 id');
     return mcpApproveResultSchema.parse(await mcp.approve(id, choice));
+  });
+
+  /** 让界面在切页签回来之后还能接着批：计划的事实本来就在主进程，这里只是把它再读一次 */
+  handle(IPC.MCP_PENDING_PLAN, async (): Promise<McpApprovalPlan | null> => {
+    const pending = mcp.pendingApproval();
+    return pending === null ? null : mcpApprovalPlanSchema.parse(pending.plan);
   });
 
   handle(IPC.MCP_DISCONNECT, async (_e, id: unknown): Promise<boolean> => {

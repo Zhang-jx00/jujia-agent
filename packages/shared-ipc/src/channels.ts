@@ -35,6 +35,15 @@ export const IPC = {
   PERMISSION_REQUEST: 'permission:request',
   /** renderer → main：回填用户的审批结果 */
   PERMISSION_RESOLVE: 'permission:resolve',
+  /**
+   * main → renderer：某个审批请求**已经在主进程侧结束**（超时 / 窗口销毁 / 被取消）。
+   *
+   * 为什么必须有它（外部审查 T9）：主进程 120 秒超时后会按"超时未响应"继续走，
+   * 而渲染层的弹窗是靠自己排队显示的 —— 没有这条通知时它还挂着，
+   * 用户随后点"允许"，决定落进一个已经不存在的需求里（点了等于没点，且没有任何提示）。
+   * 载荷带**请求 id**：只关对应那一张，不能一把全关（同一时刻可能有多个请求在排队）。
+   */
+  PERMISSION_EXPIRED: 'permission:expired',
   /** renderer → main：在工作区内执行一个已注册的工具（经权限门） */
   TOOL_RUN: 'tool:run',
 
@@ -66,6 +75,12 @@ export const IPC = {
   MCP_SERVER_DELETE: 'mcp:server-delete',
   /** 发起连接：启动子进程 → 握手 → 列工具 → 返回**待用户批准的计划** */
   MCP_CONNECT: 'mcp:connect',
+  /**
+   * 取出当前"待你批准"的接入计划（外部审查 T9）。
+   * 计划一直存在主进程（`session.pendingPlan`），以前只随 `mcp:connect` 的回包出来一次 ——
+   * 界面把它存组件 state，切个页签就没了，用户只能重新连一次（等于真的再起一个第三方进程）。
+   */
+  MCP_PENDING_PLAN: 'mcp:pending-plan',
   /** 回填用户的批准选择（逐工具） */
   MCP_APPROVE: 'mcp:approve',
   /** 断开：摘掉工具并退掉子进程 */

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { PermissionRequestPayload } from '@jujia/shared-ipc';
+import type { PermissionExpiredPayload, PermissionRequestPayload } from '@jujia/shared-ipc';
 import { PermissionDialog } from './PermissionDialog';
 
 /**
@@ -13,6 +13,7 @@ import { PermissionDialog } from './PermissionDialog';
  */
 
 const listeners = new Set<(req: PermissionRequestPayload) => void>();
+const expiredListeners = new Set<(payload: PermissionExpiredPayload) => void>();
 const resolve = vi.fn();
 
 function push(over: Partial<PermissionRequestPayload> = {}): void {
@@ -23,6 +24,8 @@ function push(over: Partial<PermissionRequestPayload> = {}): void {
     summary: 'run_command · 执行命令：echo hi —— 执行命令，需确认',
     args: { command: 'echo hi' },
     paths: ['D:/work/demo'],
+    // 默认按"软 ask"给（可被本次会话总是允许压掉）；硬 ask 的用例自己传 false
+    bypassable: true,
     ...over,
   } as PermissionRequestPayload;
   // 主进程推送是"外面来的"：必须包在 act 里，React 才会把这次 setState 冲刷完
@@ -39,13 +42,86 @@ beforeEach(() => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    onPermissionExpired(listener: (payload: PermissionExpiredPayload) => void) {
+      expiredListeners.add(listener);
+      return () => expiredListeners.delete(listener);
+    },
     permissionResolve: resolve,
   });
+  // 真实 preload 返回的是布尔（settle 是否命中）；默认给 true。
+  // "没命中"那两条用例自己 mockResolvedValue(false) / mockRejectedValue(...)
+  resolve.mockResolvedValue(true);
 });
+
+/** 主进程通知"这个请求已经结束了"（超时 / 窗口销毁）—— 来自外部，同样要包 act */
+function expire(id: string, reason: PermissionExpiredPayload['reason'] = 'timeout'): void {
+  act(() => {
+    for (const l of expiredListeners) l({ id, reason });
+  });
+}
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+describe('硬 ask 不给「总是允许」这个选项（T19）', () => {
+  it('bypassable=false：不渲染该按钮，并说明"这是硬确认，不能被总是允许跳过"', () => {
+    render(<PermissionDialog />);
+    push({ bypassable: false, summary: 'run_command · 执行命令：rm x —— 执行命令，需确认' });
+    expect(screen.queryByRole('button', { name: '本次会话总是允许' })).toBeNull();
+    expect(screen.getByText(/这是硬确认/)).not.toBeNull();
+    // 批复指定的原话要落在界面上（与 GitPanel 同一口径），不许哪天改成一句含糊的提示
+    expect(screen.getByText(/此操作每次都会要求确认/)).not.toBeNull();
+    // 少一个按钮不等于少一个选择权：允许一次 / 改参数 / 拒绝都还在
+    expect(screen.getByRole('button', { name: '允许一次' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '拒绝' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '允许并修改参数…' })).not.toBeNull();
+  });
+
+  it('bypassable=true：普通写类照常给出「本次会话总是允许」，也不多喊一句硬确认', () => {
+    render(<PermissionDialog />);
+    push({ bypassable: true, toolName: 'write_file', kind: 'write', summary: '写入 a.md' });
+    expect(screen.getByRole('button', { name: '本次会话总是允许' })).not.toBeNull();
+    expect(screen.queryByText(/这是硬确认/)).toBeNull();
+  });
+});
+
+describe('主进程说结束了，弹窗就关掉那一张（T9）', () => {
+  it('超时通知到达 → 弹窗消失且留下"没有执行"的说明（不是悄悄不见）', () => {
+    render(<PermissionDialog />);
+    push({ id: 'perm-x', summary: '会超时的请求' });
+    expect(screen.getByRole('dialog')).not.toBeNull();
+    expire('perm-x', 'timeout');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // 弹窗关了，话还得留在原地：用户需要知道"刚才那一步没发生"
+    expect(screen.getByText(/超时/).textContent).toContain('没有执行');
+  });
+
+  it('两张在排队时只关被点名的那张（不能一把全关）', () => {
+    render(<PermissionDialog />);
+    push({ id: 'perm-a', summary: '甲请求' });
+    push({ id: 'perm-b', summary: '乙请求' });
+    expire('perm-a', 'window-closed');
+    expect(screen.getByRole('heading', { level: 3 }).textContent).toContain('乙请求');
+  });
+
+  it('回填时主进程说"这个请求已经不在" → 明说决定没生效', async () => {
+    resolve.mockResolvedValue(false);
+    render(<PermissionDialog />);
+    push({ id: 'perm-late', summary: '迟到的决定' });
+    fireEvent.click(screen.getByRole('button', { name: '允许一次' }));
+    await waitFor(() => expect(screen.getByText(/没有生效/)).not.toBeNull());
+  });
+
+  it('回填通道本身抛错 → 说明"这一步没有执行"，不把异常吞掉', async () => {
+    resolve.mockRejectedValue(new Error('IPC 通道已断开'));
+    render(<PermissionDialog />);
+    push({ id: 'perm-boom', summary: '断开的回填' });
+    fireEvent.click(screen.getByRole('button', { name: '拒绝' }));
+    await waitFor(() => expect(screen.getByText(/IPC 通道已断开/)).not.toBeNull());
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
 });
 
 describe('审批弹窗：内容看得见、决定传得出去', () => {

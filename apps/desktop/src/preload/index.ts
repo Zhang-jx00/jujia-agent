@@ -16,8 +16,10 @@ import {
   hooksSaveResultSchema,
   hooksStateSchema,
   pluginsStateSchema,
+  mcpApprovalPlanSchema,
   mcpServerViewSchema,
   permissionDecisionSchema,
+  permissionExpiredSchema,
   permissionRequestSchema,
   permissionRuleInputSchema,
   permissionRuleViewSchema,
@@ -35,11 +37,13 @@ import {
   type ConnectionInput,
   type ConnectionView,
   type McpApprovalChoice,
+  type McpApprovalPlan,
   type McpApproveResult,
   type McpConnectResult,
   type McpServerInput,
   type McpServerView,
   type PermissionDecisionPayload,
+  type PermissionExpiredPayload,
   type PermissionRequestPayload,
   type HooksSaveResult,
   type HooksState,
@@ -174,6 +178,25 @@ const api = {
     return toolRunResultSchema.parse(await ipcRenderer.invoke(IPC.TOOL_RUN, { toolName, args }));
   },
 
+  /**
+   * 订阅"某个审批请求已在主进程侧结束"的通知（超时 / 窗口销毁）。
+   * 渲染层按 id 关掉对应那一张弹窗 —— 见 `IPC.PERMISSION_EXPIRED` 的注释。
+   */
+  onPermissionExpired(listener: (payload: PermissionExpiredPayload) => void): () => void {
+    const handler = (_e: unknown, payload: unknown): void => {
+      const parsed = permissionExpiredSchema.safeParse(payload);
+      if (!parsed.success) {
+        console.error('[preload] 丢弃不符合契约的审批结束通知:', parsed.error.message);
+        return;
+      }
+      listener(parsed.data);
+    };
+    ipcRenderer.on(IPC.PERMISSION_EXPIRED, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC.PERMISSION_EXPIRED, handler);
+    };
+  },
+
   /** 订阅权限审批请求；返回取消订阅函数 */
   onPermissionRequest(listener: (req: PermissionRequestPayload) => void): () => void {
     const handler = (_e: unknown, payload: unknown): void => {
@@ -281,6 +304,16 @@ const api = {
   },
 
   /** 回填批准选择（逐工具） */
+  /**
+   * 取回"待你批准"的接入计划（外部审查 T9）：切页签、重载页面之后还能接着批，
+   * 不必重新连一次 —— 重新连等于真的再起一个第三方进程。
+   */
+  async mcpPendingPlan(): Promise<McpApprovalPlan | null> {
+    const raw: unknown = await ipcRenderer.invoke(IPC.MCP_PENDING_PLAN);
+    if (raw === null) return null;
+    return mcpApprovalPlanSchema.parse(raw);
+  },
+
   async mcpApprove(id: string, choice: McpApprovalChoice): Promise<McpApproveResult> {
     const parsed = mcpApprovalChoiceSchema.parse(choice);
     return mcpApproveResultSchema.parse(

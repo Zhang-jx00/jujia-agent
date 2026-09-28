@@ -678,7 +678,7 @@ try {
   if (afterDeny !== beforeDeny) fail(`拒绝之后仓库里却多出了提交（${String(beforeDeny)} → ${String(afterDeny)}）`);
   ok('硬 ask 不被"总是允许"压掉；拒绝后仓库真的没动');
 
-  step('内置 exec：批准后真的落盘；「总是允许」压不掉下一次硬确认；拒绝后磁盘上什么都没有');
+  step('内置 exec：批准后真的落盘；硬 ask 不给「总是允许」按钮、批准也不外溢；拒绝后磁盘上什么都没有');
   /**
    * 三条断言都问**真值**（TEST-POLICY §六 第 1 条）：
    * 界面说"已执行"不算执行，文件在磁盘上出现才算；说"被拒绝"不算拒绝，文件不存在才算。
@@ -686,13 +686,26 @@ try {
   const execOut = async (command) =>
     win.evaluate(async (c) => await window.jujia.toolRun('run_command', { command: c }), command);
   const dialogCount = async () => (await win.locator('[role="dialog"][aria-label="权限请求"]').count());
+  /**
+   * 硬 ask 的弹窗上不该再有「本次会话总是允许」这个按钮（外部审查 T19），
+   * 并且必须把"每一次都会问"这句话显示出来。
+   * 为什么算界面级证据：以前这个按钮在硬 ask 上也渲染，引擎却只在软 ask 上记决定 ——
+   * 用户点了以为以后不问了，实际下次照弹。界面不能承诺后端做不到的事。
+   */
+  const assertHardAskCopy = async (where) => {
+    const n = await win.locator('button', { hasText: '本次会话总是允许' }).count();
+    if (n > 0) fail(`${where}：硬 ask 的弹窗仍挂着「本次会话总是允许」—— 点了并不会被记住，是空承诺`);
+    const t = await bodyText();
+    if (!t.includes('此操作每次都会要求确认')) fail(`${where}：硬 ask 弹窗没有说明"此操作每次都会要求确认"`, t.slice(0, 700));
+  };
 
   const fileA = `exec-approved-${String(Date.now()).slice(-6)}.txt`;
   // 不能 await：invoke 要等用户在弹窗上点完才回，先 await 就把整个流程堵死了
   const first = execOut(`echo approved > ${fileA}`);
   const firstDialog = await waitForText(`需要你确认：run_command · 执行命令：echo approved > ${fileA}`);
   if (firstDialog !== true) fail('exec 没有弹硬确认，或标题里看不到将要执行的命令行', String(firstDialog).slice(0, 600));
-  await win.locator('button', { hasText: '本次会话总是允许' }).first().click();
+  await assertHardAskCopy('内置 exec');
+  await win.locator('button', { hasText: '允许一次' }).first().click();
   await first;
   await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
   const aExists = existsSync(join(wsDir, fileA));
@@ -702,7 +715,7 @@ try {
   const fileB = `exec-denied-${String(Date.now()).slice(-6)}.txt`;
   const second = execOut(`echo denied > ${fileB}`);
   const secondDialog = await waitForText(`需要你确认：run_command · 执行命令：echo denied > ${fileB}`);
-  if (secondDialog !== true) fail('「总是允许」把第二次的硬确认也压掉了（执行类绝不允许这样）', String(secondDialog).slice(0, 600));
+  if (secondDialog !== true) fail('上一次的「允许一次」被当成了记住 —— 第二次的硬确认也没弹（执行类绝不允许这样）', String(secondDialog).slice(0, 600));
   const pendingDialogs = await dialogCount();
   if (pendingDialogs !== 1) fail('第二次执行应当只有一个确认框挂着', String(pendingDialogs));
   await win.locator('button', { hasText: '拒绝' }).first().click();
@@ -733,7 +746,7 @@ try {
     return false;
   };
 
-  step('内置浏览器：地址交给外部程序 —— 问过才交、拒绝就不交、「总是允许」压不掉下一次');
+  step('内置浏览器：地址交给外部程序 —— 问过才交、拒绝就不交、批准不外溢');
 
   // ① 切到"系统默认浏览器"这一档：界面必须先把"为什么要问一次"说清楚
   await win.locator('select[aria-label="打开方式"]').selectOption('system');
@@ -769,21 +782,22 @@ try {
   // 只说"用本机程序打开"不够：必须把**那个文件的完整路径**摊开给人看，否则点允许就是盲批
   // （批复点名要求：断言到**整条路径**，不是只断言文件名 —— 那样界面改成只显示 basename 也不会红）
   if (!dialogText.includes(handoutExe)) fail('确认框里没有点出接收方是哪个程序', dialogText.slice(0, 900));
-  await win.locator('button', { hasText: '本次会话总是允许' }).first().click();
+  await assertHardAskCopy('地址交给本机程序');
+  await win.locator('button', { hasText: '允许一次' }).first().click();
   if (!(await waitHit(firstUrl))) fail('允许之后本机程序并没有真的收到这个地址 —— 交付其实没发生');
   await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
   ok('允许 → 本机程序真的取了这个地址（请求台账为证）');
 
-  // ④ 「总是允许」之后必须**仍然问**：一次授权不外溢到下一个网址（外发动作没有"记住"这条路）
+  // ④ 上一次的「允许一次」绝不外溢：下一个网址仍必须问（外发动作没有"记住"这条路）
   const secondUrl = '/handed-exe-2';
   await addressBox.fill(`${baseUrl}${secondUrl}`);
   await win.locator('button', { hasText: '打开' }).first().click();
   const again = await waitForText('需要你确认：地址将离开本应用的安全边界');
-  if (again !== true) fail('「本次会话总是允许」压掉了下一次确认 —— 外发动作被做成了软 ask');
+  if (again !== true) fail('上一个网址的批准压掉了下一次确认 —— 外发动作被做成了软 ask');
   await win.locator('button', { hasText: '拒绝' }).first().click();
   await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
   if (hits.includes(secondUrl)) fail('拒绝了第二个地址，它却还是交了出去');
-  ok('硬 ask 不被「总是允许」压掉；拒绝 → 零交付');
+  ok('硬 ask 不给「总是允许」、批准不外溢；拒绝 → 零交付');
 
   // ⑤ 清除自选程序之后：缺前置条件就直接说清楚，不弹一个注定失败的确认框
   await win.locator('button', { hasText: '清除' }).first().click();
@@ -992,10 +1006,16 @@ try {
   // 注意：前面那些 helper（waitForText / bodyText）闭包在旧窗口上，重开之后一律用 win2。
   await app.close();
   app = undefined;
+  /**
+   * 重启这一次把审批界压到 10 秒：末尾那步要真跑一次超时（默认 120 秒，e2e 等不起，
+   * 而"等不起"正是它此前从没在界面级被验证过的原因）。
+   * 只作用于第二段：前面二十来步的弹窗都在一两秒内被点掉，没必要跟着赶时间。
+   */
+  const envRestart = { ...env, JJ_PERMISSION_TIMEOUT_MS: '10000' };
   app = await electron.launch({
     executablePath: electronPath,
     args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`],
-    env,
+    env: envRestart,
   });
   const win2 = await app.firstWindow();
   await win2.waitForSelector('body', { timeout: 15_000 });
@@ -1033,7 +1053,7 @@ try {
    * 用 win2：本步与钩子配置那一步都排在 6a 那次"关掉重开"之后，
    * 旧窗口上闭包的 helper（waitForText / bodyText / tabButton）已经全部失效。
    */
-  step('只读工具读敏感文件必须过人手：拒绝就读不到，「总是允许」也压不掉下一次确认');
+  step('只读工具读敏感文件必须过人手：拒绝就读不到、批准不外溢、界面上也没有「总是允许」');
   const body2 = async () => await win2.evaluate(() => document.body.innerText);
   const waitText2 = async (needle, ms = 8_000) => {
     const deadline = Date.now() + ms;
@@ -1048,6 +1068,14 @@ try {
     await win2.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
   };
   const dialogOpen2 = async () => (await win2.locator('[role="dialog"][aria-label="权限请求"]').count()) === 0;
+  /** 硬 ask 不给「本次会话总是允许」，且必须写明"每次都要问"（外部审查 T19） */
+  const assertHardAskCopy2 = async (where) => {
+    const n = await win2.locator('button', { hasText: '本次会话总是允许' }).count();
+    if (n > 0) fail(`${where}：硬 ask 的弹窗仍挂着「本次会话总是允许」—— 点了并不会被记住，是空承诺`);
+    if (!(await body2()).includes('此操作每次都会要求确认')) {
+      fail(`${where}：硬 ask 弹窗没有说明"此操作每次都会要求确认"`, (await body2()).slice(0, 700));
+    }
+  };
   const toolReadFile = (path) => win2.evaluate(async (p) => await window.jujia.toolRun('read_file', { path: p }), path);
 
   const secretMarker = 'E2E_T1_SECRET_DO_NOT_LEAK';
@@ -1073,7 +1101,8 @@ try {
 
   const alwaysRead = toolReadFile('.env');
   if ((await waitText2(SENSITIVE_HEAD)) !== true) fail('第二次读敏感文件没有再弹确认');
-  await clickDialog2('本次会话总是允许');
+  await assertHardAskCopy2('读敏感文件');
+  await clickDialog2('允许一次');
   const alwaysResult = await alwaysRead;
   if (alwaysResult.ok !== true) fail('批准后读不到文件', String(alwaysResult.content).slice(0, 300));
   if (!String(alwaysResult.content).includes(secretMarker)) fail('批准了却没读到内容', String(alwaysResult.content).slice(0, 300));
@@ -1081,7 +1110,7 @@ try {
 
   const thirdRead = toolReadFile('.env');
   if ((await waitText2(SENSITIVE_HEAD)) !== true) {
-    fail('「本次会话总是允许」把第三次的确认压掉了 —— 敏感路径绝不允许这样');
+    fail('上一次的「允许一次」被当成了记住 —— 第三次读敏感文件没再问，敏感路径绝不允许这样');
   }
   await clickDialog2('拒绝');
   await thirdRead;
@@ -1105,7 +1134,7 @@ try {
    * 走的是**真界面**：切页签 → 改编辑器里的 JSON → 点「保存并校验」→ 在弹窗上做决定。
    * 真值仍是磁盘：`hooks.json` 里有没有多出那一行。
    */
-  step('钩子配置：改一次问一次、拒绝不落盘、批准才落盘，「总是允许」也压不掉下一次');
+  step('钩子配置：改一次问一次、拒绝不落盘、批准才落盘、批准也不外溢到下一次');
   const hooksFile = join(dataDir, 'hooks.json');
   const saveHooksFromEditor = async (text) => {
     await win2.locator('nav.app-tabs button', { hasText: '钩子' }).first().click();
@@ -1151,16 +1180,17 @@ try {
   if (savedNote !== true) fail('批准后界面没有报告保存成功', (await body2()).slice(0, 900));
   ok('批准 → 配置真的落盘（磁盘上有那条命令），界面报告已保存');
 
-  // 第三次点「本次会话总是允许」：硬 ask 不该有白名单可记，第四次仍必须问
+  // 第三次：界面上不该再有「本次会话总是允许」（T19），点「允许一次」之后第四次仍必须问
   await saveHooksFromEditor(hooksJson);
   const askThird = await waitText2(ASK_HEAD);
   if (askThird !== true) fail('第三次保存没弹确认', (await body2()).slice(0, 900));
-  await clickDialog2('本次会话总是允许');
+  await assertHardAskCopy2('写钩子配置');
+  await clickDialog2('允许一次');
   await saveHooksFromEditor(hooksJson);
   const askFourth = await waitText2(ASK_HEAD);
-  if (askFourth !== true) fail('「总是允许」把第四次的确认压掉了 —— 钩子配置绝不允许这样');
+  if (askFourth !== true) fail('上一次的「允许一次」被当成了记住 —— 第四次写钩子配置没再问');
   await clickDialog2('拒绝');
-  ok('「总是允许」压不掉：这里没有 remembered 白名单，每次写钩子配置都过人手');
+  ok('硬 ask 不给「总是允许」、批准不外溢：这里没有 remembered 白名单，每次写钩子配置都过人手');
 
   /* ---------------- 真·流式对话 + 事件按会话分发（外部审查 T5） ----------------
    *
@@ -1217,6 +1247,56 @@ try {
   if (aBlob.includes('B_1_')) fail('B 的内容混进了 A 的历史', aBlob.slice(0, 500));
   ok('A 的完整回答照常落盘：丢的是事件，不是数据');
 
+  /**
+   * 审批超时（外部审查 T9）：主进程等不到回音时，**必须按请求 id 精准收尾**。
+   *
+   * 以前的行为：主进程 120 秒后按"未响应"继续走，渲染层那张卡还挂着 —— 用户随后点"允许"，
+   * 决定落进一个已经不存在的需求里，界面一声不响。修法是主进程主动推一条 `{id, reason}`。
+   *
+   * 为什么这里要**同时挂两张**再验：只有一张时，"超时就把弹窗全关掉"和"按 id 关那一张"
+   * 看起来一模一样 —— 变异 M43（`filter(r => r.id !== id)` 改成 `setQueue(() => [])`）
+   * 只有在排队场景下才会红。所以 A 让它在界面上等过界，中途塞进 B：
+   *   A 过期 → 关的必须是 A、说明必须留在原地、B 必须还能批、A 的命令必须没执行（磁盘为证）。
+   * 时间预算靠 `JJ_PERMISSION_TIMEOUT_MS=10000` 压到十秒（引擎侧另有单测覆盖非法值与下限）。
+   */
+  step('审批超时按请求 id 精准收尾：关的是那一张、话说得出来、排队的另一张照常能批');
+  const t9Exec = (command) =>
+    win2.evaluate(async (c) => await window.jujia.toolRun('run_command', { command: c }), command);
+  const t9FileA = `t9-timeout-${String(Date.now()).slice(-6)}.txt`;
+  const t9FileB = `t9-queued-${String(Date.now()).slice(-6)}.txt`;
+  const t9HeadA = `需要你确认：run_command · 执行命令：echo A > ${t9FileA}`;
+  const t9HeadB = `需要你确认：run_command · 执行命令：echo B > ${t9FileB}`;
+
+  const t9pA = t9Exec(`echo A > ${t9FileA}`);
+  if ((await waitText2(t9HeadA)) !== true) fail('A（超时的那张）没有弹确认', (await body2()).slice(0, 900));
+  // A 已经用掉 7 秒，还剩 3 秒过界；这期间把 B 塞进队列
+  await new Promise((r) => setTimeout(r, 7_000));
+  const t9pB = t9Exec(`echo B > ${t9FileB}`);
+  if ((await waitText2('还有 1 个请求在排队')) !== true) {
+    fail('B 没有排进队列（弹窗应当一次只展示一张，但要如实说明还有几张在等）', (await body2()).slice(0, 900));
+  }
+  await new Promise((r) => setTimeout(r, 3_600));
+
+  const t9Body = await body2();
+  if (!t9Body.includes('在主进程等待超时')) {
+    fail('A 超时之后界面没有说明"按超时自动关闭、那一步没执行"', t9Body.slice(0, 900));
+  }
+  if (t9Body.includes(t9HeadA)) fail('A 都超时了，那张卡还挂着 —— 用户再点就是点到空气上');
+  // 这一条才是 T9 的重点：收尾必须按 id，不是"把弹窗清干净"
+  if (!t9Body.includes(t9HeadB)) {
+    fail('B 的确认框被一起关掉了 —— 超时通知应按请求 id 精准，不能一把全关', t9Body.slice(0, 900));
+  }
+  const t9ResA = await t9pA;
+  if (t9ResA.ok !== false) fail(`A 超时了却返回成功：${JSON.stringify(t9ResA).slice(0, 300)}`);
+  if (existsSync(join(wsDir, t9FileA))) fail('A 明明超时未答复，命令却还是执行了（磁盘上留下了文件）');
+  ok('超时的那张按 id 关掉：说明留在界面，命令确实没执行（磁盘为证）');
+
+  await clickDialog2('允许一次');
+  const t9ResB = await t9pB;
+  if (t9ResB.ok !== true) fail(`B 批准后没执行：${JSON.stringify(t9ResB).slice(0, 300)}`);
+  if (!existsSync(join(wsDir, t9FileB))) fail('B 批准了、界面也说执行了，磁盘上却没有文件');
+  ok('排队的 B 不受影响：照常能批，批准后真的落盘');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -1235,5 +1315,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 干净退出');
 process.exit(0);

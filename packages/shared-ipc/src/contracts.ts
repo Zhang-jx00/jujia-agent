@@ -265,8 +265,25 @@ export const permissionRequestSchema = z.object({
   summary: z.string(),
   args: z.unknown(),
   paths: z.array(z.string()),
+  /**
+   * 这个询问**能不能**被"本次会话总是允许"压掉（来自 `GateDecision.bypassable`）。
+   *
+   * 为什么要把引擎侧的档位一路带到按钮上（外部审查 T19）：此前弹窗对**所有** ask 都渲染
+   * 「本次会话总是允许」，而引擎只在软 ask 上记录这个决定 —— 硬 ask（执行类 / 敏感路径 /
+   * 高危清单 / 钩子配置）上点它只兑现"这一次"。按钮承诺了引擎做不到的事，
+   * 用户以为以后不问了、实际下次照弹：这不是无害的措辞问题，是**静默失败的镜像形态**。
+   * 想减少打扰的正确路径仍然是显式的 allow 规则或 acceptEdits 模式 —— 可查看、可删除。
+   */
+  bypassable: z.boolean(),
 });
 export type PermissionRequestPayload = z.infer<typeof permissionRequestSchema>;
+
+/** 主进程侧审批请求结束的通知（按 id 精确关闭对应弹窗，见 `IPC.PERMISSION_EXPIRED`） */
+export const permissionExpiredSchema = z.object({
+  id: z.string(),
+  reason: z.enum(['timeout', 'window-closed', 'cancelled']),
+});
+export type PermissionExpiredPayload = z.infer<typeof permissionExpiredSchema>;
 
 export const permissionDecisionSchema = z.enum([
   'allow_once',

@@ -148,6 +148,8 @@ export function createGitService(deps: GitServiceDeps): GitService {
       summary: gitRequestSummary(action, detail),
       args: { action, paths: detail.paths ?? [], message: detail.message ?? '' },
       paths: detail.paths ?? [],
+      // 档位一路带到按钮上：commit 是硬 ask，这里给 false，弹窗就不该长出「总是允许」
+      bypassable: gate.bypassable,
     };
     const answer = await deps.resolvePermission(request);
     const decision = typeof answer === 'string' ? answer : answer.decision;

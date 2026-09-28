@@ -425,6 +425,17 @@ export class McpService {
   }
 
   /** 应用退出时调用 */
+  /**
+   * 当前挂着"待你批准"计划的服务端（外部审查 T9）：没有则 null。
+   * 批准一旦做出（或拒绝），`pendingPlan` 就置空，这里自然也不再返回。
+   */
+  pendingApproval(): { id: string; plan: ConnectionApprovalPlan } | null {
+    for (const [id, session] of this.sessions) {
+      if (session.pendingPlan !== null) return { id, plan: session.pendingPlan };
+    }
+    return null;
+  }
+
   disposeAll(): number {
     const count = this.sessions.size;
     for (const [id, session] of [...this.sessions]) {

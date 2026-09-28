@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { ToolRegistry, runTool, type McpTransport, type StoredTool } from '@jujia/agent-core';
 import { McpService, type ExternalMcpServer, type McpExitInfo, type McpTransportHooks } from './mcp-service';
@@ -262,6 +265,39 @@ describe('配置（save / views / remove）', () => {
     expect(view.envKeys).toEqual(['SECRET_TOKEN']);
     expect(JSON.stringify(view)).not.toContain('绝密');
     expect(JSON.stringify(await ctx.service.views())).not.toContain('绝密');
+  });
+});
+
+/**
+ * 待批准计划的**归属**（外部审查 T9）：它一直是主进程的事实，
+ * 以前只是从没被再读一次 —— 界面把它当组件 state 存，切个页签就没了，
+ * 用户只能重新点一次「连接」（那会真的再起一个第三方进程）。
+ */
+describe('待批准计划读得回来（切页签不该丢）', () => {
+  it('连接之后 pendingApproval() 给得出计划；批准做完就不再有挂着的计划', async () => {
+    const { service } = await connectFresh({ tools: TOOLS });
+    const pending = service.pendingApproval();
+    expect(pending?.id).toBeTruthy();
+    expect(pending?.plan.toolCount).toBe(2);
+    await service.approve(pending?.id ?? '', { action: 'approve_all' });
+    // 批过了还"待批准"，界面就会反复恢复一个已经做完的弹窗
+    expect(service.pendingApproval()).toBeNull();
+  });
+
+  it('拒绝同样清空计划（拒绝之后没有东西可批）', async () => {
+    const { service } = await connectFresh({ tools: TOOLS });
+    const pending = service.pendingApproval();
+    await service.approve(pending?.id ?? '', { action: 'deny' });
+    expect(service.pendingApproval()).toBeNull();
+  });
+
+  it('界面在刷新时真的去主进程读一次（不是只信自己那份 state）', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const panel = readFileSync(
+      join(here, '..', '..', 'renderer', 'src', 'features', 'mcp', 'McpPanel.tsx'),
+      'utf8',
+    );
+    expect(panel).toContain('window.jujia.mcpPendingPlan()');
   });
 });
 

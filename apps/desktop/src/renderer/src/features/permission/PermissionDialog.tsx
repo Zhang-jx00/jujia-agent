@@ -15,11 +15,22 @@ const KIND_LABEL: Record<PermissionRequestPayload['kind'], string> = {
  * - **永不自动拒绝**：请求进来一定展示给用户，由用户决定；
  * - 拒绝与超时是两种不同结果，文案必须区分；
  * - 弹窗期间不做「默认焦点落在允许」这种危险默认，两个按钮同等对待。
+ *
+ * 这一轮补的两条（外部审查 T19 / T9）：
+ * - **按钮不许承诺引擎做不到的事**：「本次会话总是允许」只在**软 ask** 上存在。
+ *   硬 ask（执行类 / 敏感路径 / 高危清单 / 改钩子配置）上以前也渲染这个按钮，
+ *   而引擎只会在软 ask 上记住这个决定 —— 用户点了以为以后不问了，实际下次照弹。
+ *   档位由载荷里的 `bypassable` 一路带过来（判档本来就有这个信息，是"最后一米"没传）。
+ * - **主进程说结束了就关掉那一张**：订阅 `onPermissionExpired`，按 id 精确移除并说明原因。
+ *   以前主进程 120 秒超时按"未响应"继续走，弹窗还挂在那里 —— 用户再点就是点到空气上。
+ *   回填返回 `false`（请求已不在）或抛错时同样必须说出来，不能静默。
  */
 export function PermissionDialog(): ReactElement | null {
   const [queue, setQueue] = useState<PermissionRequestPayload[]>([]);
   const [editing, setEditing] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  /** 决定没送达 / 请求已结束的说明（与"用户自己点了拒绝"严格区分） */
+  const [notice, setNotice] = useState<string | null>(null);
   const [editedText, setEditedText] = useState('');
   const current = queue[0];
 
@@ -33,7 +44,19 @@ export function PermissionDialog(): ReactElement | null {
       // 串行处理：一次只展示一个，避免弹窗打架与「批量确认」导致误批
       setQueue((prev) => [...prev, req]);
     });
-    return unsubscribe;
+    const unsubscribeExpired = window.jujia.onPermissionExpired(({ id, reason }) => {
+      // 按 id 精确关闭：同一时刻可能还有别的请求在排队，一把全清等于把别人的选择权也关掉
+      setQueue((prev) => prev.filter((r) => r.id !== id));
+      setNotice(
+        reason === 'timeout'
+          ? '有一个审批请求在主进程等待超时，已自动关闭 —— 那一步没有执行，需要的话请重新发起'
+          : '窗口已关闭，未答复的审批请求全部作废（没有任何操作被执行）',
+      );
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeExpired();
+    };
   }, []);
 
   async function decide(
@@ -41,11 +64,30 @@ export function PermissionDialog(): ReactElement | null {
     updatedArgs?: unknown,
   ): Promise<void> {
     if (!current) return;
-    await window.jujia.permissionResolve(
-      current.id,
-      decision,
-      updatedArgs === undefined ? undefined : updatedArgs,
-    );
+    const request = current;
+    let settled: boolean;
+    try {
+      settled = await window.jujia.permissionResolve(
+        request.id,
+        decision,
+        updatedArgs === undefined ? undefined : updatedArgs,
+      );
+    } catch (err) {
+      setNotice(
+        `回填审批结果失败：${err instanceof Error ? err.message : String(err)} —— ` +
+          '这一步没有执行，请重新发起操作',
+      );
+      setQueue((prev) => prev.filter((r) => r.id !== request.id));
+      setEditing(false);
+      return;
+    }
+    if (!settled) {
+      // 主进程那边已经没有这个请求了（多半刚好撞上超时）：必须说出来，
+      // 否则界面看起来"批准过了"，实际什么都没发生
+      setNotice(
+        '这个请求已经在主进程侧结束（超时或窗口关闭），刚才的决定没有生效 —— 需要的话请重新发起操作',
+      );
+    }
     setEditing(false);
     setQueue((prev) => prev.slice(1));
   }
@@ -60,7 +102,26 @@ export function PermissionDialog(): ReactElement | null {
     }
   }
 
-  if (!current) return null;
+  if (!current) {
+    /**
+     * 弹窗可以不在了，话得留下：超时 / 决定没送达 这两类"什么都没发生"必须看得见。
+     * 早返回里直接把 notice 一起卸载，等于把静默失败从"没提示"升级成"提示闪一下就没了"。
+     */
+    return notice === null ? null : (
+      <div className="w2-panel">
+        <div className="p0-card">
+          <p className="p0-err" role="status">
+            {notice}
+          </p>
+          <div className="w2-actions">
+            <button type="button" className="w2-btn" onClick={() => setNotice(null)}>
+              知道了
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w3-mask" role="dialog" aria-modal="true" aria-label="权限请求">
@@ -74,6 +135,12 @@ export function PermissionDialog(): ReactElement | null {
             涉及路径：{current.paths.map((p) => (
               <code key={p}>{p}</code>
             ))}
+          </p>
+        )}
+        {!current.bypassable && (
+          <p className="p0-warn">
+            此操作每次都会要求确认 —— 这是硬确认，不能被「总是允许」跳过。
+            想减少打扰请写 allow 规则或改用 acceptEdits 模式 —— 两者都是显式的、可查看、可删除。
           </p>
         )}
         {!editing && (
@@ -101,6 +168,11 @@ export function PermissionDialog(): ReactElement | null {
             {editError && <p className="p0-err">{editError}</p>}
           </>
         )}
+        {notice !== null && (
+          <p className="p0-err" role="status">
+            {notice}
+          </p>
+        )}
         {queue.length > 1 && <p className="p0-subtitle">还有 {queue.length - 1} 个请求在排队</p>}
         <div className="w2-actions">
           {editing ? (
@@ -124,9 +196,12 @@ export function PermissionDialog(): ReactElement | null {
               允许并修改参数…
             </button>
           )}
-          <button type="button" className="w2-btn" onClick={() => void decide('allow_always')}>
-            本次会话总是允许
-          </button>
+          {!editing &&
+            current.bypassable && (
+              <button type="button" className="w2-btn" onClick={() => void decide('allow_always')}>
+                本次会话总是允许
+              </button>
+            )}
           <button type="button" className="w2-btn-danger" onClick={() => void decide('deny')}>
             拒绝
           </button>

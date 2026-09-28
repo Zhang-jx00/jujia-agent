@@ -41,6 +41,12 @@ export interface PermissionRequest {
   args: unknown;
   /** 涉及的工作区内相对路径（若可解析） */
   paths: string[];
+  /**
+   * 能否被「本次会话总是允许」压掉 —— 直接取自 `GateDecision.bypassable`。
+   * 弹窗要靠它决定"给不给这个按钮"（外部审查 T19）；缺了它，硬 ask 也会长出一个
+   * 只兑现一次的"总是允许"，那是按钮在替引擎撒一个善意的谎。
+   */
+  bypassable: boolean;
 }
 
 /** 兼容两种返回：直接给决策字符串，或给出带 updatedArgs 的完整答复 */
@@ -237,6 +243,7 @@ export async function runTool(
         summary: summarizeRequest(tool, rawArgs, gate),
         args: rawArgs,
         paths,
+        bypassable: gate.bypassable,
       }),
     );
     decision = answer.decision;

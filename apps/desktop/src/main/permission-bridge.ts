@@ -1,4 +1,10 @@
-import { IPC, type PermissionDecisionPayload, type StreamEvent } from '@jujia/shared-ipc';
+import {
+  IPC,
+  permissionExpiredSchema,
+  type PermissionDecisionPayload,
+  type PermissionExpiredPayload,
+  type StreamEvent,
+} from '@jujia/shared-ipc';
 import type {
   PermissionAnswer,
   PermissionDecision,
@@ -23,6 +29,19 @@ export interface PermissionBridgeDeps {
   timeoutMs?: number;
 }
 
+/**
+ * 等待用户回音的上界（默认 120 秒，可用 `JJ_PERMISSION_TIMEOUT_MS` 覆盖）。
+ *
+ * 为什么留这个口：这一环的语义是"等不到的时候怎么收尾"，而它**只有等到才会被验证**。
+ * 没有可缩短的界，端到端就只能看着 120 秒发呆或者干脆不测 —— 不测的东西最容易腐烂。
+ * 它同时也是运维参数（有人就是想把审批窗口调长/调短），不是只为测试造出来的旋钮。
+ */
+function defaultTimeoutMs(): number {
+  const raw = process.env['JJ_PERMISSION_TIMEOUT_MS'];
+  const n = raw === undefined ? Number.NaN : Number(raw);
+  return Number.isFinite(n) && n >= 1_000 ? n : 120_000;
+}
+
 export class PermissionBridge {
   private readonly pending = new Map<
     string,
@@ -32,7 +51,7 @@ export class PermissionBridge {
   private readonly timeoutMs: number;
 
   constructor(private readonly deps: PermissionBridgeDeps) {
-    this.timeoutMs = deps.timeoutMs ?? 120_000;
+    this.timeoutMs = deps.timeoutMs ?? defaultTimeoutMs();
   }
 
   /** 提供给 agent-core 的 resolver */
@@ -46,10 +65,26 @@ export class PermissionBridge {
       const timer = setTimeout(() => {
         this.pending.delete(req.id);
         console.warn(`[permission] 请求超时未响应：${req.toolName} (${req.id})`);
+        // 只告诉渲染层"这一张可以关掉了"（按 id 精确通知，见 expire()）：
+        // 同一时刻可能有别的请求正等着用户点，一把全关会把它们一起抹掉
+        this.expire(req.id, 'timeout');
         res('timeout');
       }, this.timeoutMs);
       this.pending.set(req.id, { resolve: res, timer });
     });
+
+  /**
+   * 通知渲染层"这个 id 已在主进程侧结束"（超时 / 窗口销毁）。
+   *
+   * 为什么必须由主进程主动说（外部审查 T9）：弹窗是渲染层自己排队的，
+   * 主进程超时按"未响应"继续走之后，那张卡还挂着 —— 用户随后点"允许"，
+   * 决定落进一个已经不存在的需求里，点了等于没点，而且界面一声不响。
+   */
+  private expire(id: string, reason: PermissionExpiredPayload['reason']): void {
+    const payload = permissionExpiredSchema.safeParse({ id, reason });
+    if (!payload.success) return;
+    this.deps.send(IPC.PERMISSION_EXPIRED, payload.data);
+  }
 
   /** 渲染层回填决策（edit 时带 updatedArgs） */
   settle(id: string, decision: PermissionDecisionPayload, updatedArgs?: unknown): boolean {
@@ -67,6 +102,7 @@ export class PermissionBridge {
     console.warn(`[permission] ${reason}，${this.pending.size} 个待审批请求按超时处理`);
     for (const [id, entry] of this.pending) {
       clearTimeout(entry.timer);
+      this.expire(id, 'window-closed');
       entry.resolve('timeout');
       this.pending.delete(id);
     }

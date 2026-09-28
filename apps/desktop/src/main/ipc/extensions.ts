@@ -102,6 +102,8 @@ export function registerExtensionIpc(ctx: IpcContext): void {
         // 完整新配置放进 args：弹窗的「查看完整参数」原样展开它 —— 看不到内容的审批等于没有审批
         args: { path: configPath, config: input },
         paths: [configPath],
+        // 改钩子配置是硬 ask：这里必须是 false，否则弹窗会给出一个引擎不兑现的按钮（T19）
+        bypassable: gate.bypassable,
       };
       const answer = await ctx.deps.permission.resolve(request);
       const decision = typeof answer === 'string' ? answer : answer.decision;

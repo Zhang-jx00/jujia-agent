@@ -1,16 +1,23 @@
 # 第三方素材与许可声明
 
-> **依赖许可证清单**（443 个去重依赖，自动生成）：见 [`docs/DEPENDENCY-LICENSES.md`](docs/DEPENDENCY-LICENSES.md)。
+> **依赖许可证清单**（500 个去重依赖，自动生成）：见 [`docs/DEPENDENCY-LICENSES.md`](docs/DEPENDENCY-LICENSES.md)。
 > 合规检查：`npm run license:check` —— **发现 GPL/AGPL/SSPL 等强 copyleft 即非零退出**（CI 门禁）。
-> 当前结论：**0 个强 copyleft**；440 个宽松许可（MIT/ISC/Apache-2.0/BSD 等）；3 个需声明（见下）。
+> 当前结论：**0 个强 copyleft**；495 个宽松许可（MIT/ISC/Apache-2.0/BSD 等）；5 个条目需声明（3 个包族，见下）。
+>
+> **两节口径（外部审查 T21，2026-09-28 起）**：清单按 `package-lock.json` 的 `dev` 标记分节 ——
+> **§A 随安装包分发 14 个**（`react` / `react-dom` / `scheduler` / `zod` / `node-pty` / `node-addon-api` /
+> `@xterm/xterm` / `@xterm/addon-fit` / `electron` + 5 个本仓 workspace 包），**§B 仅构建期 486 个**。
+> **§A 里 0 个需声明、0 个硬拒绝 —— 全部 MIT**；下面这三个包族**只出现在 §B**，
+> 也就是说"随应用分发的东西里没有 copyleft 义务"这条现在是**机读结论**，不再是人工断言。
 
 ---
 
-## 0. 依赖里需履行义务的 3 个包（2026-09-21 扫描）
+## 0. 依赖里需履行义务的 3 个包族（5 个条目，2026-09-28 重扫）
 
 | 包 | 许可 | 义务 | 我们的处置 |
 |----|------|------|-----------|
 | `lightningcss` + `lightningcss-win32-x64-msvc` | **MPL-2.0** | 文件级 copyleft：保留该文件许可声明；**允许与专有代码链接** | 仅为**构建工具链**（CSS 处理器），**不随应用分发** → 保留本声明即满足；其源码可在其仓库获取 |
+| `@img/sharp-wasm32` + `@img/sharp-win32-x64` | **Apache-2.0 AND LGPL-3.0-or-later (AND MIT)** | LGPL：**库级** copyleft，须提供该库的源码获取方式 | 由顶层包 `sharp` 带进来的平台二进制，只在构建脚本 `make-icon.mjs` / `make-logo-mono.mjs` 里生成图标时用 → **不随应用分发**；源码见其仓库 [lovell/sharp](https://github.com/lovell/sharp) 的 `libvips` 预编译发布 |
 | `caniuse-lite` | **CC-BY-4.0** | 需**署名**（注明来源、许可、是否修改） | **署名如下**：`caniuse-lite` 数据由 [browserslist](https://github.com/browserslist/browserslist) 生态维护，数据源自 [caniuse.com](https://caniuse.com)（by @Fyrd），以 CC-BY-4.0 提供；本项目作为构建期数据引用，未修改数据内容 |
 
 > **区分许可证的要点**（按你要求写清楚）：

@@ -75,6 +75,8 @@ export class TerminalService {
       summary: describeTerminalPermission(shell, params.workspaceRoot),
       args: { cwd: params.workspaceRoot, cols: size.cols, rows: size.rows },
       paths: [params.workspaceRoot],
+      // 启动终端 = 执行类，永远是硬 ask：给 false，弹窗就不会显示一个只兑现一次的「总是允许」
+      bypassable: false,
     });
 
     // normalizeAnswer 在 executor 内部；这里只认字符串决策（权限桥返回的也是字符串）

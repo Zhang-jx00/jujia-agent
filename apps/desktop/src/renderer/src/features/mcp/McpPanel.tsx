@@ -87,6 +87,16 @@ export function McpPanel(): ReactElement {
   const reload = async (): Promise<void> => {
     try {
       setServers(await window.jujia.mcpServerList());
+      /**
+       * 批准计划的**事实一直在主进程**（`session.pendingPlan`），以前只随「连接」的回包出来一次，
+       * 界面把它存在组件 state 里 —— 切个页签回来就没了，只能重新连一次（外部审查 T9）。
+       * 这里在每次刷新时把它读回来；已经在看同一份就不动，避免把用户勾了一半的选择清空。
+       */
+      const pending = await window.jujia.mcpPendingPlan();
+      if (pending !== null && plan === null) {
+        setPlan(pending);
+        setSelected(new Set());
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }

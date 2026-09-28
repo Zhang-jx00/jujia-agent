@@ -88,6 +88,7 @@ describe('拆分本身：装配范围不许失焦', () => {
   it('每一条 IPC 通道都被注册（推送型通道除外，它们由主进程单向发出）', () => {
     const pushOnly = new Set([
       'PERMISSION_REQUEST',
+      'PERMISSION_EXPIRED',
       'CHAT_STREAM',
       'TERMINAL_STREAM',
       'MCP_STATE_CHANGED',
