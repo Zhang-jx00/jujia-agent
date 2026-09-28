@@ -59,15 +59,19 @@ function scan(dir, depth, seen) {
     const pj = join(full, 'package.json');
     let lic = '(未声明)';
     let ver = '';
+    // 作用域包（@scope/name）的**目录名只是尾巴**（`@testing-library/react` 的目录叫 `react`）：
+    // 用目录名记账会把第三方清单写成错名字，还会与同名包互相吞掉。
+    let realName = name;
     try {
       const j = JSON.parse(readFileSync(pj, 'utf8'));
       lic = String(j.license || '(未声明)').trim();
       ver = j.version || '';
+      if (typeof j.name === 'string' && j.name !== '') realName = j.name;
     } catch {
       /* 读取失败按未声明处理 */
     }
-    const key = `${name}@${ver}`;
-    if (!seen.has(key)) seen.set(key, { name, ver, lic, risk: licenseRisk(lic) });
+    const key = `${realName}@${ver}`;
+    if (!seen.has(key)) seen.set(key, { name: realName, ver, lic, risk: licenseRisk(lic) });
     scan(join(full, 'node_modules'), depth + 1, seen);
   }
 }

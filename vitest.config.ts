@@ -4,6 +4,15 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['packages/*/src/**/*.test.ts', 'apps/*/src/**/*.test.ts'],
+    // `.test.tsx` 是渲染层的**组件测试**（2026-09-27 批复：加 jsdom + @testing-library，
+    // 只作 devDependencies，不碰运行时）。它们各自在文件头写 `// @vitest-environment jsdom`，
+    // 所以默认的 node 环境不受影响。
+    include: [
+      'packages/*/src/**/*.test.ts',
+      'apps/*/src/**/*.test.ts',
+      'packages/*/src/**/*.test.tsx',
+      'apps/*/src/**/*.test.tsx',
+    ],
     passWithNoTests: true,
     reporters: ['default'],
 

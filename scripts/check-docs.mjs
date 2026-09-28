@@ -189,7 +189,7 @@ const allScripts = new Set([
         if (e.name === 'node_modules' || e.name === '.tmp' || e.name === '.trash') continue;
         const full = join(p, e.name);
         if (e.isDirectory()) walk(full);
-        else if (e.name.endsWith('.test.ts')) n += 1;
+        else if (/\.test\.tsx?$/.test(e.name)) n += 1;  // .tsx = 渲染层组件测试（jsdom）
       }
     };
     walk(join(repoRoot, dir));
@@ -201,7 +201,7 @@ const allScripts = new Set([
   report(
     'PROGRESS 里的测试文件数与实际一致',
     statedFiles !== undefined && Number(statedFiles) === testFiles,
-    `实际 ${testFiles} 个 .test.ts；PROGRESS 写 ${statedFiles ?? '(未写)'}`,
+    `实际 ${testFiles} 个测试文件（.test.ts / .test.tsx）；PROGRESS 写 ${statedFiles ?? '(未写)'}`,
   );
 
   const e2eSource = read('apps/desktop/scripts/e2e-ui.mjs');
