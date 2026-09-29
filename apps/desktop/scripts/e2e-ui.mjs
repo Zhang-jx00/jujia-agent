@@ -1897,8 +1897,16 @@ try {
   ok('覆盖保护生效：盘上那份没被动，且用户知道下一步能怎么办');
 
   step('M19 PDF：真画出来，且整个打开过程零出站请求');
+  /*
+   * 零出站的判据（M19b 复核方点名要改）：**跨 origin / 出站**的请求数必须是 0 ——
+   * 不能写"一条请求都没有"：M19b 之后字体/cmap 是包内字节，理论上一条都没有，
+   * 但将来若某个资源改成相对路径，本地请求会突然让"一条都没有"这条断言变成假红，
+   * 而被逼着放宽的断言很快就变成废的。所以按**出站**判，并同时记下总请求数（防空转）。
+   */
   const outbound = [];
+  let seenRequests = 0;
   const watchOut = (req) => {
+    seenRequests += 1;
     const u = req.url();
     if (u.startsWith('http://') || u.startsWith('https://')) outbound.push(u);
   };
@@ -1914,9 +1922,10 @@ try {
   await new Promise((r) => setTimeout(r, 800));
   win3.off('request', watchOut);
   if (outbound.length > 0) {
-    fail(`打开 PDF 期间出现了出站请求 —— 违反"数据不出本机"：${outbound.join(' , ')}`);
+    fail(`打开 PDF 期间出现了**出站**请求 —— 违反"数据不出本机"：${outbound.join(' , ')}`);
   }
-  ok('PDF 真画出来了（页数 + canvas），全程零出站：一份 PDF 的字节没有离开过本机');
+  // 把看到的请求总数写进回执：既是证据，也能在监听器坏掉时一眼看出来（0 条 = 可能没挂上）
+  ok(`PDF 真画出来了（页数 + canvas），全程**零出站**（本轮看到 ${String(seenRequests)} 条本地请求）：一份 PDF 的字节没有离开过本机`);
 
   step('M19 逐行 diff：点开改动的文件看到逐行 patch（内容真值）');
   const trackedFile = 'README-e2e-seed.md';

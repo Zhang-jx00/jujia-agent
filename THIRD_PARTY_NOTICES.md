@@ -1,13 +1,14 @@
 # 第三方素材与许可声明
 
-> **依赖许可证清单**（500 个去重依赖，自动生成）：见 [`docs/DEPENDENCY-LICENSES.md`](docs/DEPENDENCY-LICENSES.md)。
+> **依赖许可证清单**（503 个去重依赖，自动生成）：见 [`docs/DEPENDENCY-LICENSES.md`](docs/DEPENDENCY-LICENSES.md)。
 > 合规检查：`npm run license:check` —— **发现 GPL/AGPL/SSPL 等强 copyleft 即非零退出**（CI 门禁）。
-> 当前结论：**0 个强 copyleft**；495 个宽松许可（MIT/ISC/Apache-2.0/BSD 等）；5 个条目需声明（3 个包族，见下）。
+> 当前结论：**0 个强 copyleft**；498 个宽松许可（MIT/ISC/Apache-2.0/BSD 等）；5 个条目需声明（3 个包族，见下）。
 >
 > **两节口径（外部审查 T21，2026-09-28 起）**：清单按 `package-lock.json` 的 `dev` 标记分节 ——
-> **§A 随安装包分发 14 个**（`react` / `react-dom` / `scheduler` / `zod` / `node-pty` / `node-addon-api` /
-> `@xterm/xterm` / `@xterm/addon-fit` / `electron` + 5 个本仓 workspace 包），**§B 仅构建期 486 个**。
-> **§A 里 0 个需声明、0 个硬拒绝 —— 全部 MIT**；下面这三个包族**只出现在 §B**，
+> **§A 随安装包分发 17 个**（`react` / `react-dom` / `scheduler` / `zod` / `node-pty` / `node-addon-api` /
+> `@xterm/xterm` / `@xterm/addon-fit` / `electron` / `pdfjs-dist`(Apache-2.0) / `@napi-rs/canvas`(MIT) ×2
+> + 5 个本仓 workspace 包），**§B 仅构建期 486 个**。
+> **§A 里 0 个需声明、0 个硬拒绝**（16 个 MIT + 1 个 Apache-2.0）；下面这三个包族**只出现在 §B**，
 > 也就是说"随应用分发的东西里没有 copyleft 义务"这条现在是**机读结论**，不再是人工断言。
 
 ---
@@ -82,8 +83,22 @@
 
 ## 4. 字体
 
-本项目**未内嵌任何字体文件**，界面使用**系统字体栈**
-（如 Windows 的 `Consolas` / `Cascadia Mono` / 微软雅黑），不涉及字体再分发许可。
+**界面**：不内嵌字体文件，使用**系统字体栈**（如 Windows 的 `Consolas` / `Cascadia Mono` / 微软雅黑）。
+
+**PDF 查看（M19b 起，2026-09-29）**：为了让离线环境里打开 PDF 不缺字，**内置了 14 个标准字体文件**
+与 **16 个 CJK 常用 CMap 数据文件**，它们随渲染层包一起分发（以 data URL 内联）：
+
+| 素材 | 数量 | 来源 | 许可 |
+|------|------|------|------|
+| 标准字体 `Foxit*.pfb` | 10 | `pdfjs-dist/standard_fonts/`（PDFium） | BSD 三条款式（包内 `LICENSE_FOXIT`，含完整条款） |
+| 标准字体 `LiberationSans-*.ttf` | 4 | `pdfjs-dist/standard_fonts/`（Liberation 项目） | Liberation Font License（包内 `LICENSE_LIBERATION`） |
+| CJK CMap `Uni{GB,CNS,JIS,KS}-{UCS2,UTF16}-{H,V}.bcmap` | 16 | `pdfjs-dist/cmaps/`（Adobe CMap 资源，经 pdfjs 分发） | 随 `pdfjs-dist` 的 `LICENSE`（Apache-2.0）；以包内许可为准 |
+
+**再分发要求**：若你分发本项目的安装包，请不要删除 `pdfjs-dist` 包内的这两个许可文件，
+并在你的材料中保留上表 —— 字体**必须**随许可一起再分发（这是这两份许可的明文要求）。
+**其他语言可能缺字**：只打包了 CJK 常用子集（UCS2/UTF16 横排竖排），
+日文旧编码（如 `78-*` / `90ms-*`）、UTF32/UTF8 变体、其他文字系统**没有**内置；
+遇到未内置的资源时界面会明确报错（不静默缺字），需要时再按同一张表扩充。
 
 ---
 

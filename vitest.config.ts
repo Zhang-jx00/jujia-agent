@@ -1,6 +1,9 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // 与 `apps/desktop/electron.vite.config.ts` 保持一致：`.bcmap` / `.pfb` 是资源不是 JS
+  // （M19b 的 PDF 内置资源用 `?inline` 导入，测试也要能解析它们）
+  assetsInclude: ['**/*.bcmap', '**/*.pfb'],
   test: {
     environment: 'node',
     include: ['packages/*/src/**/*.test.ts', 'apps/*/src/**/*.test.ts'],

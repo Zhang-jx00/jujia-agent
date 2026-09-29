@@ -15,7 +15,7 @@
 ### MIT（16 个）
 
 - @jujia/agent-core@0.0.1
-- @jujia/desktop@0.46.0
+- @jujia/desktop@0.47.0
 - @jujia/shared@0.0.1
 - @jujia/shared-ipc@0.0.1
 - @jujia/ui-tokens@0.0.1

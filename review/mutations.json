@@ -516,10 +516,10 @@
     {
       "id": "M65",
       "desc": "PDF 文件大小上限被去掉：一份 500MB 的 PDF 也会被整个读进内存再送进渲染层",
-      "file": "apps/desktop/src/main/ipc/pdf.ts",
-      "find": "    if (st.size > PDF_MAX_BYTES) {",
-      "replace": "    if (false) {",
-      "test": "apps/desktop/src/main/ide-wiring.test.ts"
+      "file": "packages/shared-ipc/src/pdf-limits.ts",
+      "find": "  if (bytes > PDF_MAX_BYTES) {",
+      "replace": "  if (false) {",
+      "test": "packages/shared-ipc/src/pdf-limits.test.ts"
     },
     {
       "id": "M66",
@@ -528,6 +528,30 @@
       "find": "      useWorkerFetch: false,",
       "replace": "      useWorkerFetch: true,",
       "test": "apps/desktop/src/main/ide-wiring.test.ts"
+    },
+    {
+      "id": "M67",
+      "desc": "内置资源形状不对也照收：data URL 认不出来时不抛，直接把空/乱字节喂给 pdfjs（变成无声缺字）",
+      "file": "apps/desktop/src/renderer/src/features/ide/pdf-assets.ts",
+      "find": "  if (comma < 0 || !dataUrl.startsWith('data:')) {",
+      "replace": "  if (false) {",
+      "test": "apps/desktop/src/renderer/src/features/ide/pdf-assets.test.ts"
+    },
+    {
+      "id": "M68",
+      "desc": "未内置的资源不点名：缺 cmap 时不再说\"缺的是哪一份\"，只抛一个看不懂的错（用户无从查起）",
+      "file": "apps/desktop/src/renderer/src/features/ide/pdf-assets.ts",
+      "find": "    if (url === undefined) {",
+      "replace": "    if (false) {",
+      "test": "apps/desktop/src/renderer/src/features/ide/pdf-assets.test.ts"
+    },
+    {
+      "id": "M69",
+      "desc": "页数上限差一位：恰好等于上限的 PDF 也被拒（边界写 >= 而不是 >）",
+      "file": "packages/shared-ipc/src/pdf-limits.ts",
+      "find": "  if (pages > PDF_MAX_PAGES) {",
+      "replace": "  if (pages >= PDF_MAX_PAGES) {",
+      "test": "packages/shared-ipc/src/pdf-limits.test.ts"
     }
   ]
 }

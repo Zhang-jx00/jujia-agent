@@ -22,6 +22,12 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: INTERNAL_PACKAGES })],
   },
   renderer: {
+    /**
+     * `.bcmap`（PDF 预定义 CMap）与 `.pfb`（标准字体）不是 Vite 认识的资源类型，
+     * 不认识就会当成 JS 去解析（报 "invalid JS syntax"）。M19b 要把它们内联进包，
+     * 所以在这里声明"它们是资源"—— `.ttf` 本来就在 Vite 的默认资源表里，不用加。
+     */
+    assetsInclude: ['**/*.bcmap', '**/*.pfb'],
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src'),

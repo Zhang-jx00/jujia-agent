@@ -25,21 +25,29 @@ describe('PDF：只读、过守卫、有界', () => {
     expect(pdfIpc.indexOf('await guardPath(')).toBeLessThan(pdfIpc.indexOf('await readFile('));
   });
 
-  it('两条上限都在：文件大小与页数（超限一律明确拒绝）', () => {
-    expect(pdfIpc).toContain('PDF_MAX_BYTES');
-    expect(pdfIpc).toContain('st.size > PDF_MAX_BYTES');
-    // 页数上限在渲染层判（那里才知道 numPages），但常量必须来自共享上限表
-    expect(read('../renderer/src/features/ide/PdfView.tsx')).toContain('PDF_MAX_PAGES');
+  it('两条上限都在，且判定走共享的纯函数（行为由单测喂边界值，不再只有接线锁）', () => {
+    expect(pdfIpc).toContain('checkPdfSize(');
+    // 页数上限在渲染层判（那里才知道 numPages），但判定同样是共享纯函数
+    expect(read('../renderer/src/features/ide/PdfView.tsx')).toContain('checkPdfPages(');
+    // 常量与判定只有一处：上限表 + pdf-limits.ts
+    const limits = read('../../../../packages/shared-ipc/src/pdf-limits.ts');
+    expect(limits).toContain('PDF_MAX_BYTES');
+    expect(limits).toContain('PDF_MAX_PAGES');
   });
 
-  it('零出站是**配置**保证的：不设任何资源 URL，且 worker 不许走 fetch', () => {
+  it('零出站：worker 不许走 fetch，且字体/cmap 由**内置资源工厂**供给', () => {
     const view = read('../renderer/src/features/ide/PdfView.tsx');
     expect(view).toContain('useWorkerFetch: false');
     expect(view).toContain('useWasm: false');
-    // 三个 URL 一个都不许出现：没有地址，就没有它去取的可能
+    // 视图这一层不许出现任何资源地址：没有地址，就没有它自己去取的可能
     for (const opt of ['cMapUrl', 'standardFontDataUrl', 'wasmUrl']) {
       expect(view).not.toContain(opt);
     }
+    // M19b：字节来自包内（内联进包），工厂就是唯一入口
+    expect(view).toContain('BinaryDataFactory: BundledPdfBinaryDataFactory');
+    const assets = read('../renderer/src/features/ide/pdf-assets.ts');
+    expect(assets).toContain('?inline');
+    expect(assets).toContain('class BundledPdfBinaryDataFactory');
   });
 
   it('PDF 没有被做成工具（不把"读任意二进制"变成模型的能力）', () => {

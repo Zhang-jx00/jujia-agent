@@ -1,5 +1,5 @@
 import { stat, readFile } from 'node:fs/promises';
-import { IPC, PDF_MAX_BYTES, pdfOpenQuerySchema, pdfOpenResultSchema, type PdfOpenResult } from '@jujia/shared-ipc';
+import { IPC, checkPdfSize, pdfOpenQuerySchema, pdfOpenResultSchema, type PdfOpenResult } from '@jujia/shared-ipc';
 import { displayPath, guardPath } from '@jujia/agent-core';
 import { getWorkspaceInfo } from '../workspace';
 import type { IpcContext } from './context';
@@ -58,16 +58,10 @@ export function registerPdfIpc(ctx: IpcContext): void {
         error: `文件不存在：${displayPath(info.root, abs)}`,
       });
     }
-    if (st.size > PDF_MAX_BYTES) {
-      // 上限之内一律说话：不说清楚，用户只会以为"这软件坏了"
-      return pdfOpenResultSchema.parse({
-        ok: false,
-        bytes: null,
-        size: st.size,
-        error: `这份 PDF 有 ${String(Math.round(st.size / 1024 / 1024))} MB，超过本机查看的上限 ${String(
-          PDF_MAX_BYTES / 1024 / 1024,
-        )} MB。`,
-      });
+    // 上限判定抽在纯函数里（复核 041 第二条建议）：边界值能直接喂单测，不必造 32MB 样本
+    const tooBig = checkPdfSize(st.size);
+    if (tooBig !== null) {
+      return pdfOpenResultSchema.parse({ ok: false, bytes: null, size: st.size, error: tooBig });
     }
 
     const buf = await readFile(abs);

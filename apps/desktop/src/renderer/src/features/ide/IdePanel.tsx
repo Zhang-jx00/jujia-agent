@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { TREE_MAX_ENTRIES } from '@jujia/shared-ipc';
 import { isPdfPath, isTruncatedRead, parseListing, shouldRefuseSave, TREE_QUERY_LIMIT, type Listing } from './ide-parse';
-import { PdfView } from './PdfView';
+/**
+ * PDF 查看器**按需加载**：它连带 pdfjs（~800KB）与内置字体/cmap（~1.4MB）共 2.2MB 懒加载块 ——
+ * 只有真的点开一份 PDF 才值得付这份代价，光开「文件」页签不该付。
+ */
+const PdfView = lazy(() => import('./PdfView').then((m) => ({ default: m.PdfView })));
 
 /**
  * 轻量 IDE（M19a）：文件树 + 打开/编辑/保存 + PDF 入口。
@@ -169,7 +173,11 @@ export function IdePanel(): ReactElement {
 
       <div className="jj-ide-main">
         {open === null && <p className="p0-subtitle">左边点一个文件：文本可编辑，PDF 直接在页面里看。</p>}
-        {open !== null && pdf !== null && <PdfView path={pdf.path} bytes={pdf.bytes} />}
+        {open !== null && pdf !== null && (
+          <Suspense fallback={<p className="p0-subtitle">正在准备 PDF 查看器…</p>}>
+            <PdfView path={pdf.path} bytes={pdf.bytes} />
+          </Suspense>
+        )}
         {open !== null && pdf === null && (
           <>
             <div className="jj-ide-bar">

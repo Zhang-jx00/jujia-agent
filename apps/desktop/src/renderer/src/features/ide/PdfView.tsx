@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import { PDF_MAX_PAGES } from '@jujia/shared-ipc';
+import { checkPdfPages } from '@jujia/shared-ipc';
+import { BundledPdfBinaryDataFactory } from './pdf-assets';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFDocumentLoadingTask } from 'pdfjs-dist';
 // worker 走构建产物里的本地文件：**不是**网络请求，也不是 file:// 取数据
@@ -10,8 +11,9 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
  * PDF 查看（M19 报备 §四 3/4）。
  *
  * 三条底线写在这里，改这个文件的人先看这三条：
- * 1. **零出站**：不设 `cMapUrl` / `standardFontDataUrl` / `wasmUrl`，`useWorkerFetch: false`
- *    —— pdfjs 想取字体/cmap/wasm 时没有可取的地址（不是"我们保证它不去取"，是"它没有地方可去"）。
+ * 1. **零出站**：字体与 cmap 由 `BundledPdfBinaryDataFactory` 从**包内字节**供给（M19b 内联进包），
+ *    三个资源地址一个都不设、`useWorkerFetch: false` —— pdfjs 想取东西时既没有地址、
+ *    也没有第二条路（取字节只有工厂那一条，且它只会翻包里的表）。
  *    `useWasm: false` 同理（JPEG2000 之类的解码退回纯 JS，慢一点，但不出网）。
  * 2. **不执行 PDF 里带的东西**：这里用的是 pdfjs 的**API**、不是它自带的 viewer，
  *    所以根本没有"viewer 插件"那一层；而 `enableXfa` 之类会求值文档内容的开关一律不开。
@@ -49,6 +51,8 @@ export function PdfView({ path, bytes }: Props): ReactElement {
     const data = new Uint8Array(bytes);
     const task = getDocument({
       data,
+      // 字体/cmap 由**内置资源工厂**喂（M19b）：字节在包里，取它不需要任何地址
+      BinaryDataFactory: BundledPdfBinaryDataFactory,
       useWorkerFetch: false,
       useWasm: false,
       useSystemFonts: true,
@@ -64,8 +68,9 @@ export function PdfView({ path, bytes }: Props): ReactElement {
           void task.destroy();
           return;
         }
-        if (doc.numPages > PDF_MAX_PAGES) {
-          setError(`这份 PDF 有 ${String(doc.numPages)} 页，超过本机查看的上限 ${String(PDF_MAX_PAGES)} 页。`);
+        const tooMany = checkPdfPages(doc.numPages);
+        if (tooMany !== null) {
+          setError(tooMany);
           setLoading(false);
           void task.destroy();
           return;
