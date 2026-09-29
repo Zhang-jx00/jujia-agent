@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { relative } from 'node:path';
 import {
   commit as gitCommitRun,
+  getDiffPatch,
   getDiffSummary,
   getStatus,
   getRecentCommits,
@@ -61,7 +62,11 @@ export interface GitActionResult {
 
 export interface GitService {
   status(): Promise<GitQuery<unknown>>;
-  diff(staged: boolean): Promise<GitQuery<unknown>>;
+  /**
+   * `mode` 默认 `summary`（既有关键行摘录）；`patch` 是 M19 的逐行原文（已按行数上限有界）。
+   * `onlyPath` 只对 patch 有意义（摘要的路径过滤留给后续轮次，不在这轮扩）。
+   */
+  diff(staged: boolean, mode?: 'summary' | 'patch', onlyPath?: string): Promise<GitQuery<unknown>>;
   log(count: number): Promise<GitQuery<string[]>>;
   stage(paths: ReadonlyArray<string>): Promise<GitActionResult>;
   unstage(paths: ReadonlyArray<string>): Promise<GitActionResult>;
@@ -196,7 +201,11 @@ export function createGitService(deps: GitServiceDeps): GitService {
 
   return {
     status: () => query((root) => getStatus(root)),
-    diff: (staged) => query((root) => getDiffSummary(root, staged)),
+    diff: (staged, mode = 'summary', onlyPath) =>
+      // 两个模式的返回形状不同，所以这里显式要 `unknown`：契约上由 `mode` 区分（见 shared-ipc 的联合类型）
+      query<unknown>((root) =>
+        mode === 'patch' ? getDiffPatch(root, staged, onlyPath) : getDiffSummary(root, staged),
+      ),
     log: (count) => query(async (root) => await getRecentCommits(root, count)),
     stage: (paths) => guardedPaths('stage', paths, (root, p) => stagePaths(root, p)),
     unstage: (paths) => guardedPaths('unstage', paths, (root, p) => unstagePaths(root, p)),

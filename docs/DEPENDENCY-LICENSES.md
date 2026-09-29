@@ -4,21 +4,23 @@
 > 规则：强 copyleft（GPL/AGPL/SSPL）= 硬拒绝；LGPL/MPL/CC-BY = 需声明义务；其余按各自许可。
 > 归类看 SPDX 表达式的**任意位置**（`Apache-2.0 AND LGPL-3.0-or-later` 也算需声明），不只看开头。
 
-> **本表覆盖整个 `node_modules`（共 500 个去重依赖），分两节**：
-> **§A 随安装包分发**（14 个 —— copyleft 的关注点全在这一节）；
+> **本表覆盖整个 `node_modules`（共 503 个去重依赖），分两节**：
+> **§A 随安装包分发**（17 个 —— copyleft 的关注点全在这一节）；
 > **§B 仅构建期 · 不随包分发**（486 个 —— 按开源合规惯例保留声明即可，不删条目）。
 > 划分口径：`package-lock.json` 每条的 `dev` 标记（npm 安装时算出来的可达性，peer / optional 都算过）。
 > 唯一一条手动覆盖：`electron` —— 见脚本注释。判不准的条目一律留在 §A。
 
-## §A 随安装包分发（14 个）
+## §A 随安装包分发（17 个）
 
-### MIT（14 个）
+### MIT（16 个）
 
 - @jujia/agent-core@0.0.1
-- @jujia/desktop@0.45.0
+- @jujia/desktop@0.46.0
 - @jujia/shared@0.0.1
 - @jujia/shared-ipc@0.0.1
 - @jujia/ui-tokens@0.0.1
+- @napi-rs/canvas@1.0.9
+- @napi-rs/canvas-win32-x64-msvc@1.0.9
 - @xterm/addon-fit@0.11.0
 - @xterm/xterm@6.0.0
 - electron@44.4.2
@@ -28,6 +30,10 @@
 - react-dom@19.3.0
 - scheduler@0.28.0
 - zod@3.25.76
+
+### Apache-2.0（1 个）
+
+- pdfjs-dist@6.3.289
 
 ## §B 仅构建期 · 不随包分发（486 个）
 

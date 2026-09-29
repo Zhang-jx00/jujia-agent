@@ -24,27 +24,27 @@
  *   被高估的覆盖比没有覆盖更危险：改这个文件时若以为"绑定错了也会红"，那是错的。
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { IPC } from '@jujia/shared-ipc';
 import { describe, expect, it } from 'vitest';
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
-/** 装配根 + 全部 ipc 模块（顺序 = 注册顺序，区域切片断言依赖它） */
-const IPC_FILES = [
+/**
+ * 装配根 + 全部 ipc 模块。
+ *
+ * **`ipc/` 下现扫**（不再写死清单）：写死的话，新增一个模块就静默离开扫描范围 ——
+ * "每一条通道都被注册"那条锁会**照样绿**，而新模块里的通道其实没被检查。
+ * M19 加 `ipc/pdf.ts` 时当场踩到（PDF_OPEN 没被注册却只报"缺一条"，看着像漏注册、
+ * 实际是锁没扫到那个文件）。顺序不再参与任何断言，所以按名字排序即可。
+ */
+const IPC_FILES: readonly string[] = [
   './ipc.ts',
-  './ipc/context.ts',
-  './ipc/handle.ts',
-  './ipc/core.ts',
-  './ipc/chat.ts',
-  './ipc/tools.ts',
-  './ipc/terminal.ts',
-  './ipc/browser.ts',
-  './ipc/git.ts',
-  './ipc/mcp.ts',
-  './ipc/extensions.ts',
-  './ipc/permissions.ts',
-] as const;
+  ...readdirSync(new URL('./ipc/', import.meta.url))
+    .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+    .sort()
+    .map((f) => `./ipc/${f}`),
+];
 
 function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

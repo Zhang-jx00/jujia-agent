@@ -37,7 +37,11 @@ export function registerGitIpc(ctx: IpcContext): void {
   handle(IPC.GIT_DIFF, async (_e, payload: unknown) => {
     const parsed = gitDiffSchema.safeParse(payload ?? {});
     const staged = parsed.success ? (parsed.data.staged ?? false) : false;
-    return gitDiffResultSchema.parse(await git.diff(staged));
+    const mode = parsed.success ? (parsed.data.mode ?? 'summary') : 'summary';
+    const onlyPath = parsed.success ? parsed.data.path : undefined;
+    const r = await git.diff(staged, mode, onlyPath);
+    // patch 与摘要的返回形状不同，用 `mode` 明确标出来（老调用点看不到这个字段也照常工作）
+    return gitDiffResultSchema.parse(r.ok === true ? { ok: true, mode, data: r.data } : r);
   });
 
   handle(IPC.GIT_LOG, async (_e, payload: unknown) => {

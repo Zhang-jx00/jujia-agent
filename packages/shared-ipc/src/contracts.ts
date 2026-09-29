@@ -784,6 +784,13 @@ export type GitCommitPayload = z.infer<typeof gitCommitSchema>;
 /** diff 看的是暂存区还是工作区 */
 export const gitDiffSchema = z.object({
   staged: z.boolean().optional(),
+  /**
+   * `summary`（默认）= 关键行摘录；`patch` = 逐行原文，供 IDE 的 diff 视图。
+   * 默认值保持 summary：既有调用点与断言一个字不用改。
+   */
+  mode: z.enum(['summary', 'patch']).optional(),
+  /** 只看某个文件（工作区相对路径）；不传=全部改动 */
+  path: z.string().min(1).max(1000).optional(),
 });
 export type GitDiffPayload = z.infer<typeof gitDiffSchema>;
 
@@ -850,8 +857,18 @@ export const gitStatusResultSchema = z.union([
 ]);
 export type GitStatusResult = z.infer<typeof gitStatusResultSchema>;
 
+/** patch 模式下单个文件的逐行原文（已按行数上限截断，截断必须如实标注） */
+export const gitDiffPatchSchema = z.object({
+  path: z.string(),
+  text: z.string(),
+  lines: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+});
+
 export const gitDiffResultSchema = z.union([
-  z.object({ ok: z.literal(true), data: gitDiffSummarySchema }),
+  // `mode` 在摘要分支上是**可选**的：老代码构造的两个字段也照常解析（向后兼容不是口惠）
+  z.object({ ok: z.literal(true), mode: z.literal('summary').optional(), data: gitDiffSummarySchema }),
+  z.object({ ok: z.literal(true), mode: z.literal('patch'), data: z.array(gitDiffPatchSchema) }),
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type GitDiffResult = z.infer<typeof gitDiffResultSchema>;
@@ -861,3 +878,26 @@ export const gitLogResultSchema = z.union([
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type GitLogResult = z.infer<typeof gitLogResultSchema>;
+
+/* ------------------------------------------------------------------ *
+ * M19：轻量 IDE 的 PDF 打开（只读）
+ *
+ * 两条约定写进类型里：
+ * - **失败与"没内容"必须能区分**：`ok` 是唯一判定字段，`error` 空串表示没出错；
+ * - `.strict()`：跨进程载荷多一个字段就该被发现，而不是被无声吞掉。
+ * ------------------------------------------------------------------ */
+
+export const pdfOpenQuerySchema = z.object({ path: z.string().min(1).max(1000) }).strict();
+export type PdfOpenQuery = z.infer<typeof pdfOpenQuerySchema>;
+
+export const pdfOpenResultSchema = z
+  .object({
+    ok: z.boolean(),
+    /** 成功时是文件字节（给渲染层画图用）；失败为 null */
+    bytes: z.instanceof(Uint8Array).nullable(),
+    /** 实际字节数（失败时为 0）；上限见 `PDF_MAX_BYTES` */
+    size: z.number().int().nonnegative(),
+    error: z.string(),
+  })
+  .strict();
+export type PdfOpenResult = z.infer<typeof pdfOpenResultSchema>;

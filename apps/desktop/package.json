@@ -1,6 +1,6 @@
 {
   "name": "@jujia/desktop",
-  "version": "0.45.0",
+  "version": "0.46.0",
   "private": true,
   "description": "俱佳Agent：本地优先的 Windows 个人 Agent（副作用动作需确认，数据不出本机）",
   "main": "./out/main/index.js",
@@ -25,6 +25,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "node-pty": "^1.1.0",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

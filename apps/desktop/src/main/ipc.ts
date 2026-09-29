@@ -9,6 +9,7 @@ import { registerGitIpc } from './ipc/git';
 import { registerMcpIpc } from './ipc/mcp';
 import { registerExtensionIpc } from './ipc/extensions';
 import { registerPermissionRulesIpc } from './ipc/permissions';
+import { registerPdfIpc } from './ipc/pdf';
 
 export type { IpcDeps };
 
@@ -42,4 +43,5 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerMcpIpc(ctx);
   registerExtensionIpc(ctx);
   registerPermissionRulesIpc(ctx);
+  registerPdfIpc(ctx);
 }

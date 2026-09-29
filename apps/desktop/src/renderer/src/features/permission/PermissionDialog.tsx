@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import type { PermissionRequestPayload } from '@jujia/shared-ipc';
+import { DIALOG_PREVIEW_MAX_LINES, type PermissionRequestPayload } from '@jujia/shared-ipc';
 
 const KIND_LABEL: Record<PermissionRequestPayload['kind'], string> = {
   read: '读取',
@@ -38,6 +38,24 @@ export function PermissionDialog(): ReactElement | null {
     () => (current ? JSON.stringify(current.args, null, 2) : ''),
     [current],
   );
+
+  /**
+   * 参数预览的**呈现**上限（M19 报备 §四 2，批复同意）。
+   *
+   * 为什么要有：保存一个大文件时，参数里带着整份内容 —— 不设上限就是往弹窗里塞 1MB 文本，
+   * 界面卡住、而人根本不会去读。截断必须**如实标注**："共 M 行，仅预览前 N 行"。
+   *
+   * 只动呈现：`editedText`（用户点「修改参数」后提交的那份）保持完整原文 ——
+   * 在编辑通道上截断等于悄悄改掉用户批准的东西。
+   */
+  const preview = useMemo(() => {
+    const lines = argsText.split('\n');
+    if (lines.length <= DIALOG_PREVIEW_MAX_LINES) return { text: argsText, note: null as string | null };
+    return {
+      text: lines.slice(0, DIALOG_PREVIEW_MAX_LINES).join('\n'),
+      note: `共 ${String(lines.length)} 行，仅预览前 ${String(DIALOG_PREVIEW_MAX_LINES)} 行`,
+    };
+  }, [argsText]);
 
   useEffect(() => {
     const unsubscribe = window.jujia.onPermissionRequest((req) => {
@@ -146,7 +164,8 @@ export function PermissionDialog(): ReactElement | null {
         {!editing && (
           <details>
             <summary>查看完整参数</summary>
-            <pre>{argsText}</pre>
+            {preview.note !== null && <p className="p0-subtitle">{preview.note}</p>}
+            <pre>{preview.text}</pre>
           </details>
         )}
 

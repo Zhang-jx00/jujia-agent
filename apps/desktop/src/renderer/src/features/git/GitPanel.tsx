@@ -39,6 +39,9 @@ export function GitPanel(): ReactElement {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [showNoise, setShowNoise] = useState(false);
+  /** 逐行 patch（M19：点某个文件才去取那一份，不一次拉全部） */
+  const [patch, setPatch] = useState<{ path: string; text: string; truncated: boolean } | null>(null);
+  const [patchNote, setPatchNote] = useState<string | null>(null);
 
   const reload = useCallback(async (): Promise<void> => {
     const st = await window.jujia.gitStatus();
@@ -57,9 +60,40 @@ export function GitPanel(): ReactElement {
 
   const reloadDiff = useCallback(async (staged: boolean): Promise<void> => {
     const r = await window.jujia.gitDiff(staged);
-    setDiff(r.ok ? r.data : null);
+    // 这里只要摘要那一支：`mode` 缺省就是 summary，但契约上是联合类型，得先收窄再赋值
+    if (r.ok && r.mode !== 'patch') setDiff(r.data);
+    if (!r.ok) setDiff(null);
     if (!r.ok) setError(r.error);
   }, []);
+
+  /**
+   * 看某一个文件的**逐行** patch（M19 §五：复用 git 读侧，不新开通道）。
+   * 未跟踪的新文件没有 patch（`git diff` 不显示它们）—— 这种情况如实说明，不假装"没有改动"。
+   */
+  const showPatch = useCallback(
+    async (path: string): Promise<void> => {
+      setPatchNote(null);
+      const r = await window.jujia.gitDiff(diffStaged, { mode: 'patch', path });
+      if (!r.ok) {
+        setPatch(null);
+        setPatchNote(`取不到 patch：${r.error}`);
+        return;
+      }
+      if (r.mode !== 'patch') {
+        setPatch(null);
+        setPatchNote('主进程没有返回逐行 patch（协议不对，什么都不显示好过显示错的）。');
+        return;
+      }
+      const hit = r.data.find((f) => f.path === path);
+      if (hit === undefined) {
+        setPatch(null);
+        setPatchNote('这个文件没有逐行 patch（新文件不被 git diff 显示；内容见「文件」页签）。');
+        return;
+      }
+      setPatch({ path: hit.path, text: hit.text, truncated: hit.truncated });
+    },
+    [diffStaged],
+  );
 
   const reloadLog = useCallback(async (): Promise<void> => {
     const r = await window.jujia.gitLog(20);
@@ -288,7 +322,9 @@ export function GitPanel(): ReactElement {
                     <span>
                       +{String(f.added)} / -{String(f.removed)}
                     </span>
-                    <code>{f.path}</code>
+                    <button type="button" className="jj-git-link" onClick={() => void showPatch(f.path)}>
+                      {f.path}
+                    </button>
                     {f.noise && <span className="jj-git-badge">噪音</span>}
                     {f.truncated && <span className="jj-git-badge">摘录已截断</span>}
                     <ul className="jj-git-lines">
@@ -299,6 +335,27 @@ export function GitPanel(): ReactElement {
                   </li>
                 ))}
               </ul>
+              {patchNote !== null && <p className="jj-muted">{patchNote}</p>}
+              {patch !== null && (
+                <div>
+                  <p className="p0-subtitle">
+                    {`逐行 patch：${patch.path}${patch.truncated ? '（已截断）' : ''}`}
+                  </p>
+                  <pre className="jj-patch">
+                    {patch.text.split('\n').map((line, i) => (
+                      <span
+                        key={i}
+                        className={
+                          line.startsWith('+') ? 'jj-patch-add' : line.startsWith('-') ? 'jj-patch-del' : undefined
+                        }
+                      >
+                        {line}
+                        {'\n'}
+                      </span>
+                    ))}
+                  </pre>
+                </div>
+              )}
             </>
           )}
         </section>

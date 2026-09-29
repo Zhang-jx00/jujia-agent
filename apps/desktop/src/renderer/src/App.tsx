@@ -48,6 +48,9 @@ const GitPanel = lazy(() =>
 const DocPanel = lazy(() =>
   import('./features/docs/DocPanel').then((m) => ({ default: m.DocPanel })),
 );
+const IdePanel = lazy(() =>
+  import('./features/ide/IdePanel').then((m) => ({ default: m.IdePanel })),
+);
 
 /** 兜底样式包改为在启动时从动态导入的模块里取，见下方 useEffect（首屏不加载 ui-tokens） */
 
@@ -78,6 +81,7 @@ type Tab =
   | 'browser'
   | 'docs'
   | 'git'
+  | 'ide'
   | 'mcp'
   | 'permissions'
   | 'hooks'
@@ -98,6 +102,7 @@ const TAB_LABEL: Record<Tab, string> = {
   browser: '浏览器',
   docs: '文档',
   git: 'Git',
+  ide: '文件',
   mcp: 'MCP',
   permissions: '权限',
   hooks: '钩子',
@@ -259,6 +264,7 @@ export function App(): ReactElement {
           {state.phase === 'ready' && tab === 'browser' && <BrowserPanel />}
           {state.phase === 'ready' && tab === 'docs' && <DocPanel />}
           {state.phase === 'ready' && tab === 'git' && <GitPanel />}
+          {state.phase === 'ready' && tab === 'ide' && <IdePanel />}
           {state.phase === 'ready' && tab === 'mcp' && <McpPanel />}
           {state.phase === 'ready' && tab === 'permissions' && <PermissionRulesPanel />}
           {state.phase === 'ready' && tab === 'hooks' && <HooksPanel />}

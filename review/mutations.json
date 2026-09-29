@@ -480,6 +480,54 @@
       "find": "}, [active]);",
       "replace": "}, []);",
       "test": "apps/desktop/src/main/tab-state-wiring.test.ts"
+    },
+    {
+      "id": "M61",
+      "desc": "覆盖保护失效：编辑期间盘上被别人改过，保存照样盖回去（IDE 最经典的事故）",
+      "file": "apps/desktop/src/renderer/src/features/ide/ide-parse.ts",
+      "find": "  return opened !== current;",
+      "replace": "  return false;",
+      "test": "apps/desktop/src/renderer/src/features/ide/ide-parse.test.ts"
+    },
+    {
+      "id": "M62",
+      "desc": "目录截断变成静默截断：只显示前 N 项但不告诉用户还有多少（界面上看着像「就这么多」）",
+      "file": "packages/agent-core/src/tools/builtin/file-tools.ts",
+      "find": "    const clipped = shown.length < sorted.length;",
+      "replace": "    const clipped = false;",
+      "test": "packages/agent-core/src/tools/builtin/file-tools.test.ts"
+    },
+    {
+      "id": "M63",
+      "desc": "把工具的截断标注当成一个文件名显示（「（共 900 项…）」变成树里的一项）",
+      "file": "apps/desktop/src/renderer/src/features/ide/ide-parse.ts",
+      "find": "    .filter((l) => !l.startsWith('（'))",
+      "replace": "    .filter(() => true)",
+      "test": "apps/desktop/src/renderer/src/features/ide/ide-parse.test.ts"
+    },
+    {
+      "id": "M64",
+      "desc": "逐行 patch 变成无界：行数上限形同虚设（几万行的 diff 全塞进渲染层）",
+      "file": "packages/agent-core/src/git/git.ts",
+      "find": "    if (current.kept.length < limit) current.kept.push(line);",
+      "replace": "    current.kept.push(line);",
+      "test": "packages/agent-core/src/git/git.test.ts"
+    },
+    {
+      "id": "M65",
+      "desc": "PDF 文件大小上限被去掉：一份 500MB 的 PDF 也会被整个读进内存再送进渲染层",
+      "file": "apps/desktop/src/main/ipc/pdf.ts",
+      "find": "    if (st.size > PDF_MAX_BYTES) {",
+      "replace": "    if (false) {",
+      "test": "apps/desktop/src/main/ide-wiring.test.ts"
+    },
+    {
+      "id": "M66",
+      "desc": "零出站被打开：pdfjs 的 worker 允许自己走 fetch 取字体/cmap（PDF 一开就可能出网）",
+      "file": "apps/desktop/src/renderer/src/features/ide/PdfView.tsx",
+      "find": "      useWorkerFetch: false,",
+      "replace": "      useWorkerFetch: true,",
+      "test": "apps/desktop/src/main/ide-wiring.test.ts"
     }
   ]
 }

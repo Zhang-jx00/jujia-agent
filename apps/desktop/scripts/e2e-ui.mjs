@@ -217,6 +217,35 @@ const echoPort = echoServer.address().port;
  * 会话 id 用符合白名单的 uuid 形态；文件按真实格式写（JsonStore 的信封 + JSONL 一行一条），
  * 于是"重启后还在"这一条问的是**应用真的能读盘**，不是它自己刚写的内存。
  */
+/**
+ * 造一份**最小但合法**的 PDF（一页，写着一行字）。
+ *
+ * 为什么自己造而不是塞一份二进制样本进仓库：样本会跟着仓库变老、也没人知道它为什么是这个形状；
+ * 三十行生成器把"合法的 PDF 长什么样"（对象表 + xref 偏移 + trailer）写清楚，
+ * 而且字节数是实测出来的（`Buffer.byteLength` 算偏移，不是数着字符猜）。
+ */
+function buildMinimalPdf() {
+  const stream = 'BT /F1 14 Tf 20 100 Td (E2E PDF OK) Tj ET';
+  const objs = [
+    '<</Type/Catalog/Pages 2 0 R>>',
+    '<</Type/Pages/Kids[3 0 R]/Count 1>>',
+    '<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>',
+    `<</Length ${String(Buffer.byteLength(stream))}>>\nstream\n${stream}\nendstream`,
+    '<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets = [];
+  for (let i = 0; i < objs.length; i += 1) {
+    offsets.push(Buffer.byteLength(out));
+    out += `${String(i + 1)} 0 obj\n${objs[i] ?? ''}\nendobj\n`;
+  }
+  const xrefAt = Buffer.byteLength(out);
+  out += `xref\n0 ${String(objs.length + 1)}\n0000000000 65535 f \n`;
+  for (const off of offsets) out += `${String(off).padStart(10, '0')} 00000 n \n`;
+  out += `trailer\n<</Size ${String(objs.length + 1)}/Root 1 0 R>>\nstartxref\n${String(xrefAt)}\n%%EOF\n`;
+  return out;
+}
+
 const seededConnId = 'e2e-conn-1';
 const seededStreamConnId = 'e2e-stream-1';
 const seededEchoConnId = 'e2e-6b-1';
@@ -1798,6 +1827,111 @@ try {
   }
   ok('流式中切走 2 秒再切回：后续增量照常到达，整轮走完（订阅一直在）');
 
+  /* ---------------- M19a：轻量 IDE（文件树 / 保存过门 / 覆盖保护 / PDF / 逐行 patch） ----------------
+   *
+   * 五步各覆盖一个入口，断言全部落在**磁盘真值**与"零出站"上：
+   * 树里的条目与磁盘对照；保存看的是文件真的变了（拒绝时真的没变）；
+   * PDF 看的是 canvas 与页数，外加"整个打开过程没有一条出站请求"。
+   */
+  step('M19 文件树：展开看到真实条目，点开文件看到内容');
+  const ideFile = `ide-e2e-${String(Date.now()).slice(-6)}.txt`;
+  const idePdf = `ide-e2e-${String(Date.now()).slice(-6)}.pdf`;
+  writeFileSync(join(wsDir, ideFile), '第一行\n第二行\n', 'utf8');
+  writeFileSync(join(wsDir, idePdf), buildMinimalPdf(), 'utf8');
+  await win3.locator('nav.app-tabs button', { hasText: '文件' }).first().click();
+  if ((await waitText3(ideFile, 12_000)) !== true) {
+    fail('「文件」页签没有列出刚写进去的文件（树没读磁盘？）', (await body3()).slice(0, 800));
+  }
+  await win3.locator('button', { hasText: ideFile }).first().click();
+  /*
+   * 内容在 **textarea 的 value** 里，而 `innerText` 不含表单值 —— 这里必须读 value。
+   * （第一次跑红在'点开文件之后没有看到内容'，就是这么来的：文件明明开了，断言看不见。）
+   */
+  const editorValue = async () => await win3.locator('textarea[aria-label="文件内容"]').inputValue();
+  let shownText = '';
+  for (let i = 0; i < 40 && !shownText.includes('第二行'); i += 1) {
+    await new Promise((r) => setTimeout(r, 250));
+    shownText = await editorValue().catch(() => '');
+  }
+  if (!shownText.includes('第二行')) {
+    fail('点开文件之后编辑器里没有内容', shownText.slice(0, 300) || '（读不到编辑器）');
+  }
+  ok('树与磁盘一致，点开就能看到文件内容');
+
+  step('M19 保存必须过权限门：批准 → 磁盘真变；拒绝 → 磁盘不变');
+  const editor = win3.locator('textarea[aria-label="文件内容"]');
+  await editor.fill('第一行\n第二行\n第三行（e2e 加的）\n');
+  await win3.locator('button', { hasText: '保存' }).first().click();
+  if ((await waitText3('需要你确认：', 10_000)) !== true) {
+    fail('保存没有过权限门 —— 写类操作必须问人（与模型调 write_file 同一扇门）', (await body3()).slice(0, 900));
+  }
+  await win3.locator('button', { hasText: '允许一次' }).first().click();
+  await new Promise((r) => setTimeout(r, 600));
+  const savedText = readFileSync(join(wsDir, ideFile), 'utf8');
+  if (!savedText.includes('第三行（e2e 加的）')) {
+    fail('批准了，磁盘上却没有这一行（界面说成功不算数）', savedText.slice(0, 300));
+  }
+  await editor.fill('这一版不该落盘\n');
+  await win3.locator('button', { hasText: '保存' }).first().click();
+  if ((await waitText3('需要你确认：', 10_000)) !== true) fail('第二次保存没有弹确认', (await body3()).slice(0, 700));
+  await win3.locator('button', { hasText: '拒绝' }).first().click();
+  await new Promise((r) => setTimeout(r, 600));
+  if (readFileSync(join(wsDir, ideFile), 'utf8').includes('不该落盘')) {
+    fail('用户拒绝了，盘上却还是被写了（拒绝必须真的不做）');
+  }
+  ok('保存逐次过门：批准才写、拒绝就不写 —— 两次都有磁盘证据');
+
+  step('M19 覆盖保护：文件被外部改过之后拒绝保存，并给出两条出路');
+  writeFileSync(join(wsDir, ideFile), '外部改动\n', 'utf8');
+  await editor.fill('编辑器里的旧版本\n');
+  await win3.locator('button', { hasText: '保存' }).first().click();
+  if ((await waitText3('被改过了', 10_000)) !== true) {
+    fail('覆盖保护没生效（盘上的新内容被旧编辑器内容盖了？）', (await body3()).slice(0, 900));
+  }
+  const afterRefuse = readFileSync(join(wsDir, ideFile), 'utf8');
+  if (afterRefuse !== '外部改动\n') fail('拒绝了却还是覆盖了盘上的内容', afterRefuse.slice(0, 200));
+  const refuseBody = await body3();
+  if (!refuseBody.includes('重新打开') || !refuseBody.includes('另存为')) {
+    fail('拒绝的文案没给出两条出路（重新打开 / 另存为）', refuseBody.slice(0, 700));
+  }
+  ok('覆盖保护生效：盘上那份没被动，且用户知道下一步能怎么办');
+
+  step('M19 PDF：真画出来，且整个打开过程零出站请求');
+  const outbound = [];
+  const watchOut = (req) => {
+    const u = req.url();
+    if (u.startsWith('http://') || u.startsWith('https://')) outbound.push(u);
+  };
+  win3.on('request', watchOut);
+  await win3.locator('button', { hasText: idePdf }).first().click();
+  if ((await waitText3('第 1 / 1 页', 15_000)) !== true) {
+    fail('PDF 没有渲染出页数（pdfjs 没跑起来？）', (await body3()).slice(0, 900));
+  }
+  const canvasBox = await win3.locator('canvas.jj-pdf-canvas').boundingBox();
+  if (canvasBox === null || canvasBox.width < 50 || canvasBox.height < 50) {
+    fail('画布没画出来（尺寸不对）', JSON.stringify(canvasBox));
+  }
+  await new Promise((r) => setTimeout(r, 800));
+  win3.off('request', watchOut);
+  if (outbound.length > 0) {
+    fail(`打开 PDF 期间出现了出站请求 —— 违反"数据不出本机"：${outbound.join(' , ')}`);
+  }
+  ok('PDF 真画出来了（页数 + canvas），全程零出站：一份 PDF 的字节没有离开过本机');
+
+  step('M19 逐行 diff：点开改动的文件看到逐行 patch（内容真值）');
+  const trackedFile = 'README-e2e-seed.md';
+  writeFileSync(join(wsDir, trackedFile), 'seed\n新增一行给 patch 看\n', 'utf8');
+  await win3.locator('nav.app-tabs button', { hasText: 'Git' }).first().click();
+  await win3.locator('button.jj-git-link', { hasText: trackedFile }).first().click();
+  if ((await waitText3('逐行 patch', 12_000)) !== true) {
+    fail('没有出现逐行 patch 视图', (await body3()).slice(0, 900));
+  }
+  const patchBody = await body3();
+  if (!patchBody.includes('+新增一行给 patch 看')) {
+    fail('patch 里没有那一行新增（逐行视图没生效）', patchBody.slice(-900));
+  }
+  ok('逐行 patch 真取回来了：新增行以 + 出现（看的是内容，不是界面文案）');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -1817,5 +1951,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 干净退出');
 process.exit(0);

@@ -97,17 +97,29 @@ export const writeFileTool: ToolDefinition<{ path: string; content: string }> = 
   },
 };
 
-export const listDirTool: ToolDefinition<{ path?: string | undefined }> = {
+export const listDirTool: ToolDefinition<{
+  path?: string | undefined;
+  maxEntries?: number | undefined;
+}> = {
   name: 'list_dir',
   description: '列出工作区内某个目录的直接子项（不递归）。',
   kind: 'read',
   parameters: {
     type: 'object',
-    properties: { path: { type: 'string', description: '目录路径，默认工作区根目录' } },
+    properties: {
+      path: { type: 'string', description: '目录路径，默认工作区根目录' },
+      // 可选上限：文件树（M19）用它防"十万个名字跨进程传过来"。
+      // **不传 = 列全部** —— 模型今天的行为一字不改。
+      maxEntries: { type: 'number', description: '最多返回多少项；不传=全部' },
+    },
     required: [],
     additionalProperties: false,
   },
-  parse: (raw) => z.object({ path: z.string().optional() }).strict().parse(raw ?? {}),
+  parse: (raw) =>
+    z
+      .object({ path: z.string().optional(), maxEntries: z.number().int().positive().optional() })
+      .strict()
+      .parse(raw ?? {}),
   async run(args, ctx): Promise<ToolOutcome> {
     const abs = await guardPath(ctx.workspaceRoot, args.path ?? '.');
     const info = await stat(abs).catch(() => null);
@@ -116,13 +128,21 @@ export const listDirTool: ToolDefinition<{ path?: string | undefined }> = {
     }
 
     const entries = await readdir(abs, { withFileTypes: true });
-    const lines = entries
+    const sorted = entries
       .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
       .map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
 
+    const cap = args.maxEntries;
+    const shown = cap === undefined ? sorted : sorted.slice(0, cap);
+    const clipped = shown.length < sorted.length;
+    const body = shown.length > 0 ? shown.join('\n') : '（空目录）';
+
     return {
       ok: true,
-      content: lines.length > 0 ? lines.join('\n') : '（空目录）',
+      // 截断就如实说：这句标注界面与模型看到的是同一句，不各写一套
+      content: clipped
+        ? `${body}\n（共 ${String(sorted.length)} 项，只显示了前 ${String(shown.length)} 项）`
+        : body,
       evidence: { paths: [abs] },
     };
   },

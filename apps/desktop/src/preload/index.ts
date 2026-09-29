@@ -90,6 +90,8 @@ import {
   gitCommitSchema,
   gitDiffResultSchema,
   gitLogResultSchema,
+  pdfOpenQuerySchema,
+  pdfOpenResultSchema,
   gitPathsSchema,
   gitStatusResultSchema,
   type BrowserBoundsPayload,
@@ -102,6 +104,7 @@ import {
   type GitActionResultView,
   type GitDiffResult,
   type GitLogResult,
+  type PdfOpenResult,
   type GitStatusResult,
 } from '@jujia/shared-ipc';
 
@@ -481,12 +484,25 @@ const api = {
     return gitStatusResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_STATUS));
   },
 
-  async gitDiff(staged = false): Promise<GitDiffResult> {
-    return gitDiffResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_DIFF, { staged }));
+  /**
+   * git diff：默认 `summary`（关键行摘录，既有调用点不变）；
+   * `{mode:'patch', path}` 拿逐行原文给 IDE 的 diff 视图用。
+   */
+  async gitDiff(
+    staged = false,
+    options: { mode?: 'summary' | 'patch'; path?: string } = {},
+  ): Promise<GitDiffResult> {
+    return gitDiffResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_DIFF, { staged, ...options }));
   },
 
   async gitLog(count = 20): Promise<GitLogResult> {
     return gitLogResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_LOG, { count }));
+  },
+
+  /** 打开一份 PDF（M19）：只读、过路径守卫、**只回渲染层**（不进模型上下文） */
+  async pdfOpen(path: string): Promise<PdfOpenResult> {
+    const query = pdfOpenQuerySchema.parse({ path });
+    return pdfOpenResultSchema.parse(await ipcRenderer.invoke(IPC.PDF_OPEN, query));
   },
 
   async gitStage(paths: string[]): Promise<GitActionResultView> {

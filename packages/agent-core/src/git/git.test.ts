@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   commit,
+  getDiffPatch,
   DIFF_HIGHLIGHTS_PER_FILE,
   getDiffSummary,
   getRecentCommits,
@@ -242,5 +243,58 @@ describe('getRecentCommits', () => {
     await commit(repo, 'c1');
     expect((await getRecentCommits(repo, 0)).ok).toBe(true);
     expect((await getRecentCommits(repo, 999)).ok).toBe(true);
+  });
+});
+
+/**
+ * 逐行 patch（M19 的 diff 视图要用）。与摘要的分别就一句话：
+ * 摘要**只留关键行**（省上下文），patch 要**逐行原文**（给人看改动）——
+ * 两者共用同一个 `git diff` 口径，所以能力上不是新增，只是不再精简。
+ * 边界仍然要有：行数上限，超了截断并如实标注。
+ */
+describe('getDiffPatch：逐行原文，但有界', () => {
+  it('一个文件的改动逐行取回，且带 +/- 与文件路径', async () => {
+    await writeFile(join(repo, 'a.txt'), '第一行\n第二行\n', 'utf8');
+    await g(['add', 'a.txt']);
+    await g(['commit', '-qm', 'add a']);
+    await writeFile(join(repo, 'a.txt'), '第一行\n改过的第二行\n', 'utf8');
+
+    const res = await getDiffPatch(repo, false);
+    expect(res.ok).toBe(true);
+    const files = res.data ?? [];
+    expect(files).toHaveLength(1);
+    expect(files[0]?.path).toBe('a.txt');
+    expect(files[0]?.text).toContain('-第二行');
+    expect(files[0]?.text).toContain('+改过的第二行');
+    expect(files[0]?.truncated).toBe(false);
+  });
+
+  it('只看指定文件时不带出别的文件', async () => {
+    for (const name of ['a.txt', 'b.txt']) {
+      await writeFile(join(repo, name), 'x\n', 'utf8');
+      await g(['add', name]);
+    }
+    await g(['commit', '-qm', 'two']);
+    await writeFile(join(repo, 'a.txt'), 'a 改了\n', 'utf8');
+    await writeFile(join(repo, 'b.txt'), 'b 改了\n', 'utf8');
+
+    const res = await getDiffPatch(repo, false, 'b.txt');
+    expect(res.ok).toBe(true);
+    expect((res.data ?? []).map((f) => f.path)).toEqual(['b.txt']);
+  });
+
+  it('超过行数上限就截断，并把"还有多少行"写在文本里（不静默）', async () => {
+    const lines = Array.from({ length: 300 }, (_, i) => `行 ${String(i)}`);
+    await writeFile(join(repo, 'big.txt'), 'x\n', 'utf8');
+    await g(['add', 'big.txt']);
+    await g(['commit', '-qm', 'big']);
+    await writeFile(join(repo, 'big.txt'), `${lines.join('\n')}\n`, 'utf8');
+
+    const res = await getDiffPatch(repo, false, undefined, 40);
+    const file = (res.data ?? [])[0];
+    expect(file?.truncated).toBe(true);
+    expect(file?.lines).toBe(40);
+    expect(file?.text).toContain('已截断');
+    expect(file?.text).toContain('共');
   });
 });

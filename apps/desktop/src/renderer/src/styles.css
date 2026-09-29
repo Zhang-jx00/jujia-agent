@@ -1378,3 +1378,95 @@ html[data-jj-bg-kind='glass'] .app-shell {
   border-top: 1px solid var(--border);
 }
 
+
+/* ---------------------- 轻量 IDE（M19a：文件树 + 编辑 + PDF + patch） ---------------------- */
+
+.jj-ide {
+  display: flex;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+}
+
+.jj-ide-tree {
+  width: 280px;
+  min-width: 200px;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  padding-right: 8px;
+}
+
+.jj-ide-entry {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.jj-ide-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.jj-ide-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.jj-ide-editor {
+  flex: 1;
+  min-height: 320px;
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: var(--fs-caption);
+  white-space: pre;
+  resize: vertical;
+}
+
+.jj-ide-bar input {
+  flex: 1;
+  min-width: 200px;
+}
+
+.jj-pdf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+}
+
+.jj-pdf-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.jj-pdf-canvas {
+  max-width: 100%;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+/* 逐行 diff：加/删行各自着色，其余原样（与 Git 页同一套观感） */
+.jj-patch {
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: var(--fs-caption);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+.jj-patch-add {
+  color: var(--success);
+}
+
+.jj-patch-del {
+  color: #ff7875;
+}

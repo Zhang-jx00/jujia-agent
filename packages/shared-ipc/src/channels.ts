@@ -175,6 +175,17 @@ export const IPC = {
   GIT_UNSTAGE: 'git:unstage',
   /** 提交：**硬 ask**（会写入仓库历史，任何「总是允许」都压不掉） */
   GIT_COMMIT: 'git:commit',
+
+  /* ------------------------- 轻量 IDE（M19 接线） ------------------------- */
+
+  /**
+   * 打开一份 PDF：**只读**，主进程读过路径守卫后把字节交给渲染层画。
+   *
+   * 为什么不走工具层：PDF 字节是给**人看**的，不是给模型的。把它做成工具，
+   * 等于给模型新增一个"读任意二进制"的能力（攻击面变大、收益为零）。
+   * 所以这条通道的返回值**只回渲染层**，不进模型上下文、不产生任何 chat 事件。
+   */
+  PDF_OPEN: 'pdf:open',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

@@ -66,6 +66,11 @@ export interface DiffSummary {
 export const DIFF_HIGHLIGHTS_PER_FILE = 12;
 /** 文件数上限 */
 export const DIFF_MAX_FILES = 60;
+/**
+ * 逐行 patch 每个文件最多多少行（M19 的 diff 视图用）。
+ * 上限归**读侧**所有：渲染层拿到的 patch 早已有界，不必也不该再存一份。
+ */
+export const DIFF_PATCH_MAX_LINES = 2000;
 
 /** 噪音路径：lockfile 与构建产物——它们行数极大但对审阅几乎无价值 */
 const NOISE_PATTERNS: ReadonlyArray<RegExp> = [
@@ -298,6 +303,74 @@ export async function getDiffSummary(cwd: string, staged = false): Promise<GitRe
       note: notes.length > 0 ? notes.join('；') : null,
     },
   };
+}
+
+/** 逐行 patch 的一个文件（`text` 已按行数上限截断，截断时会在文本里如实说明） */
+export interface DiffPatchFile {
+  path: string;
+  text: string;
+  /** `text` 里实际包含的行数 */
+  lines: number;
+  truncated: boolean;
+}
+
+/**
+ * 逐行 patch（只读）—— M19 的 diff 视图用它。
+ *
+ * 与 `getDiffSummary` 的分别只有一句：摘录**只留关键行**（省上下文），
+ * patch 要**逐行原文**（给人看改动）。两者共用同一个 `git diff` 口径，
+ * 所以这不是新增能力，只是不再精简；上限从"每文件 12 行摘录"换成"每文件 2000 行原文"。
+ *
+ * 未跟踪的新文件不会出现在这里（`git diff` 不显示它们）——
+ * 界面上要按摘要那一份的说法呈现，不能假装"这个文件没有改动"。
+ */
+export async function getDiffPatch(
+  cwd: string,
+  staged = false,
+  onlyPath?: string,
+  maxLines = DIFF_PATCH_MAX_LINES,
+): Promise<GitResult<DiffPatchFile[]>> {
+  if (!(await isGitRepo(cwd))) return { ok: false, error: '当前工作区不是 Git 仓库' };
+
+  const args = ['diff', ...(staged ? ['--cached'] : []), '--no-color', '--unified=3'];
+  if (onlyPath !== undefined && onlyPath !== '') args.push('--', onlyPath);
+  const res = await git(cwd, args);
+  if (!res.ok) return { ok: false, error: res.error };
+
+  const limit = Math.max(1, Math.floor(maxLines));
+  const files: DiffPatchFile[] = [];
+  let current: { path: string; kept: string[]; total: number } | null = null;
+
+  const seal = (): void => {
+    if (current === null) return;
+    const truncated = current.total > current.kept.length;
+    const body = current.kept.join('\n');
+    files.push({
+      path: current.path,
+      // 截断必须写在正文里：界面与任何别的消费者看到的是同一句话
+      text: truncated
+        ? `${body}\n（已截断：本文件共 ${String(current.total)} 行 patch，只显示了前 ${String(current.kept.length)} 行）`
+        : body,
+      lines: current.kept.length,
+      truncated,
+    });
+    current = null;
+  };
+
+  for (const line of res.stdout.split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      seal();
+      const m = / b\/(.+)$/.exec(line);
+      current = { path: m?.[1] ?? '(未知路径)', kept: [], total: 0 };
+      continue;
+    }
+    if (current === null) continue; // 头部杂项（如 `warning:` 之类）不进任何文件
+    current.total += 1;
+    if (current.kept.length < limit) current.kept.push(line);
+  }
+  seal();
+
+  return { ok: true, data: files };
 }
 
 /** 最近提交（只读） */
