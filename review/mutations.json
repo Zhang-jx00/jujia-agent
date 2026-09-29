@@ -552,6 +552,14 @@
       "find": "  if (pages > PDF_MAX_PAGES) {",
       "replace": "  if (pages >= PDF_MAX_PAGES) {",
       "test": "packages/shared-ipc/src/pdf-limits.test.ts"
+    },
+    {
+      "id": "M70",
+      "desc": "Adobe CMap 族里少一份：真实世界的中文 CID 字体（(Adobe)(GB1)）就会缺字 —— 端到端第 38 步当场红",
+      "file": "apps/desktop/src/renderer/src/features/ide/pdf-assets.ts",
+      "find": "  'Adobe-GB1-UCS2.bcmap': adobeGb1Ucs2,",
+      "replace": "  // 变异：这一份不提供",
+      "test": "apps/desktop/src/renderer/src/features/ide/pdf-assets.test.ts"
     }
   ]
 }

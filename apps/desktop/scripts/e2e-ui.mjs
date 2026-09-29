@@ -246,6 +246,38 @@ function buildMinimalPdf() {
   return out;
 }
 
+/**
+ * 造一份**用 CJK 预定义 CMap 的中文 PDF**（M19b 复核③要求的 fixture）。
+ *
+ * 形状：Type0 字体 + CIDFontType0 后代，`/Encoding /UniGB-UCS2-H` —— 也就是"字符串里的字节
+ * 要经那份 CMap 才能变成字形"。**只有内置了 `UniGB-UCS2-H.bcmap`，这两个字才画得出来**；
+ * 少了它就是"缺字"（这正是内联 cmap 要解决的那件事，所以它能当反证）。
+ * 文本 `<4F60597D>` 是"你好"的 UCS2 编码。
+ */
+function buildCjkPdf() {
+  const stream = 'BT /F1 48 Tf 20 100 Td <4F60597D> Tj ET';
+  const objs = [
+    '<</Type/Catalog/Pages 2 0 R>>',
+    '<</Type/Pages/Kids[3 0 R]/Count 1>>',
+    '<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>',
+    `<</Length ${String(Buffer.byteLength(stream))}>>\nstream\n${stream}\nendstream`,
+    '<</Type/Font/Subtype/Type0/BaseFont/STSong-Light/Encoding/UniGB-UCS2-H/DescendantFonts[6 0 R]>>',
+    '<</Type/Font/Subtype/CIDFontType0/BaseFont/STSong-Light/CIDSystemInfo<</Registry(Adobe)/Ordering(GB1)/Supplement 2>>/FontDescriptor 7 0 R/DW 1000>>',
+    '<</Type/FontDescriptor/FontName/STSong-Light/Flags 4/FontBBox[0 -300 1000 900]/ItalicAngle 0/Ascent 880/Descent -120/CapHeight 700/StemV 58>>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets = [];
+  for (let i = 0; i < objs.length; i += 1) {
+    offsets.push(Buffer.byteLength(out));
+    out += `${String(i + 1)} 0 obj\n${objs[i] ?? ''}\nendobj\n`;
+  }
+  const xrefAt = Buffer.byteLength(out);
+  out += `xref\n0 ${String(objs.length + 1)}\n0000000000 65535 f \n`;
+  for (const off of offsets) out += `${String(off).padStart(10, '0')} 00000 n \n`;
+  out += `trailer\n<</Size ${String(objs.length + 1)}/Root 1 0 R>>\nstartxref\n${String(xrefAt)}\n%%EOF\n`;
+  return out;
+}
+
 const seededConnId = 'e2e-conn-1';
 const seededStreamConnId = 'e2e-stream-1';
 const seededEchoConnId = 'e2e-6b-1';
@@ -1836,8 +1868,11 @@ try {
   step('M19 文件树：展开看到真实条目，点开文件看到内容');
   const ideFile = `ide-e2e-${String(Date.now()).slice(-6)}.txt`;
   const idePdf = `ide-e2e-${String(Date.now()).slice(-6)}.pdf`;
+  const ideCjkPdf = `ide-cjk-${String(Date.now()).slice(-6)}.pdf`;
   writeFileSync(join(wsDir, ideFile), '第一行\n第二行\n', 'utf8');
   writeFileSync(join(wsDir, idePdf), buildMinimalPdf(), 'utf8');
+  // 中文 fixture 也在这里先落盘：树的清单是**懒加载缓存**的，开页签之后再写就看不见（第 33 步实测过）
+  writeFileSync(join(wsDir, ideCjkPdf), buildCjkPdf(), 'utf8');
   await win3.locator('nav.app-tabs button', { hasText: '文件' }).first().click();
   if ((await waitText3(ideFile, 12_000)) !== true) {
     fail('「文件」页签没有列出刚写进去的文件（树没读磁盘？）', (await body3()).slice(0, 800));
@@ -1941,6 +1976,54 @@ try {
   }
   ok('逐行 patch 真取回来了：新增行以 + 出现（看的是内容，不是界面文案）');
 
+  step('M19b 中文 PDF：内置的 CJK cmap 真被取用，字节经它正确映射成「你好」（抽取为证）');
+  await win3.locator('nav.app-tabs button', { hasText: '文件' }).first().click();
+  await win3.locator('button', { hasText: ideCjkPdf }).first().click();
+  if ((await waitText3('第 1 / 1 页', 15_000)) !== true) {
+    fail('中文 PDF 没有渲染出页数', (await body3()).slice(0, 900));
+  }
+  // ① 取用记录：这份文档**真的**向内置工厂要过那份 cmap（"不缺字"的第一步）
+  // 取用记录是**按需**产生的：轮询等它出现（同时把渲染层的 console 收下来，失败时一并打印）
+  const pdfConsole = [];
+  const tapConsole = (msg) => pdfConsole.push(`${msg.type()}: ${msg.text()}`);
+  win3.on('console', tapConsole);
+  let servedAttr = '';
+  for (let i = 0; i < 32 && !servedAttr.includes('Adobe-GB1-UCS2.bcmap'); i += 1) {
+    await new Promise((r) => setTimeout(r, 250));
+    servedAttr = (await win3.locator('.jj-pdf').first().getAttribute('data-pdf-assets')) ?? '';
+  }
+  win3.off('console', tapConsole);
+  // 名字是**实测出来的**：pdfjs 对 `(Adobe)(GB1)` 的 CID 字体要的是 `Adobe-GB1-UCS2.bcmap`，
+  // 而不是 `UniGB-UCS2-H.bcmap` —— 第一次跑就是在这里红的（那一族当时没打包）
+  if (!servedAttr.includes('Adobe-GB1-UCS2.bcmap')) {
+    fail(
+      `这份中文 PDF 没有取用内置的 Adobe-GB1-UCS2（data-pdf-assets 实际是：${servedAttr || '（空）'}）`,
+      pdfConsole.slice(-10).join(' | '),
+    );
+  }
+  /*
+   * ② 映射证据：**抽字**抽出"你好"。
+   *
+   * 预定义 CMap 干的活就是"字节 → 字符"的映射 —— 少了它，这串字节映射不出正确的字，
+   * 抽字会得到空或乱码。这一步与"字形从哪来"无关，所以它验的正是 CMap 本身。
+   *
+   * 为什么不是像素：先写过"画布上有墨色像素"，实测为 **0**，而且**不是缺字** ——
+   * 这份 fixture 的字体没内嵌、环境里也没有可用的系统字体，所以 pdfjs 什么都没画。
+   * 像素验的是"字形渲染"，CMap 只负责"映射"；把两者混在一起会得出错误的结论（这次就差点）。
+   */
+  let pageText = '';
+  for (let i = 0; i < 32 && !pageText.includes('你好'); i += 1) {
+    await new Promise((r) => setTimeout(r, 250));
+    pageText = (await win3.locator('.jj-pdf').first().getAttribute('data-pdf-text')) ?? '';
+  }
+  if (!pageText.includes('你好')) {
+    fail(
+      `这份中文 PDF 没有抽取到「你好」（实际：${pageText === '' ? '（空）' : pageText}）—— 内置 CMap 没生效`,
+      pdfConsole.slice(-10).join(' | '),
+    );
+  }
+  ok(`中文 PDF：内置 cmap 被取用（${servedAttr}），抽字得到 ${pageText} —— 字节经这份 CMap 正确映射`);
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -1960,5 +2043,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → 干净退出');
 process.exit(0);

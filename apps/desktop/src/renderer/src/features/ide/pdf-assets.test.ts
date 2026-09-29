@@ -35,8 +35,8 @@ describe('decodeInlineAsset：data URL → 字节', () => {
 });
 
 describe('内置资源清单：子集是有意挑的，不许悄悄变空', () => {
-  it('16 个 CJK cmap + 14 个标准字体都在包里', () => {
-    expect(BUNDLED_CMAP_COUNT).toBe(16);
+  it('43 个 CJK cmap（Uni* 16 + Adobe* 27）+ 14 个标准字体都在包里', () => {
+    expect(BUNDLED_CMAP_COUNT).toBe(43);
     expect(BUNDLED_FONT_COUNT).toBe(14);
   });
 });
@@ -55,6 +55,19 @@ describe('工厂：按文件名喂字节，缺哪份就报哪份', () => {
     );
   });
 
+  it('pdfjs 对 CID 字体实际要的那一族（Adobe-*-UCS2）也在包里', async () => {
+    // 这条是端到端测试逼出来的：只打 Uni* 时，一份 Adobe-GB1 的 CID 字体照样缺字
+    for (const name of [
+      'Adobe-GB1-UCS2.bcmap',
+      'Adobe-CNS1-UCS2.bcmap',
+      'Adobe-Japan1-UCS2.bcmap',
+      'Adobe-Korea1-UCS2.bcmap',
+    ]) {
+      const bytes = await factory.fetch({ kind: 'cMapUrl', filename: name });
+      expect(bytes.length).toBeGreaterThan(1000);
+    }
+  });
+
   it('wasm 一类资源一律不提供（本应用不开 wasm，也不出网）', async () => {
     await expect(factory.fetch({ kind: 'wasmUrl', filename: 'openjpeg.wasm' })).rejects.toThrow(/不提供/);
   });
@@ -63,5 +76,25 @@ describe('工厂：按文件名喂字节，缺哪份就报哪份', () => {
     expect(factory.cMapUrl).toBeNull();
     expect(factory.standardFontDataUrl).toBeNull();
     expect(factory.wasmUrl).toBeNull();
+  });
+
+  /**
+   * 取用记录（给 e2e 的 `data-pdf-assets` 用）。
+   * 为什么这条要在单测里钉住：e2e 靠它证明"这份中文 PDF 真的取用了内置的 CJK cmap" ——
+   * 记录本身错（记了没成功的、或者重置不掉），那条端到端证据就是假的。
+   */
+  it('取用记录只记**成功**的那些，且可以重置', async () => {
+    BundledPdfBinaryDataFactory.resetServed();
+    expect(BundledPdfBinaryDataFactory.served.size).toBe(0);
+
+    await factory.fetch({ kind: 'cMapUrl', filename: 'UniGB-UCS2-H.bcmap' });
+    expect([...BundledPdfBinaryDataFactory.served]).toEqual(['UniGB-UCS2-H.bcmap']);
+
+    // 失败的那次不许留下记录（否则"取用过"这个说法就掺水了）
+    await expect(factory.fetch({ kind: 'cMapUrl', filename: 'UniJIS-UTF32-H.bcmap' })).rejects.toThrow();
+    expect([...BundledPdfBinaryDataFactory.served]).toEqual(['UniGB-UCS2-H.bcmap']);
+
+    BundledPdfBinaryDataFactory.resetServed();
+    expect(BundledPdfBinaryDataFactory.served.size).toBe(0);
   });
 });

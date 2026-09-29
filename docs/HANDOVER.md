@@ -467,6 +467,11 @@ PDF 零出站、diff 扩 `GIT_DIFF` 而不新开通道，末尾九条开关）�
 - 首屏 chunk 体积超标（目标 <400KB gzip；**当前实测值与增长原因见 `docs/PERF-BUDGET.md` §二/§四**）；长会话 fps 未实测（需 DevTools 录制）—— PERF-BUDGET 待办。
 - `as never` / `as unknown as` 断言集中在工具入参与 provider 解析处（有注释说明，属类型边界妥协）。
 - PLAN 选型表里的 React 18 / Fluent UI / zustand / xyflow **与实际不符**（实际 React 19 + 自研组件）——已按事实修正一部分，选型表仍待清理。
+- **打包产物验证缺失（2026-09-29 复核 042 点名的系统性缺口）**：全部门禁跑的都是 `out/` 的开发产物，
+  而 M19b 踩到的坑（`file://` 页面不许 `fetch` 本地文件）**只在打包产物里出现** —— 也就是说
+  "发出去才会坏"的那一类今天没有门禁能拦。最小方案见 `docs/DESIGN-M9-CANVAS.md` §七：
+  `electron-builder --dir` 构建一次 + Playwright 驱动跑三步（启动 / 开「文件」页签 / 打开 PDF 看到页数）；
+  排在 **M9 之前或与之并行**。
 
 ### 5.8 定位冲突与设计律（需要产品决策，不是 bug）
 

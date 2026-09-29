@@ -125,8 +125,24 @@ M19 在 `docs/PLAN.md` / `COVERAGE-MATRIX` 里的原话是"文件树 + CodeMirro
 
 | 素材 | 数量 | 体积（原始） |
 |------|------|--------------|
-| CJK 常用 CMap：`Uni{GB,CNS,JIS,KS}-{UCS2,UTF16}-{H,V}.bcmap` | 16 | 305 KB |
+| CJK CMap：`Uni{GB,CNS,JIS,KS}-{UCS2,UTF16}-{H,V}.bcmap` | 16 | 305 KB |
+| CJK CMap：`Adobe-{CNS1,GB1,Japan1,Korea1}-*` 整族（**端到端测试逼出来的**，见 §10.3） | 27 | 145 KB |
 | 标准字体：`Foxit*.pfb` 10 个 + `LiberationSans-*.ttf` 4 个 | 14 | 774 KB |
+
+### 10.3 中文缺字的端到端证据（M19c，复核 042 裁决③）
+
+**做法**：造一份**用预定义 CMap 的中文 PDF**（Type0 + CIDFontType0，`/Encoding /UniGB-UCS2-H`，
+正文是"你好"的 UCS2 字节），在 e2e 里打开它，断言两件事：
+① 内置工厂**被问过并成功答出**那份 cmap（界面以 `data-pdf-assets` 暴露）；
+② 页面**抽字**抽出来的是"你好"（`data-pdf-text`）—— 字节经 CMap 正确映射。
+
+**它当场抓到一个真缺口**：pdfjs 对 `(Adobe)(GB1)` 的 CID 字体要的是 **`Adobe-GB1-UCS2.bcmap`**，
+而不是 `UniGB-UCS2-H.bcmap`。M19b 只打了 `Uni*` 那一族 —— 也就是说**真实的中文 PDF 依旧会缺字**，
+而单元测试（按名取字节）完全看不出来。补齐 Adobe 整族（27 个，~145KB）后两个断言都过。
+
+**一条走错的路也记下**：这条断言最初写的是"画布上的墨色像素 > 200"，实测 **0** —— 而且**不是缺字**：
+这份 fixture 的字体没内嵌、环境里也没有可用的系统字体，pdfjs 什么都没画。
+**像素验的是字形渲染，CMap 只负责映射**，把两者混在一起会得出错误结论（这次就差点）。已换成抽字。
 
 **做法**：Vite 的 `?inline` 把每个文件变成 data URL，`BundledPdfBinaryDataFactory` 按文件名喂给 pdfjs；
 三个资源地址一个都不设、`useWorkerFetch: false` —— **没有地址、也没有第二条取字节的路**。

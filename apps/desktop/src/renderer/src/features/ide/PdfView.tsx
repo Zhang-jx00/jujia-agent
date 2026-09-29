@@ -39,6 +39,17 @@ export function PdfView({ path, bytes }: Props): ReactElement {
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  /** 这份文档取用了哪些内置资源（给 e2e 的 `data-pdf-assets` 用；见 pdf-assets.ts 的注释） */
+  const [served, setServed] = useState<string[]>([]);
+  /**
+   * 首页**抽取出来的文字**（给 e2e 的 `data-pdf-text` 用）。
+   *
+   * 为什么用"抽字"而不是"数像素"来证明内联 cmap 生效：预定义 CMap 干的活就是
+   * "把字节映射成 CID/字符" —— 抽字走的正是这条路（映射错了就会抽出乱码）。
+   * 而像素那条路还依赖"字形从哪来"（非内嵌字体要靠系统字体或内嵌字体），
+   * 在测试环境里它可能什么都没画 —— 那验的是字形，不是 CMap。
+   */
+  const [pageText, setPageText] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -46,6 +57,9 @@ export function PdfView({ path, bytes }: Props): ReactElement {
     setError(null);
     setPages(0);
     setPage(1);
+    BundledPdfBinaryDataFactory.resetServed();
+    setServed([]);
+    setPageText('');
 
     // 复制一份：pdfjs 会**接管**传入的 buffer（分离 ArrayBuffer），留着原件才能翻页/重开
     const data = new Uint8Array(bytes);
@@ -78,6 +92,7 @@ export function PdfView({ path, bytes }: Props): ReactElement {
         setPages(doc.numPages);
         setLoading(false);
         docRef.current = doc;
+
       },
       (err: unknown) => {
         if (cancelled) return;
@@ -93,6 +108,19 @@ export function PdfView({ path, bytes }: Props): ReactElement {
       docRef.current = null;
     };
   }, [bytes]);
+
+  /**
+   * 把"这一份文档取用了哪些内置资源"同步到界面（诊断用，见 pdf-assets.ts）。
+   * 用轮询而不是"加载完成后读一次"：字体/cmap 是**按需**取的，取用的时刻在渲染过程中间，
+   * 一次性快照会读出"还没取"的空表（e2e 第一次跑就是这么红的）。
+   */
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = [...BundledPdfBinaryDataFactory.served].sort();
+      setServed((prev) => (prev.join(',') === now.join(',') ? prev : now));
+    }, 300);
+    return () => clearInterval(id);
+  }, []);
 
   /** 只画当前页（不预渲染整本：一本 500 页的 PDF 全画出来等于把内存吃光） */
   useEffect(() => {
@@ -113,6 +141,16 @@ export function PdfView({ path, bytes }: Props): ReactElement {
       void pdfPage.render({ canvas, canvasContext: ctx, viewport }).promise.catch((err: unknown) => {
         if (!cancelled) setError(`这一页画不出来：${err instanceof Error ? err.message : String(err)}`);
       });
+      // 抽字：CMap 生效与否在这里看得见（像素看不出"映射对不对"）
+      void pdfPage.getTextContent().then((content) => {
+        if (cancelled) return;
+        const text = content.items
+          .map((it) => ('str' in it ? it.str : ''))
+          .join('')
+          .replace(/\s+/g, ' ')
+          .trim();
+        setPageText(text);
+      });
     });
     return () => {
       cancelled = true;
@@ -120,7 +158,12 @@ export function PdfView({ path, bytes }: Props): ReactElement {
   }, [page, pages, loading]);
 
   return (
-    <div className="jj-pdf" aria-label="PDF 查看">
+    <div
+      className="jj-pdf"
+      aria-label="PDF 查看"
+      data-pdf-assets={served.join(',')}
+      data-pdf-text={pageText}
+    >
       <div className="jj-pdf-bar">
         <span className="p0-subtitle" title={path}>
           {path}
