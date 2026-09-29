@@ -24,8 +24,13 @@ describe('decodeInlineAsset：data URL → 字节', () => {
   });
 
   it('认不出来的输入直接抛（喂空字节给 pdfjs 会变成无声缺字）', () => {
-    expect(() => decodeInlineAsset('不是 data URL')).toThrow();
-    expect(() => decodeInlineAsset('data:application/octet-stream;base64')).toThrow();
+    // 这一对用例是**变异 M67 逃逸之后补的**：原先只写 `toThrow()`，
+    // 而 `atob('不是 data URL')` 自己也会抛 —— 守卫被删掉照样"通过"，断言等于没写。
+    // 所以现在①断言**是我们那句话**抛的（消息里含 data URL），②再加一个"合法 base64 但不是 data URL"的输入
+    // （`hello`：去掉守卫之后 atob 能解开，函数会**静默返回乱字节**）。
+    expect(() => decodeInlineAsset('hello')).toThrow(/data URL/);
+    expect(() => decodeInlineAsset('data:text/plain;base64')).toThrow(/data URL/);
+    expect(() => decodeInlineAsset('不是 data URL')).toThrow(/data URL/);
   });
 });
 
