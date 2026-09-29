@@ -467,24 +467,7 @@ PDF 零出站、diff 扩 `GIT_DIFF` 而不新开通道，末尾九条开关）�
 - 首屏 chunk 体积超标（目标 <400KB gzip；**当前实测值与增长原因见 `docs/PERF-BUDGET.md` §二/§四**）；长会话 fps 未实测（需 DevTools 录制）—— PERF-BUDGET 待办。
 - `as never` / `as unknown as` 断言集中在工具入参与 provider 解析处（有注释说明，属类型边界妥协）。
 - PLAN 选型表里的 React 18 / Fluent UI / zustand / xyflow **与实际不符**（实际 React 19 + 自研组件）——已按事实修正一部分，选型表仍待清理。
-- **打包产物验证缺失（2026-09-29 复核 042 点名的系统性缺口）**：全部门禁跑的都是 `out/` 的开发产物，
-  而 M19b 踩到的坑（`file://` 页面不许 `fetch` 本地文件）**只在打包产物里出现** —— 也就是说
-  "发出去才会坏"的那一类今天没有门禁能拦。最小方案见 `docs/DESIGN-M9-CANVAS.md` §七：
-  `electron-builder --dir` 构建一次 + Playwright 驱动跑三步（启动 / 开「文件」页签 / 打开 PDF 看到页数）；
-  排在 **M9 之前或与之并行**。
-
-### 5.8 定位冲突与设计律（需要产品决策，不是 bug）
-
-`docs/ARCH-CLOUD-IDE.md` 的 M20/M21（远程接入/云端 worker）与 PRODUCT-GOAL 的"数据不出本机"、
-README 的"无服务器中转"存在**表述冲突**（SECURITY 的出站表也没有对应类别）。
-**在解决这个冲突之前不要动工 M20/M21**；SECURITY.md 的出站清单必须先扩展并如实标注。
-
-扩展架构若将来落地，**三条设计律不可破**（`docs/ARCH-CLOUD-IDE.md`）：
-**会话状态归 host** · **远端连接一律出站**（本机不做入站监听）· **绝不允许匿名可达**；
-且 **权限门永远在本机**（远端 worker 无放行权）、样式包拒绝任意 CSS/JS。
-
-### 5.9 账号与密钥（**仓库里没有任何密钥**）
-
+- ~~**打包产物验证缺失**~~ → **已补（`v0.49.0-规整9`）**：`npm run verify:pack` = `electron-builder --dir` 打真实产物 + Playwright 驱动跑三步（启动 / 开「文件」页签 / 打开中文 PDF 验内置 cmap 与零出站）。它已进 `check:docs` 的门禁集合（清单以 `docs/PROGRESS.md` 为准），并在首次运行的校准里证明"能红"。
 - 仓库：`https://github.com/Zhang-jx00/jujia-agent`（**当前私有**；计划是**发布第一个正式版本时切公开**）。**交接不涉及任何账号转移**。
   > **口径更正（2026-09-24）**：本文档与 CHANGELOG / PROGRESS / 复核台账的若干旧条目都写着"公开仓库"，
   > **那是错的** —— GitHub API 实测 `private: true`（匿名访问 `api.github.com/repos/...` 返回 404，已独立旁证）。

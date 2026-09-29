@@ -35,6 +35,7 @@
 | W23a/b | **外观系统**：样式包契约 + 对比度守护 + 设置页（M13/M23） | `v0.8.2-w23a` / `v0.9.3-w23b` | 拒绝任意 CSS/JS；4 个内置包 |
 | W12 | 打包（NSIS + portable）+ Release 发布 | `v0.9.1-pack` / `v0.9.2-release` | Release `v0.9.0-w9a`；`npmRebuild=false` 后打包成功 |
 | — | 开源就绪（LICENSE / SECURITY / CONTRIBUTING / 三方声明 / LOGO） | `v0.11.0-oss` 等 | 作者提供的 LOGO；`assets/icon/README.md` |
+| **规整9** | **门禁升级：打包产物验证 `verify:pack`**（复核 042 系统性建议 + 043 裁决②，排在 M9 之前）：`electron-builder --dir` 打真实产物 + Playwright 驱动跑三步（启动 / 开「文件」页签 / 打开中文 PDF）；第 ③ 步直接验 **M19b 的内联方案在打包版里是否仍成立**（内置 cmap 取用 + 抽字「你好」+ 零出站）；两份 PDF fixture 抽成 `scripts/pdf-fixtures.mjs` 共享（e2e 与 verify:pack 用同一份）；`check:docs` 的门禁集合加入它 → PROGRESS 门禁行升级为**八件套** | `v0.49.0-规整9` | 首跑即绿（打包版 cmap 取用 `Adobe-GB1-UCS2.bcmap,UniGB-UCS2-H.bcmap`、抽字「你好」、零出站）· 校准：fixture 换成未内置的 CMap → 如实红（pdfjs 报错点名缺 `UniJIS-UTF32-H.bcmap`）→ 还原 → 绿 · 零源码改动、零新依赖 |
 | **扩容M19c** | **M19 第三批：中文缺字的端到端证据**（复核 042 裁决③）：新增 **CJK PDF fixture**（Type0 + CIDFontType0、`/Encoding /UniGB-UCS2-H`、正文是"你好"的 UCS2 字节）+ e2e 第 38 步（断言"工厂被问过并答出那份 cmap"与"抽字得到你好"）；**当场抓到真缺口**：pdfjs 对 `(Adobe)(GB1)` 的 CID 字体要的是 `Adobe-GB1-UCS2.bcmap` 而不是 `UniGB-*`，M19b 只打 Uni* 一族 → 真实中文 PDF 依旧缺字（单测看不出来）→ 补 Adobe 整族 27 个（~145KB，子集 16→43）；另一条走错的路也记下：先写的"墨色像素"断言实测 0 且**不是缺字**（像素验字形、CMap 只管映射）| `v0.48.0-M19c` | `pdf-assets.test.ts` 9 例 · **e2e 39/39** · 变异 **M70**（累计 **70 项**，0 逃逸）· 校准：拿掉 `Adobe-GB1-UCS2` → 第 38 步如实红 → 还原 → 绿 |
 | **扩容M19b** | **轻量 IDE 第二批**：**cmap/标准字体内联进包**（CJK 常用 16 个 + 标准字体 14 个，经 `?inline` 变 data URL 由工厂供给 pdfjs —— 离线、零新通道、零新协议；未内置的明确报错）；PDF 查看器改 `lazy()`（「文件」页签 chunk 2.2MB → **10KB**，PDF 那 2.3MB 只有点开才加载）；PDF 上限判定抽成纯函数并补边界单测（"只有接线锁"的覆盖边界减一处）；`WORK-PROTOCOL` 加两条通则（写文件用编辑工具 / 枚举现状的锁一律现扫）；证照补内置字体的再分发义务 | `v0.47.0-M19b` | 新增 2 个测试文件（13 例）· 单测 **1153 通过 / 1 跳过**（72 个文件）· **e2e 38/38** · 变异 **M67–M68**（累计 **68 项**，0 逃逸）· 体积实测记入 PERF-BUDGET · **CodeMirror 6 评估：暂不引入**（结论与验收要求在 `docs/DESIGN-M19-IDE.md` §10.2）|
 | **扩容M19a** | **轻量 IDE 第一批**（报备 `docs/DESIGN-M19-IDE.md` 八条全批）：新页签「文件」= 文件树（懒展开 + 单目录 500 项上限）· 只读预览 · 编辑保存（**走既有 `write_file` 那扇门**，与模型调工具同一弹窗）· PDF 查看（`pdfjs-dist` + canvas）；逐行 patch 放在 Git 页。主进程新增只读通道 `PDF_OPEN`（过 `guardPath`、32MB 上限、**只回渲染层不进模型上下文**）；`list_dir` 加可选 `maxEntries`（不传=列全部）；`GIT_DIFF` 加 `mode: summary|patch`（默认不变，**不新开通道**）；覆盖保护（打开记内容、保存前重读比对，不一致拒绝并给两条出路）；审批弹窗参数预览超 200 行如实截断 | `v0.46.0-M19a` | 新增 3 个测试文件 + git 3 例 · 单测 **1140 通过 / 1 跳过**（70 个文件）· **e2e 38/38**（第 33–37 步：树与磁盘一致 / 保存批准才写拒绝不写 / 覆盖保护两条出路 / PDF 画出来且**全程零出站** / 逐行 patch 内容真值）· 变异 **M61–M66**（累计 **66 项**，0 逃逸）· 新依赖 `pdfjs-dist@6.3.289`（Apache-2.0，§A）· 体积记入 PERF-BUDGET |
@@ -75,7 +76,7 @@
 见 §2.3 待办）
 
 **当前规模**：5 个 workspace 包 · **72 个测试文件 · 1155 个测试全绿（+1 网络用例默认跳过）· 界面级 e2e 39 步全自动 · 渲染层组件测试 19 例（jsdom）** ·
-七件套门禁（typecheck / lint / test / smoke / perf / **e2e 界面级** / **check:docs 文档一致性**）
+八件套门禁（typecheck / lint / test / smoke / perf / **e2e 界面级** / **check:docs 文档一致性** / **verify:pack 打包产物验证**）
 
 ---
 
@@ -163,7 +164,7 @@
 |----|------|------|
 | `LICENSE`（MIT） | ✅ | package.json 原本已声明 MIT，但**缺许可正文**，已补 |
 | `SECURITY.md` | ✅ | 能做什么/没做什么、使用建议、**私密漏洞披露渠道（不开公开 issue）**、支持范围 |
-| `CONTRIBUTING.md` | ✅ | 环境、七件套门禁、六条硬规矩（含「绝不假称完成」「来源宁缺勿滥」）、代码约定 |
+| `CONTRIBUTING.md` | ✅ | 环境、八件套门禁、六条硬规矩（含「绝不假称完成」「来源宁缺勿滥」）、代码约定 |
 | README 面向他人 | ✅ | 新增「快速开始」（安装包 / 源码两条路径）、支持平台、安全提示、贡献入口 |
 | `package.json` 元信息 | ✅ | 补 repository / homepage / bugs / author |
 | 无本机绝对路径（**声明与实际范围对齐**） | ✅ **已修，并由两条机器断言看住**（2026-09-24） | `apps/`、`packages/`、`.github/` 一直干净；`scripts/` 曾有 **6 处**写死 checkout 路径（`count_coverage.py`、`gen_matrix.py`、`fix_paths.py`、`fix_source_urls.py`、`fix_links_round2.py`），另在 `make-logo-mono.mjs` 发现一处**连 Windows 用户名一起泄漏**的默认值 —— 已全部改为按 `__file__` / `import.meta.url` 解析或必传参数。**现在的真实范围**：`check:docs` 第 **9** 条扫**代码与配置**（禁仓库根路径与用户主目录两种字面量）；第 **9b** 条扫**活文档 `.md`**，只禁**用户主目录**（隐私那一层），**允许台账把仓库路径当证据引用** —— 所以 `CHANGELOG` / `REVIEW-LOG` 里的路径引述不算违规，判据边界写清楚而不是含糊说"全仓无绝对路径"。两条各配一条注入自检（**证明会咬**，共 **9 处**注入全部拦住） |

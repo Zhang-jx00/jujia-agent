@@ -1,6 +1,6 @@
 {
   "name": "@jujia/desktop",
-  "version": "0.48.0",
+  "version": "0.49.0",
   "private": true,
   "description": "俱佳Agent：本地优先的 Windows 个人 Agent（副作用动作需确认，数据不出本机）",
   "main": "./out/main/index.js",
@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "dist": "electron-vite build && electron-builder --win --publish never",
     "dist:dir": "electron-vite build && electron-builder --win --dir",
+    "verify:pack:drive": "node scripts/verify-pack.mjs",
     "icon": "node scripts/make-icon.mjs",
     "e2e": "electron-vite build && node scripts/e2e-ui.mjs",
     "app": "electron-vite build && node scripts/run-electron.mjs"

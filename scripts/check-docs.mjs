@@ -306,7 +306,9 @@ const allScripts = new Set([
  * 4. 结构性事实：钩子事件数 / 权限模式数 / e2e 步数
  * ------------------------------------------------------------------ */
 
-const GATE = ['typecheck', 'lint', 'test', 'smoke', 'perf', 'e2e', 'check:docs'];
+// 2026-09-29（复核 043 裁决②）加入 verify:pack：它验的是**打包产物**，
+// 而"发出去才会坏"的那一类问题（M19b 的 file:// 不许 fetch 本地文件）只有它拦得住。
+const GATE = ['typecheck', 'lint', 'test', 'smoke', 'perf', 'e2e', 'check:docs', 'verify:pack'];
 const CN_NUM = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 const expectedCn = CN_NUM[GATE.length];
 {
