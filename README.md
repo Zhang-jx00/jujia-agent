@@ -60,12 +60,13 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 | 做了什么、还差什么 | [docs/PROGRESS.md](docs/PROGRESS.md) · [CHANGELOG.md](CHANGELOG.md) |
 | 每轮复核记录（含未通过项） | [review/REVIEW-LOG.md](review/REVIEW-LOG.md) |
 | 工作怎么分类与记录（轨道计划） | [docs/TRACK-PLANS.md](docs/TRACK-PLANS.md) |
-| 开发必须遵守的工作协议（29 条，逐条有出处） | [docs/WORK-PROTOCOL.md](docs/WORK-PROTOCOL.md) |
+| 开发必须遵守的工作协议（31 条，逐条有出处） | [docs/WORK-PROTOCOL.md](docs/WORK-PROTOCOL.md) |
 | 会话持久化的数据布局**报备稿**（五开关已批，6a 已交付 `v0.38.0-铺设6a`） | [docs/DESIGN-SESSIONS.md](docs/DESIGN-SESSIONS.md) |
 | 会话压缩与自动摘要**报备稿**（七条已批，已交付 `v0.44.0-铺设6b`） | [docs/DESIGN-COMPACT.md](docs/DESIGN-COMPACT.md) |
 | 切走页签不丢对话连接的**报备稿**（七条已批，已交付 `v0.45.0-T22`） | [docs/DESIGN-T22-TAB-STATE.md](docs/DESIGN-T22-TAB-STATE.md) |
-| 轻量 IDE 的**报备稿**（八条已批，M19a/M19b 均已交付） | [docs/DESIGN-M19-IDE.md](docs/DESIGN-M19-IDE.md) |
-| 无限画布（M9）的**报备稿**（待批，未动工） | [docs/DESIGN-M9-CANVAS.md](docs/DESIGN-M9-CANVAS.md) |
+| 轻量 IDE 的**报备稿**（八条已批，M19a/M19b/M19c 均已交付） | [docs/DESIGN-M19-IDE.md](docs/DESIGN-M19-IDE.md) |
+| 无限画布（M9）的**报备稿**（九条已批，**M9a 已交付 `v0.50.0-M9a`**） | [docs/DESIGN-M9-CANVAS.md](docs/DESIGN-M9-CANVAS.md) |
+| 画布 ↔ 编码引擎的**接驳契约**（节点如何调工具；M9a 交付物） | [docs/LINKAGE-M9.md](docs/LINKAGE-M9.md) |
 | 排期、里程碑编号与修复队列（路线图） | [docs/TRACK-ROADMAP.md](docs/TRACK-ROADMAP.md) |
 | 全项目排查记录 | [review/TRACK-SWEEP-1.md](review/TRACK-SWEEP-1.md) |
 | 第三方依赖与许可证 | [docs/DEPENDENCY-LICENSES.md](docs/DEPENDENCY-LICENSES.md) |
@@ -106,10 +107,10 @@ npm run typecheck      # 类型检查
 npm run lint           # 静态检查
 npm run test           # 单元 + 集成测试
 npm run smoke          # 真实启动 Electron，断言 IPC 全链路 + 渲染层无 Node 泄漏
-npm run e2e            # 界面级端到端：真应用 + 真点击，39 步全自动（数据隔离到临时目录）
+npm run e2e            # 界面级端到端：真应用 + 真点击，42 步全自动（数据隔离到临时目录）
 npm run mut            # 变异测试：按 review/mutations.json 逐项改坏代码，验证测试真拦得住
 npm run check:docs     # 文档一致性：文档里的命令/链接/步数/事件数必须与代码一致
-npm run check:docs:selftest  # 检查器自检：注入 9 处漂移，证明它真的会失败（而不是永远绿）
+npm run check:docs:selftest  # 检查器自检：注入 10 处漂移，证明它真的会失败（而不是永远绿）
 npm run perf           # 启动性能预算判定（首帧 < 1000ms）
 
 npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/）
@@ -153,14 +154,14 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 | **技能（Skills）**（`SKILL.md` 渐进披露 + `load_skill` 按需加载） | ✅ |
 | **插件**（一个清单打包技能 / 命令 / MCP 服务端 / 选项；贡献物经同一套批准流程） | ✅ |
 | **生命周期钩子**（七类事件 · 默认关闭 · 可拒绝 · 有超时与输出上限） | ✅ |
-| **界面级自动化验证**（`npm run e2e` 39 步 · 变异测试 · 文档一致性检查） | ✅ |
+| **界面级自动化验证**（`npm run e2e` 42 步 · 变异测试 · 文档一致性检查） | ✅ |
 | **打包产物验证**（`npm run verify:pack`：打真实产物再驱动它开 PDF，验"发出去之后"仍然成立） | ✅ |
-| **内置浏览器**（本地受控视图 · 只放 http/https · 页面不得跨站跳转（**含服务端 302 逐跳**）· **网页不能往本机存文件** · 读正文给模型） | ✅ 能开网页、能读正文；**三档打开方式已可用**：内置不问，交给系统默认浏览器或自选程序时**每次都确认**（弹窗点明"地址将离开本应用的安全边界"，自选那档还摊开是哪个程序）；自选程序只能由本机文件对话框选定、不得放在工作区内。**已知边界**：锁的是顶层导航（含服务端 302 的逐跳），**拦不住 iframe 自己发出的第三方子资源请求** —— 那是"在应用里看网页"的固有属性（详见 `docs/HANDOVER.md` 的边界说明）。剩 **PDF 查看**（`pdfjs-dist`，随 M19 与文件树一起做） |
+| **内置浏览器**（本地受控视图 · 只放 http/https · 页面不得跨站跳转（**含服务端 302 逐跳**）· **网页不能往本机存文件** · 读正文给模型） | ✅ 能开网页、能读正文；**三档打开方式已可用**：内置不问，交给系统默认浏览器或自选程序时**每次都确认**（弹窗点明"地址将离开本应用的安全边界"，自选那档还摊开是哪个程序）；自选程序只能由本机文件对话框选定、不得放在工作区内。**已知边界**：锁的是顶层导航（含服务端 302 的逐跳），**拦不住 iframe 自己发出的第三方子资源请求** —— 那是"在应用里看网页"的固有属性（详见 `docs/HANDOVER.md` 的边界说明）。**PDF 查看已交付**（`v0.46.0-M19a`/`v0.47.0-M19b`：`pdfjs-dist` + cmap 与标准字体内联进包，离线也不缺字，全程零出站） |
 | **应用内文档查看 · Markdown** | ✅ 「文档」页签：把 `.md` 解析成元素渲染 —— **原始 HTML 按字面显示、不解释**，`javascript:` 之类链接**不给点**，远程图片**不加载**，长文档**分块挂载**；读文件复用已审的 `read_file`（同一套路径守卫，越界拒绝并说明理由），一次最多 256KB，超出会在界面上写明 |
 | 启动性能（`npm run perf`；历史采样与预算见 [`docs/PERF-BUDGET.md`](docs/PERF-BUDGET.md)） | 🔶 见该文档的"采样铁律" |
 | 定时任务（RRULE + 补跑） | ⏳ 未开始 |
-| **无限画布** / 多模态门控 | ⏳ 未开始 |
-| **轻量 IDE** / 远程接入 / 云端 worker 调度 | ⏳ 未开始 |
+| **无限画布**（建节点/连线/成环校验/整图执行/图持久化） | 🔶 **M9a 已交付**（`v0.50.0-M9a`）：提示词与工具两类节点；执行走**既有链路**（工具 → 同一注册表与同一扇审批门、模型 → 同一 provider 层，接线锁钉死"不许自建"）；图 JSON 只存连接 id、**不许存 API Key**；图带版本信封与迁移骨架。M9b 未开始（对齐辅助线 / 命令面板 / 控制流节点） |
+| 多模态门控 · 远程接入 / 云端 worker 调度 | ⏳ 未开始（远程三项**先解决与"数据不出本机"定位的冲突**，见 `docs/HANDOVER.md` §5.8） |
 
 ## 数据与目录（它把你的东西放哪了）
 

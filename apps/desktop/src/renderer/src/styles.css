@@ -1470,3 +1470,82 @@ html[data-jj-bg-kind='glass'] .app-shell {
 .jj-patch-del {
   color: #ff7875;
 }
+
+/* ---------------------- 无限画布（M9a：图列表 + 画布 + 节点卡片） ---------------------- */
+
+.jj-canvas {
+  display: flex;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+}
+
+.jj-canvas-side {
+  width: 280px;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+
+.jj-canvas-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.jj-canvas-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+}
+
+.jj-canvas-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* 节点卡片：状态一眼可见（pending / running / ok / failed / denied / cancelled） */
+.jj-canvas-node {
+  min-width: 140px;
+  max-width: 220px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-container);
+  font-size: 12px;
+}
+
+.jj-canvas-node-kind {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.jj-canvas-node-body {
+  margin: 4px 0;
+  word-break: break-all;
+}
+
+.jj-canvas-node-status {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.jj-canvas-node-running {
+  border-color: var(--primary);
+}
+
+.jj-canvas-node-ok {
+  border-color: var(--success);
+}
+
+.jj-canvas-node-failed,
+.jj-canvas-node-denied {
+  border-color: #ff7875;
+}

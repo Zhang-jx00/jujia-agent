@@ -303,6 +303,31 @@ const allScripts = new Set([
 }
 
 /**
+ * M 状态行的**受控词表**（2026-09-29 复核 046 给的中间步）：
+ * 每条 `| M<号> |` 的状态列必须带三态词之一 —— ✅ 已落地 / 🔶 部分 / ⏳ 未开始。
+ *
+ * 先说清它**不**做什么：它不判"状态与事实是否匹配"（那件事继续靠人工判断 +
+ * 像上面 `PDF_OPEN` 那样按能力逐条立的条件断言）。它抓的是最常见的那一类漂移：
+ * 某行压根没写状态词、或者自造了一个表外词 —— 这类问题占大多数，而且能机器判。
+ */
+{
+  const rows = read('docs/TRACK-ROADMAP.md')
+    .split('\n')
+    .filter((l) => /^\| M\d+ \|/.test(l));
+  const missing = rows
+    .filter((l) => {
+      const status = (l.split('|')[3] ?? '').trim();
+      return !(status.includes('✅') || status.includes('🔶') || status.includes('⏳'));
+    })
+    .map((l) => (l.split('|')[1] ?? '').trim());
+  report(
+    `里程碑状态行都用了受控词表（✅/🔶/⏳，共 ${String(rows.length)} 行）`,
+    rows.length > 0 && missing.length === 0,
+    `缺状态词的里程碑：${missing.join('、') || '(无)'}`,
+  );
+}
+
+/**
  * M 状态行与代码事实的同步（2026-09-29 复核 046 顺手抓到的文档滞后）：
  * TRACK-ROADMAP 的 M10 行当时还写着"PDF 查看随 M19 做"，而 PDF 查看（M19b）早已交付 ——
  * 能力表有机器交叉断言，**里程碑状态行却没有**。

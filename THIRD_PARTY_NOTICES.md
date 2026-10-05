@@ -1,14 +1,15 @@
 # 第三方素材与许可声明
 
-> **依赖许可证清单**（503 个去重依赖，自动生成）：见 [`docs/DEPENDENCY-LICENSES.md`](docs/DEPENDENCY-LICENSES.md)。
+> **依赖许可证清单**（523 个去重依赖，自动生成）：见 [`docs/DEPENDENCY-LICENSES.md`](docs/DEPENDENCY-LICENSES.md)。
 > 合规检查：`npm run license:check` —— **发现 GPL/AGPL/SSPL 等强 copyleft 即非零退出**（CI 门禁）。
-> 当前结论：**0 个强 copyleft**；498 个宽松许可（MIT/ISC/Apache-2.0/BSD 等）；5 个条目需声明（3 个包族，见下）。
+> 当前结论：**0 个强 copyleft**；518 个宽松许可（MIT/ISC/Apache-2.0/BSD 等）；5 个条目需声明（3 个包族，见下）。
 >
 > **两节口径（外部审查 T21，2026-09-28 起）**：清单按 `package-lock.json` 的 `dev` 标记分节 ——
-> **§A 随安装包分发 17 个**（`react` / `react-dom` / `scheduler` / `zod` / `node-pty` / `node-addon-api` /
-> `@xterm/xterm` / `@xterm/addon-fit` / `electron` / `pdfjs-dist`(Apache-2.0) / `@napi-rs/canvas`(MIT) ×2
-> + 5 个本仓 workspace 包），**§B 仅构建期 486 个**。
-> **§A 里 0 个需声明、0 个硬拒绝**（16 个 MIT + 1 个 Apache-2.0）；下面这三个包族**只出现在 §B**，
+> **§A 随安装包分发 40 个**（`react` / `react-dom` / `scheduler` / `zod` / `node-pty` / `node-addon-api` /
+> `@xterm/xterm` / `@xterm/addon-fit` / `electron` / `pdfjs-dist`(Apache-2.0) / `@napi-rs/canvas`(MIT) ×2 /
+> **`@xyflow/react` 画布家族**（`@xyflow/system` / `zustand` / `classcat` / `use-sync-external-store` / `d3-*` ×9 / `@types/*` ×8）
+> + 5 个本仓 workspace 包），**§B 仅构建期 483 个**。
+> **§A 里 0 个需声明、0 个硬拒绝**（30 个 MIT + 8 个 ISC + 1 个 BSD-3-Clause + 1 个 Apache-2.0）；下面这三个包族**只出现在 §B**，
 > 也就是说"随应用分发的东西里没有 copyleft 义务"这条现在是**机读结论**，不再是人工断言。
 
 ---

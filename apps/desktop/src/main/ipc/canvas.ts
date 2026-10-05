@@ -30,14 +30,6 @@ function store(): CanvasStore {
   return storeRef;
 }
 
-/** 测试用：换掉 store 与 runner（真实现依赖 electron 路径与注册表） */
-export function __setCanvasDepsForTests(
-  injected: { store?: CanvasStore | null; runner?: CanvasRunner | null } = {},
-): void {
-  if ('store' in injected) storeRef = injected.store ?? null;
-  if ('runner' in injected) runnerRef = injected.runner ?? null;
-}
-
 let runnerRef: CanvasRunner | null = null;
 
 export function registerCanvasIpc(ctx: IpcContext): void {

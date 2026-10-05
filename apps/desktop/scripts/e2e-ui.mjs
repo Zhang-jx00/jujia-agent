@@ -1964,6 +1964,135 @@ try {
   }
   ok(`中文 PDF：内置 cmap 被取用（${servedAttr}），抽字得到 ${pageText} —— 字节经这份 CMap 正确映射`);
 
+  /* ---------------- M9a：无限画布（图跑起来 / 成环被拒 / 工具节点过审批） ----------------
+   *
+   * 三步各验一件事，断言全部落在**真值**上：
+   * ① 三节点链真的跑完（节点状态来自主进程事件，最后一步工具的输出出现在回执里）；
+   * ② 磁盘上的坏图（成环）在**运行前**被主进程拒 —— 不是靠界面拦；
+   * ③ 工具节点跑起来会弹审批，拒绝之后**节点状态是"被拒"**（不是静默跳过、也不是"失败"）。
+   *
+   * 图 fixture 直接写进数据目录（信封与真实落盘同形），然后在「画布」页签里点开它 ——
+   * 这样验的是"应用真的能从盘上读回一张图"，不是"界面刚建了什么"。
+   */
+  const canvasDir = join(dataDir, 'canvas');
+  mkdirSync(canvasDir, { recursive: true });
+  const writeGraph = (id, graph) => {
+    writeFileSync(
+      join(canvasDir, `${id}.json`),
+      JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), data: graph }, null, 2),
+      'utf8',
+    );
+  };
+  const chainId = 'e2e-canvas-chain-0001';
+  const cyclicId = 'e2e-canvas-cyclic-0001';
+  const deniedId = 'e2e-canvas-denied-0001';
+  const readmeForChain = '需要读回的那一行在 readme 里';
+  writeFileSync(join(wsDir, 'canvas-readme.txt'), `${readmeForChain}\n`, 'utf8');
+  writeGraph(chainId, {
+    version: 1,
+    connectionId: seededEchoConnId,
+    nodes: [
+      { id: 'n1', kind: 'prompt', x: 40, y: 40, config: { prompt: '把要点说一句' } },
+      { id: 'n2', kind: 'tool', x: 260, y: 40, config: { toolName: 'list_dir', argsText: '{"path":"."}' } },
+      {
+        id: 'n3',
+        kind: 'tool',
+        x: 480,
+        y: 40,
+        config: { toolName: 'read_file', argsText: '{"path":"canvas-readme.txt"}' },
+      },
+    ],
+    edges: [
+      { id: 'e1', from: 'n1', to: 'n2' },
+      { id: 'e2', from: 'n2', to: 'n3' },
+    ],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  });
+  writeGraph(cyclicId, {
+    version: 1,
+    connectionId: seededEchoConnId,
+    nodes: [
+      { id: 'c1', kind: 'tool', x: 0, y: 0, config: { toolName: 'list_dir', argsText: '{}' } },
+      { id: 'c2', kind: 'tool', x: 200, y: 0, config: { toolName: 'list_dir', argsText: '{}' } },
+    ],
+    edges: [
+      { id: 'ce1', from: 'c1', to: 'c2' },
+      { id: 'ce2', from: 'c2', to: 'c1' },
+    ],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  });
+  writeGraph(deniedId, {
+    version: 1,
+    connectionId: seededEchoConnId,
+    nodes: [
+      {
+        id: 'd1',
+        kind: 'tool',
+        x: 0,
+        y: 0,
+        config: { toolName: 'write_file', argsText: '{"path":"canvas-should-not-exist.txt","content":"x"}' },
+      },
+    ],
+    edges: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  });
+
+  step('M9a 画布：三节点链真的跑完（节点状态来自主进程事件，最后一步工具的输出在回执里）');
+  await win3.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  if ((await waitText3('运行这张图', 15_000)) !== true) {
+    fail('「画布」页签没有渲染出来（React Flow 的懒加载 chunk 没取到？）', (await body3()).slice(0, 700));
+  }
+  await win3.locator(`button[data-graph-id="e2e-canvas-chain-0001"]`).first().click();
+  if ((await waitText3('已打开 e2e-canvas-chain-0001', 10_000)) !== true) {
+    fail('从磁盘打开那张三节点图失败', (await body3()).slice(0, 700));
+  }
+  const chainNodes = await win3.locator('[data-node-status]').count();
+  if (chainNodes !== 3) fail(`画布上应该有三个节点（实际 ${String(chainNodes)} 个）`);
+  await win3.locator('button', { hasText: '运行这张图' }).first().click();
+  if ((await waitText3('跑完了', 30_000)) !== true) {
+    fail('三节点链没有跑完', (await body3()).slice(0, 900));
+  }
+  const chainBody = await body3();
+  if (!chainBody.includes(readmeForChain)) {
+    fail('最后一步工具的输出没出现在回执里（那一步可能根本没跑）', chainBody.slice(-600));
+  }
+  const okCount = await win3.locator('[data-node-status="ok"]').count();
+  if (okCount !== 3) fail(`三个节点应该都是 ok（实际 ${String(okCount)} 个）`, chainBody.slice(-600));
+  const savedChain = readFileSync(join(canvasDir, `${chainId}.json`), 'utf8');
+  if ((savedChain.match(/"kind":/g) ?? []).length !== 3) fail('存下的图里不是三个节点', savedChain.slice(0, 400));
+  ok('三节点链跑完：三个节点状态都是 ok，最后一步工具的输出（磁盘上那行字）出现在回执里');
+
+  step('M9a 画布：成环的图在**运行前**被主进程拒（不是靠界面拦）');
+  await win3.locator(`button[data-graph-id="e2e-canvas-cyclic-0001"]`).first().click();
+  if ((await waitText3('已打开 e2e-canvas-cyclic-0001', 10_000)) !== true) {
+    fail('打开成环那张图失败', (await body3()).slice(0, 700));
+  }
+  await win3.locator('button', { hasText: '运行这张图' }).first().click();
+  if ((await waitText3('连成了环', 15_000)) !== true) {
+    fail('成环的图没有被拒（二次校验没生效？）', (await body3()).slice(0, 900));
+  }
+  ok('成环被拒：主进程在跑之前就拦住，并说清"连成了环"');
+
+  step('M9a 画布：工具节点跑起来会弹审批；拒绝之后节点状态是"被拒"');
+  await win3.locator(`button[data-graph-id="e2e-canvas-denied-0001"]`).first().click();
+  if ((await waitText3('已打开 e2e-canvas-denied-0001', 10_000)) !== true) {
+    fail('打开"写文件"那张图失败', (await body3()).slice(0, 700));
+  }
+  await win3.locator('button', { hasText: '运行这张图' }).first().click();
+  if ((await waitText3('需要你确认：', 15_000)) !== true) {
+    fail('工具节点跑起来没有弹审批（写类必须问人）', (await body3()).slice(0, 900));
+  }
+  await win3.locator('button', { hasText: '拒绝' }).first().click();
+  if ((await waitText3('被拒', 15_000)) !== true) {
+    fail('拒绝之后没有"被拒"的结论', (await body3()).slice(0, 900));
+  }
+  const deniedCount = await win3.locator('[data-node-status="denied"]').count();
+  if (deniedCount !== 1) fail(`拒绝之后节点状态应该是 denied（实际 ${String(deniedCount)} 个）`, (await body3()).slice(-500));
+  if (existsSync(join(wsDir, 'canvas-should-not-exist.txt'))) {
+    fail('用户拒绝了，文件却还是被写出来了（拒绝必须真的不做）');
+  }
+  ok('工具节点过同一扇门：弹审批、拒绝后节点状态=被拒、磁盘上没有文件');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -1983,5 +2112,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ 干净退出');
 process.exit(0);
