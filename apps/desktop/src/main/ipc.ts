@@ -10,6 +10,7 @@ import { registerMcpIpc } from './ipc/mcp';
 import { registerExtensionIpc } from './ipc/extensions';
 import { registerPermissionRulesIpc } from './ipc/permissions';
 import { registerPdfIpc } from './ipc/pdf';
+import { registerCanvasIpc } from './ipc/canvas';
 
 export type { IpcDeps };
 
@@ -44,4 +45,5 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerExtensionIpc(ctx);
   registerPermissionRulesIpc(ctx);
   registerPdfIpc(ctx);
+  registerCanvasIpc(ctx);
 }

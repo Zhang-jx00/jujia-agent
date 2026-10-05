@@ -92,6 +92,14 @@ import {
   gitLogResultSchema,
   pdfOpenQuerySchema,
   pdfOpenResultSchema,
+  canvasEventSchema,
+  canvasListResultSchema,
+  canvasLoadQuerySchema,
+  canvasLoadResultSchema,
+  canvasRunResultSchema,
+  canvasRunSchema,
+  canvasSaveResultSchema,
+  canvasSaveSchema,
   gitPathsSchema,
   gitStatusResultSchema,
   type BrowserBoundsPayload,
@@ -104,6 +112,11 @@ import {
   type GitActionResultView,
   type GitDiffResult,
   type GitLogResult,
+  type CanvasEventPayload,
+  type CanvasListResult,
+  type CanvasLoadResult,
+  type CanvasRunResult,
+  type CanvasSaveResult,
   type PdfOpenResult,
   type GitStatusResult,
 } from '@jujia/shared-ipc';
@@ -503,6 +516,47 @@ const api = {
   async pdfOpen(path: string): Promise<PdfOpenResult> {
     const query = pdfOpenQuerySchema.parse({ path });
     return pdfOpenResultSchema.parse(await ipcRenderer.invoke(IPC.PDF_OPEN, query));
+  },
+
+  /* ------------------------------ 无限画布（M9） ------------------------------ */
+
+  async canvasList(): Promise<CanvasListResult> {
+    return canvasListResultSchema.parse(await ipcRenderer.invoke(IPC.CANVAS_LIST));
+  },
+
+  async canvasLoad(id: string): Promise<CanvasLoadResult> {
+    const query = canvasLoadQuerySchema.parse({ id });
+    return canvasLoadResultSchema.parse(await ipcRenderer.invoke(IPC.CANVAS_LOAD, query));
+  },
+
+  async canvasSave(id: string, graph: unknown): Promise<CanvasSaveResult> {
+    const payload = canvasSaveSchema.parse({ id, graph });
+    return canvasSaveResultSchema.parse(await ipcRenderer.invoke(IPC.CANVAS_SAVE, payload));
+  },
+
+  async canvasRun(id: string): Promise<CanvasRunResult> {
+    const payload = canvasRunSchema.parse({ id });
+    return canvasRunResultSchema.parse(await ipcRenderer.invoke(IPC.CANVAS_RUN, payload));
+  },
+
+  async canvasStop(id: string): Promise<boolean> {
+    const payload = canvasRunSchema.parse({ id });
+    const raw: unknown = await ipcRenderer.invoke(IPC.CANVAS_STOP, payload);
+    return raw === true;
+  },
+
+  /**
+   * 订阅节点事件（main → renderer 推送）。
+   * 回调拿到的是**带归属**的事件（graphId + nodeId）——界面据此判断"这是不是我正在看的那张图的第几步"。
+   */
+  onCanvasEvent(listener: (event: CanvasEventPayload) => void): () => void {
+    const handler = (_e: unknown, payload: unknown): void => {
+      const parsed = canvasEventSchema.safeParse(payload);
+      if (parsed.success) listener(parsed.data);
+      else console.warn('[canvas] 丢弃形状不合法的事件：', parsed.error.message);
+    };
+    ipcRenderer.on(IPC.CANVAS_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC.CANVAS_EVENT, handler);
   },
 
   async gitStage(paths: string[]): Promise<GitActionResultView> {

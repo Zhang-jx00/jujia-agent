@@ -186,6 +186,30 @@ export const IPC = {
    * 所以这条通道的返回值**只回渲染层**，不进模型上下文、不产生任何 chat 事件。
    */
   PDF_OPEN: 'pdf:open',
+
+  /* --------------------------- 无限画布（M9） --------------------------- */
+
+  /**
+   * 图的**读写**（CRUD 的前三条）：列清单 / 读一张 / 存一张。
+   * 图是能被导出分享的文件，所以契约 `.strict()` 且只存 `connectionId`（见 `canvas-graph.ts`）。
+   */
+  CANVAS_LIST: 'canvas:list',
+  CANVAS_LOAD: 'canvas:load',
+  CANVAS_SAVE: 'canvas:save',
+  /**
+   * **跑一张图**与**停下**。注意：这两条通道只负责"编排的起停"——
+   * 真正执行每个节点的能力在主进程内部走既有链路（工具 = `runTool` + 权限门；
+   * 提示词 = 与对话同一个 provider 流式层），不从这里另开一条执行面。
+   */
+  CANVAS_RUN: 'canvas:run',
+  CANVAS_STOP: 'canvas:stop',
+  /**
+   * main → renderer：**节点状态与步骤**的推送。
+   *
+   * 每条事件都带 `graphId` + `nodeId`（批复追加要求 a：T5"事件按会话分发"的推广）——
+   * 渲染层据此判断"这是不是我正在看的那张图的第几个节点"，而不是靠"看起来像"。
+   */
+  CANVAS_EVENT: 'canvas:event',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

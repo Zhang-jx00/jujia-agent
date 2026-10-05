@@ -333,6 +333,74 @@ export const pendingResolveResultSchema = z.object({ ok: z.boolean(), error: z.s
 export type PendingResolveResult = z.infer<typeof pendingResolveResultSchema>;
 
 /* ------------------------------------------------------------------ *
+ * M9：无限画布的通道载荷
+ *
+ * 三条约定：`.strict()`（跨进程多一个字段就该被发现）；失败与"没有内容"分得开
+ * （`ok` 唯一判定、`error` 空串表示没出错）；**图里只有 connectionId**（密钥不进可分享文件）。
+ * ------------------------------------------------------------------ */
+
+export const canvasListItemSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    /** 首节点的一句话，给列表当名字用（截断，不存全文） */
+    name: z.string(),
+    nodeCount: z.number().int().nonnegative(),
+    updatedAt: z.string(),
+  })
+  .strict();
+export type CanvasListItem = z.infer<typeof canvasListItemSchema>;
+
+export const canvasListResultSchema = z.object({ items: z.array(canvasListItemSchema) }).strict();
+export type CanvasListResult = z.infer<typeof canvasListResultSchema>;
+
+export const canvasLoadQuerySchema = z.object({ id: z.string().min(1).max(64) }).strict();
+
+export const canvasLoadResultSchema = z
+  .object({
+    ok: z.boolean(),
+    /** 读不到（不存在 / 版本更新 / 形状不合法）时为 null */
+    graph: z.unknown().nullable(),
+    error: z.string(),
+  })
+  .strict();
+export type CanvasLoadResult = z.infer<typeof canvasLoadResultSchema>;
+
+export const canvasSaveSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    graph: z.unknown(),
+  })
+  .strict();
+export const canvasSaveResultSchema = z
+  .object({ ok: z.boolean(), error: z.string(), /** 校验没过时逐条列出来给人看 */ problems: z.array(z.string()) })
+  .strict();
+export type CanvasSaveResult = z.infer<typeof canvasSaveResultSchema>;
+
+export const canvasRunSchema = z.object({ id: z.string().min(1).max(64) }).strict();
+export const canvasRunResultSchema = z
+  .object({
+    ok: z.boolean(),
+    reason: z.enum(['done', 'failed', 'cancelled']).nullable(),
+    error: z.string(),
+    /** 逐步记录（成功时就是"真的跑了几步"的证据） */
+    steps: z.array(z.string()),
+  })
+  .strict();
+export type CanvasRunResult = z.infer<typeof canvasRunResultSchema>;
+
+/** main → renderer 的节点事件：**归属判别**（graphId + nodeId）是必填，不许省略 */
+export const canvasEventSchema = z
+  .object({
+    graphId: z.string().min(1),
+    nodeId: z.string().min(1),
+    status: z.enum(['pending', 'running', 'ok', 'failed', 'denied', 'cancelled']),
+    step: z.number().int().nonnegative(),
+    note: z.string(),
+  })
+  .strict();
+export type CanvasEventPayload = z.infer<typeof canvasEventSchema>;
+
+/* ------------------------------------------------------------------ *
  * W3：工作区与权限审批
  * ------------------------------------------------------------------ */
 
