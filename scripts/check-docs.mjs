@@ -306,18 +306,28 @@ const allScripts = new Set([
  * 4. 结构性事实：钩子事件数 / 权限模式数 / e2e 步数
  * ------------------------------------------------------------------ */
 
-// 2026-09-29（复核 043 裁决②）加入 verify:pack：它验的是**打包产物**，
-// 而"发出去才会坏"的那一类问题（M19b 的 file:// 不许 fetch 本地文件）只有它拦得住。
-const GATE = ['typecheck', 'lint', 'test', 'smoke', 'perf', 'e2e', 'check:docs', 'verify:pack'];
-const CN_NUM = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
-const expectedCn = CN_NUM[GATE.length];
+/**
+ * 门禁分**两档**（2026-09-29 复核 044 的流程建议：成本与收益匹配）。
+ * - 快档 —— 每次提交前跑：`typecheck / lint / test / check:docs / e2e`
+ *   （都快，而且这几类改动每轮都碰得到）；
+ * - 慢档 —— 阶段收尾或发版前跑：`smoke / perf / verify:pack / mut`
+ *   （验的是打包配置、启动行为、变异覆盖 —— 这些**不会每轮都变**，每轮跑的边际价值低、成本高）。
+ * "全绿才打标签"据此改为"**快档全绿才打标签**，慢档在阶段收尾与发版前全绿"。
+ * 这里盯两件事：① 两条档位行都要**点名自己那一档的全部脚本**（少写一个就是清单漂了）；
+ * ② 档位之外的地方仍然不许写数量词（沿用下面那条"数量只许出现在 PROGRESS"的规则）。
+ */
+const GATE_FAST = ['typecheck', 'lint', 'test', 'check:docs', 'e2e'];
+const GATE_SLOW = ['smoke', 'perf', 'verify:pack', 'mut'];
 {
-  const gateLine = /[一二三四五六七八九十]件套门禁[^\n]*/.exec(progress)?.[0] ?? '';
-  const named = GATE.filter((s) => gateLine.includes(s));
+  const fastLine = /快档[^\n]*/.exec(progress)?.[0] ?? '';
+  const slowLine = /慢档[^\n]*/.exec(progress)?.[0] ?? '';
+  const fastNamed = GATE_FAST.filter((s) => fastLine.includes(s));
+  const slowNamed = GATE_SLOW.filter((s) => slowLine.includes(s));
   report(
-    'PROGRESS 的门禁清单与 package.json 脚本对齐',
-    gateLine !== '' && named.length === GATE.length && gateLine.includes(expectedCn + '件套'),
-    `门禁行识别到 ${named.length}/${GATE.length} 项，数量词应为「${expectedCn}件套」：${gateLine.slice(0, 60)}`,
+    'PROGRESS 的按档门禁清单与 package.json 脚本对齐',
+    fastNamed.length === GATE_FAST.length && slowNamed.length === GATE_SLOW.length,
+    `快档识别到 ${fastNamed.length}/${GATE_FAST.length}、慢档 ${slowNamed.length}/${GATE_SLOW.length}：` +
+      `${fastLine.slice(0, 40)} ｜ ${slowLine.slice(0, 40)}`,
   );
 
   /**
@@ -343,8 +353,8 @@ const expectedCn = CN_NUM[GATE.length];
       const ctx = text.slice(Math.max(0, m.index - 6), m.index + 8).replace(/\n/g, ' ');
       // 「开源三件套」指 LICENSE / SECURITY / CONTRIBUTING，与门禁数量无关
       if (ctx.includes('开源')) continue;
-      // PROGRESS 是唯一允许写数量的地方（上面那条已核对它等于实际数量）
-      if (f === 'docs/PROGRESS.md' && m[1] === expectedCn) continue;
+      // PROGRESS 是唯一允许写数量/档位清单的地方（上面那条已核对它与脚本集合一致）
+      if (f === 'docs/PROGRESS.md') continue;
       violations.push(`${f}：…${ctx.trim()}…`);
     }
   }
