@@ -128,6 +128,7 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
         // 提示词节点：单轮补全，走与对话同一个 provider 流式层
         const prompt = String(node.config['prompt'] ?? '');
         let text = '';
+        let aborted = false;
         const { record, apiKey } = await deps.resolveConnection(graph.connectionId);
         for await (const ev of streamChat(
           {
@@ -140,6 +141,13 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
           deps.fetcher === undefined ? {} : { fetcher: deps.fetcher },
         )) {
           if (ev.type === 'text_delta') text += ev.delta;
+          // 用户停止是**正常路径**（streamChat 产 done(aborted) 而不抛错）——
+          // 但它绝不能把半截回答当成功（复核 047 实验抓到的静默错报）
+          if (ev.type === 'done' && ev.reason === 'aborted') aborted = true;
+        }
+        if (aborted) {
+          // 抛出去让编排层按"信号已中止"归到 cancelled —— 与"执行出错"是两种状态
+          throw new Error('用户停止了这一步（不把半截回答当结果）');
         }
         const oneLine = text.replace(/\s+/g, ' ').trim();
         if (oneLine === '') {

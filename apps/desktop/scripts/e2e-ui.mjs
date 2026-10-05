@@ -1511,7 +1511,21 @@ try {
   await ask6b(`E2E6B_START ${'x'.repeat(66_000)}`, 'ECHO n=1 sum=0');
   ok('第一问真的走通了回显服务：此时还没有摘要，体检报告 sum=0');
 
-  const list6b = await win2.evaluate(async () => await window.jujia.chatList());
+  /*
+   * 清单读取用**有界轮询**：回显先到界面、会话清单的落盘稍后一拍 —— 固定读一次在机器忙时
+   * 会偶发失败（2026-10-05 实测：同一步骤一红一绿，二次复跑全绿）。轮询只用于"等它出现"，
+   * 后面的断言仍然只信磁盘真值。
+   */
+  const list6b = await (async () => {
+    const deadline = Date.now() + 6_000;
+    let list = [];
+    while (Date.now() < deadline) {
+      list = await win2.evaluate(async () => await window.jujia.chatList());
+      if (list.some((s) => s.title.includes('E2E6B_START'))) return list;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return list;
+  })();
   const s6b = list6b.find((s) => s.title.includes('E2E6B_START'));
   if (!s6b) fail('6b 会话没出现在清单里（后面的断言会全部失去对象）', JSON.stringify(list6b).slice(0, 300));
   const sessDir6b = join(dataDir, 'sessions', s6b.id);
