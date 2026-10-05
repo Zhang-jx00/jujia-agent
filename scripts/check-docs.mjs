@@ -302,6 +302,26 @@ const allScripts = new Set([
   );
 }
 
+/**
+ * M 状态行与代码事实的同步（2026-09-29 复核 046 顺手抓到的文档滞后）：
+ * TRACK-ROADMAP 的 M10 行当时还写着"PDF 查看随 M19 做"，而 PDF 查看（M19b）早已交付 ——
+ * 能力表有机器交叉断言，**里程碑状态行却没有**。
+ *
+ * 这里先把**能机器判**的那一条立起来：通道表里有 `PDF_OPEN` ⇒ M10 行不许再说"只剩 PDF"。
+ * （通用的"M 状态全量同步"得先给状态行定一个可解析格式，登记为后续项，不在本轮凭空想象。）
+ */
+{
+  const channelsSrc = read('packages/shared-ipc/src/channels.ts');
+  const roadmapSrc = read('docs/TRACK-ROADMAP.md');
+  const pdfShipped = channelsSrc.includes('PDF_OPEN:');
+  const m10Line = roadmapSrc.split('\n').find((l) => l.startsWith('| M10 |')) ?? '';
+  report(
+    'M10 状态行与代码事实一致（PDF 查看交付后不许再写"只剩 PDF"）',
+    !pdfShipped || /已交付/.test(m10Line) || !/PDF/.test(m10Line),
+    `M10 行：${m10Line.slice(0, 90)}`,
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * 4. 结构性事实：钩子事件数 / 权限模式数 / e2e 步数
  * ------------------------------------------------------------------ */

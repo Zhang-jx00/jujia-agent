@@ -75,14 +75,17 @@ export type CanvasGraph = z.infer<typeof canvasGraphSchema>;
  * 扫的是键名不是值：提示词里出现"token"这个词是正常的，不用管。
  */
 /**
- * 判据是**"宁可误报也不漏"**（复核 045 的必改）。
+ * 判定口径（复核 045 改片段匹配 + 复核 046 补豁免清单）：
  *
- * 第一版写的是两端锚定的正则（`^token$`），于是 `accessToken` / `clientSecret` / `privateKey`
- * 这些**真实世界最常见的写法**全被放过 —— 而它们恰恰是 OAuth 与数据库配置里的标配。
- * 现在改成**片段匹配**（键名里出现任一片段就算命中），并补齐常见前缀形态。
+ * **敏感词元命中 且 不在豁免清单 → 拒。**
  *
- * 已知的误报：形如 `maxTokens`（把 token 当"词元"用的参数名）会被拦 —— 这是**有意**的取舍：
- * 误报的代价是用户改个字段名，漏的代价是密钥进了能被导出的文件。
+ * - 第一版是两端锚定的正则（`^token$`），于是 `accessToken` / `clientSecret` / `privateKey`
+ *   这些**真实世界最常见的写法**全被放过 —— 它们恰恰是 OAuth 与数据库配置里的标配；
+ * - 改成片段匹配后，又反过来把 `maxTokens` 这类**最高频的 LLM 参数名**拦下 ——
+ *   那不是"误报"，是让提示词节点根本没法配（功能不可用级）。所以必须配一份**显式豁免清单**。
+ *
+ * 豁免必须**点名**，不许通配放行：加一项之前先想清楚"它会不会真的藏密钥"，
+ * 每加一项配一条测试（`canvas-graph.test.ts` 里那张表就是清单的可执行版本）。
  */
 const SECRET_FRAGMENTS = [
   'apikey',
@@ -99,8 +102,25 @@ const SECRET_FRAGMENTS = [
   'private-key',
 ];
 
+/**
+ * 显式豁免清单：**已知无害且高频**的参数名（小写比较）。
+ * 每一项都在 `canvas-graph.test.ts` 里有对应断言 —— 清单本身就是被测对象。
+ * 加之前先想清楚：它会不会真的藏密钥？（"看起来像"不够，要"它确实是模型/工具参数"）
+ */
+const HARMLESS_KEYS = new Set([
+  'maxtokens',
+  'max_tokens',
+  'tokenlimit',
+  'inputtokens',
+  'outputtokens',
+  'tokenspersecond',
+  'temperature',
+  'topp',
+]);
+
 function looksLikeSecretKey(key: string): boolean {
   const k = key.toLowerCase();
+  if (HARMLESS_KEYS.has(k)) return false;
   return SECRET_FRAGMENTS.some((f) => k.includes(f));
 }
 

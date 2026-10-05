@@ -640,6 +640,14 @@
       "find": "  if (order === null) {",
       "replace": "  if (false) {",
       "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M81",
+      "desc": "豁免清单失效：maxTokens/temperature 这类最高频的 LLM 参数名又被当成密钥键拦下（提示词节点没法配）",
+      "file": "packages/shared-ipc/src/canvas-graph.ts",
+      "find": "  if (HARMLESS_KEYS.has(k)) return false;",
+      "replace": "  // 变异：豁免清单不生效",
+      "test": "packages/shared-ipc/src/canvas-graph.test.ts"
     }
   ]
 }

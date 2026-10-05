@@ -94,6 +94,38 @@ describe('契约：图里只有 connectionId，多一个字段就拒（批复追
     }
   });
 
+  /**
+   * 豁免清单（复核 046 的修正）：片段匹配会把 `maxTokens` 这类**最高频的 LLM 参数名**也拦下 ——
+   * 那不是"误报"，是让提示词节点根本没法配（功能不可用级）。
+   * 判据因此改成：**敏感词元命中 且 不在豁免清单 → 拒**；豁免必须是**显式可审计的清单**，不是通配放行。
+   */
+  it('已知无害的高频参数名被显式豁免（每项一条断言）', () => {
+    const harmless = [
+      'maxTokens',
+      'max_tokens',
+      'tokenLimit',
+      'inputTokens',
+      'outputTokens',
+      'temperature',
+      'topP',
+      'tokensPerSecond',
+    ];
+    for (const key of harmless) {
+      const g = graph({ nodes: [node('a', 'prompt', { prompt: 'x', [key]: 1 })], edges: [] });
+      expect(validateGraph(g as CanvasGraph), `${key} 不该被拦`).toEqual([]);
+    }
+  });
+
+  it('豁免是**点名的**，不是通配：换个前缀就照样拦（accessToken 仍被拒）', () => {
+    const g = graph({
+      nodes: [node('a', 'prompt', { prompt: 'x', accessToken: 't', maxTokens: 1 })],
+      edges: [],
+    });
+    const problems = validateGraph(g as CanvasGraph);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]?.message).toContain('accessToken');
+  });
+
   it('普通字段名与**值**里的这些词不受影响（不误报）', () => {
     const ok = graph({
       nodes: [node('a', 'prompt', { prompt: '把 token 这个词写进提示词是正常的' })],
