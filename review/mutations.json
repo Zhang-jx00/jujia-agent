@@ -600,6 +600,46 @@
       "find": "    n += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;",
       "replace": "    n += 1;",
       "test": "packages/shared-ipc/src/canvas-graph.test.ts"
+    },
+    {
+      "id": "M76",
+      "desc": "编排出错也继续往下跑：前一步失败后接着执行后面的节点（拿半成品当输入）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "        return { states, steps, reason: 'failed' };\n      }\n      emit(id, 'ok', step, result.output.slice(0, 200));",
+      "replace": "        emit(id, 'ok', step, '变异：失败也当成功');\n      }\n      emit(id, 'ok', step, result.output.slice(0, 200));",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M77",
+      "desc": "被拒当成普通失败：界面上分不出「用户拒绝」与「执行出错」（用户会以为工具坏了）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "      if (result.denied === true) {",
+      "replace": "      if (false) {",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M78",
+      "desc": "取消不传下去：被取消的节点留在 pending，界面看起来像「还没跑」（其实不会再跑了）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "      emit(id, 'cancelled', step, '已取消');\n      continue;",
+      "replace": "      continue;",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M79",
+      "desc": "步数上界失效：一张几百节点的图会被一口气跑完（界面拖住、成本失控）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "  if (order.length > options.maxSteps) {",
+      "replace": "  if (false) {",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M80",
+      "desc": "有环的图也照样跑：拓扑序排不出来时不做整体拒绝（跑到一半顺序全错）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "  if (order === null) {",
+      "replace": "  if (false) {",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
     }
   ]
 }

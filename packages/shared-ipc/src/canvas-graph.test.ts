@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   CANVAS_GRAPH_VERSION,
@@ -36,6 +37,24 @@ const graph = (over: Partial<CanvasGraph> = {}): CanvasGraph => ({
   edges: [edge('a', 'b')],
   viewport: { x: 0, y: 0, zoom: 1 },
   ...over,
+});
+
+/**
+ * 跨运行时的依赖纪律（复核 045 表扬并建议沉淀的那条）：
+ * 这个包**渲染层也要引**（同一套规则做即时反馈），所以底层只能用两边都有的东西 ——
+ * 不引 Node 专属（`Buffer`）、不引 DOM 专属（`TextEncoder`）；两者都不可用就自己写纯函数
+ * （UTF-8 字节数那六行就是这么来的）。这条锁防止将来有人顺手把它们写回来：
+ * 类型检查会因为 `types: ["node"]` 放行，但运行到渲染层就炸。
+ */
+describe('跨运行时边界：不许引 Node / DOM 专属的东西', () => {
+  it('源码里不出现 Buffer / TextEncoder（两边都有的才许用）', () => {
+    // 注释里提这两名字是**解释为什么不用它们**，所以先剥注释再扫（与接线锁同一手法）
+    const src = readFileSync(new URL('./canvas-graph.ts', import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    expect(src).not.toContain('Buffer');
+    expect(src).not.toContain('TextEncoder');
+  });
 });
 
 describe('契约：图里只有 connectionId，多一个字段就拒（批复追加要求 b）', () => {
