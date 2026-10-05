@@ -560,6 +560,46 @@
       "find": "  'Adobe-GB1-UCS2.bcmap': adobeGb1Ucs2,",
       "replace": "  // 变异：这一份不提供",
       "test": "apps/desktop/src/renderer/src/features/ide/pdf-assets.test.ts"
+    },
+    {
+      "id": "M71",
+      "desc": "键名扫描失效：图里带 accessToken/clientSecret 这类键名也不再被拦（密钥进了能被导出的文件）",
+      "file": "packages/shared-ipc/src/canvas-graph.ts",
+      "find": "    if (looksLikeSecretKey(k)) hits.push(k);",
+      "replace": "    if (false) hits.push(k);",
+      "test": "packages/shared-ipc/src/canvas-graph.test.ts"
+    },
+    {
+      "id": "M72",
+      "desc": "环探测视而不见：连成环的图被当成没环（执行时要么死循环、要么顺序错）",
+      "file": "packages/shared-ipc/src/canvas-graph.ts",
+      "find": "      if (s === 'gray') {",
+      "replace": "      if (false) {",
+      "test": "packages/shared-ipc/src/canvas-graph.test.ts"
+    },
+    {
+      "id": "M73",
+      "desc": "拓扑序在/有环/时照样给：不再返回 null，调用方以为排得出顺序",
+      "file": "packages/shared-ipc/src/canvas-graph.ts",
+      "find": "  return order.length === graph.nodes.length ? order : null;",
+      "replace": "  return order;",
+      "test": "packages/shared-ipc/src/canvas-graph.test.ts"
+    },
+    {
+      "id": "M74",
+      "desc": "重复边不再被指出：同一对节点连两次也算通过（执行时同一段跑两遍）",
+      "file": "packages/shared-ipc/src/canvas-graph.ts",
+      "find": "    if (edgeKeys.has(`${e.from}->${e.to}`)) {",
+      "replace": "    if (false) {",
+      "test": "packages/shared-ipc/src/canvas-graph.test.ts"
+    },
+    {
+      "id": "M75",
+      "desc": "UTF-8 字节按字符数算：一份 3 千字的中文提示词（9KB，已超限）被当成 3KB 放行",
+      "file": "packages/shared-ipc/src/canvas-graph.ts",
+      "find": "    n += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;",
+      "replace": "    n += 1;",
+      "test": "packages/shared-ipc/src/canvas-graph.test.ts"
     }
   ]
 }

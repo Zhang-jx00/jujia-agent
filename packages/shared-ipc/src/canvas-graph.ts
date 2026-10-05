@@ -74,13 +74,41 @@ export type CanvasGraph = z.infer<typeof canvasGraphSchema>;
  * `.strict()` 管不住它里面；而图是能被导出/分享的文件 —— 里面出现 `apiKey` 这类键名本身就是事故。
  * 扫的是键名不是值：提示词里出现"token"这个词是正常的，不用管。
  */
-const FORBIDDEN_KEY_RE = /^(api[-_]?key|secret|password|token|authorization|bearer)$/i;
+/**
+ * 判据是**"宁可误报也不漏"**（复核 045 的必改）。
+ *
+ * 第一版写的是两端锚定的正则（`^token$`），于是 `accessToken` / `clientSecret` / `privateKey`
+ * 这些**真实世界最常见的写法**全被放过 —— 而它们恰恰是 OAuth 与数据库配置里的标配。
+ * 现在改成**片段匹配**（键名里出现任一片段就算命中），并补齐常见前缀形态。
+ *
+ * 已知的误报：形如 `maxTokens`（把 token 当"词元"用的参数名）会被拦 —— 这是**有意**的取舍：
+ * 误报的代价是用户改个字段名，漏的代价是密钥进了能被导出的文件。
+ */
+const SECRET_FRAGMENTS = [
+  'apikey',
+  'api_key',
+  'api-key',
+  'secret',
+  'password',
+  'passwd',
+  'token',
+  'authorization',
+  'bearer',
+  'privatekey',
+  'private_key',
+  'private-key',
+];
+
+function looksLikeSecretKey(key: string): boolean {
+  const k = key.toLowerCase();
+  return SECRET_FRAGMENTS.some((f) => k.includes(f));
+}
 
 function findForbiddenKeys(value: unknown, depth = 0): string[] {
   if (depth > 4 || value === null || typeof value !== 'object') return [];
   const hits: string[] = [];
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (FORBIDDEN_KEY_RE.test(k)) hits.push(k);
+    if (looksLikeSecretKey(k)) hits.push(k);
     hits.push(...findForbiddenKeys(v, depth + 1));
   }
   return hits;

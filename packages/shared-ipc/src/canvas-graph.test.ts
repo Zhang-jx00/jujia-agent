@@ -57,6 +57,31 @@ describe('契约：图里只有 connectionId，多一个字段就拒（批复追
     const problems = validateGraph(keyInNode as CanvasGraph);
     expect(problems.some((p) => p.message.includes('apiKey'))).toBe(true);
   });
+
+  /**
+   * 键名扫描的**判据是"宁可误报也不漏"**（复核 045 的必改）：
+   * 原先正则两端锚定（`^token$`），于是 `accessToken` / `clientSecret` / `privateKey`
+   * 这些**真实世界最常见的写法**全被放过 —— 而它们恰恰是 OAuth / 数据库配置里的标配。
+   * 误报的代价是用户改个字段名；漏的代价是密钥进了能被导出的文件。
+   */
+  it('大小写与前缀变体都拦得住（accessToken / clientSecret / privateKey / dbPassword）', () => {
+    for (const key of ['accessToken', 'refresh_token', 'clientSecret', 'privateKey', 'dbPassword', 'api_key', 'Authorization', 'passwd']) {
+      const g = graph({
+        nodes: [node('a', 'prompt', { prompt: 'x', [key]: 'v' })],
+        edges: [],
+      });
+      const problems = validateGraph(g as CanvasGraph);
+      expect(problems.some((p) => p.message.includes('疑似密钥字段')), `${key} 没被拦住`).toBe(true);
+    }
+  });
+
+  it('普通字段名与**值**里的这些词不受影响（不误报）', () => {
+    const ok = graph({
+      nodes: [node('a', 'prompt', { prompt: '把 token 这个词写进提示词是正常的' })],
+      edges: [],
+    });
+    expect(validateGraph(ok as CanvasGraph)).toEqual([]);
+  });
 });
 
 describe('validateGraph：连错的图不许跑', () => {
@@ -96,6 +121,25 @@ describe('validateGraph：连错的图不许跑', () => {
   it('超过节点数上限要说话', () => {
     const many = Array.from({ length: CANVAS_MAX_NODES + 1 }, (_, i) => node(`n${String(i)}`));
     expect(validateGraph(graph({ nodes: many, edges: [] })).some((p) => p.message.includes('节点太多'))).toBe(true);
+  });
+
+  /**
+   * 上限是按**字节**算的，不是按字符数 —— 中文一个字 3 字节。
+   * 这条专门钉住"自己数 UTF-8"那六行：如果退回"每个字符算 1 字节"，
+   * 一份 3 千字的中文提示词（9 KB，已超限）就会被当成 3 KB 放行。
+   */
+  it('上限按字节算：同样字符数，中文超限、英文不超', () => {
+    const cjk = graph({
+      nodes: [node('a', 'prompt', { prompt: '中'.repeat(CANVAS_MAX_CONFIG_BYTES / 2) })],
+      edges: [],
+    });
+    expect(validateGraph(cjk as CanvasGraph).some((p) => p.message.includes('KB'))).toBe(true);
+
+    const ascii = graph({
+      nodes: [node('a', 'prompt', { prompt: 'x'.repeat(CANVAS_MAX_CONFIG_BYTES / 2) })],
+      edges: [],
+    });
+    expect(validateGraph(ascii as CanvasGraph)).toEqual([]);
   });
 
   it('单节点配置超上限要说话', () => {
