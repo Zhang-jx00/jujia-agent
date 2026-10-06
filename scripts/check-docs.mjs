@@ -328,6 +328,38 @@ const allScripts = new Set([
 }
 
 /**
+ * CHANGELOG 标题的**轨道段**必须命中十条轨道的受控词表（2026-10-05 复核 047 的补账要求）。
+ *
+ * 为什么立它：标题曾长期只有任务号 —— `v0.46.0-M19a`、`v0.45.0-T22`、`v0.50.0-M9a`。
+ * 任务号回答"这是哪一批"，轨道词（扩容 / 接驳 / 规整…）回答"这属于哪类工作"；两者不是一回事，
+ * 缺了轨道段，按轨道的统计与检索就做不了。词表与 `docs/TRACK-PLANS.md` §一 的十条轨道同源，
+ * 并逐词核对它在文档里真实存在（免得词表两处漂移，同"现扫不写死"的纪律）。
+ *
+ * 边界（历史不回改）：≤ v0.50.0 的标题按当时约定写成任务号，**一个字不改**；
+ * 新规自 **v0.51.0** 起生效 —— 标题的轨道段里至少要出现一个受控轨道词。
+ */
+{
+  const TRACKS = ['回归', '铺设', '扩容', '拓展', '加固', '升级', '优化', '规整', '排查', '接驳'];
+  const plans = read('docs/TRACK-PLANS.md');
+  const missingVocab = TRACKS.filter((t) => !plans.includes(t));
+  const titles = [...read('CHANGELOG.md').matchAll(/^## \[v(\d+)\.(\d+)\.(\d+)-([^\]]+)\]/gm)].map((m) => ({
+    v: [Number(m[1]), Number(m[2]), Number(m[3])],
+    suffix: m[4],
+  }));
+  const FLOOR = [0, 50, 0]; // ≤ v0.50.0 = 历史（不回改）；自 v0.51.0 起按新规
+  const above = (a, b) =>
+    a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] > b[2])));
+  const bad = titles.filter((t) => above(t.v, FLOOR) && !TRACKS.some((w) => t.suffix.includes(w)));
+  report(
+    'CHANGELOG 标题的轨道段命中受控词表（v0.51.0 起；历史标题不回改）',
+    missingVocab.length === 0 && titles.length > 0 && bad.length === 0,
+    missingVocab.length > 0
+      ? `词表与 TRACK-PLANS.md 对不上（缺：${missingVocab.join('、')}）`
+      : `缺轨道词的标题：${bad.map((t) => t.suffix).join('、') || '(无)'}`,
+  );
+}
+
+/**
  * M 状态行与代码事实的同步（2026-09-29 复核 046 顺手抓到的文档滞后）：
  * TRACK-ROADMAP 的 M10 行当时还写着"PDF 查看随 M19 做"，而 PDF 查看（M19b）早已交付 ——
  * 能力表有机器交叉断言，**里程碑状态行却没有**。
