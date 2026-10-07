@@ -89,7 +89,7 @@ export function registerCanvasIpc(ctx: IpcContext): void {
     const p = payload as { id?: unknown; fromNodeId?: unknown } | null;
     const id = p?.id;
     if (typeof id !== 'string' || id === '') {
-      return canvasRunResultSchema.parse({ ok: false, reason: null, error: '缺少图标识', steps: [] });
+      return canvasRunResultSchema.parse({ ok: false, reason: null, error: '缺少图标识', steps: [], skipped: 0 });
     }
     // B2：局部重跑的起点（可选）——现读现验，坏形状**明确拒绝**，不静默当整图跑
     const fromNodeId = p?.fromNodeId;
@@ -99,11 +99,12 @@ export function registerCanvasIpc(ctx: IpcContext): void {
         reason: null,
         error: '重跑的起点不合法（要的是节点 id）',
         steps: [],
+        skipped: 0,
       });
     }
     const loaded = await store().load(id);
     if (!loaded.ok) {
-      return canvasRunResultSchema.parse({ ok: false, reason: null, error: loaded.error, steps: [] });
+      return canvasRunResultSchema.parse({ ok: false, reason: null, error: loaded.error, steps: [], skipped: 0 });
     }
     // 磁盘上的图可能被手改过：**跑之前再校验一次**
     const problems = validateGraph(loaded.graph);
@@ -113,6 +114,7 @@ export function registerCanvasIpc(ctx: IpcContext): void {
         reason: null,
         error: `这张图有问题，没有开跑：${problems.map((p) => p.message).join('；')}`,
         steps: [],
+        skipped: 0,
       });
     }
     const result = await runner().run(id, loaded.graph, fromNodeId);
@@ -121,6 +123,7 @@ export function registerCanvasIpc(ctx: IpcContext): void {
       reason: result.reason,
       error: result.error,
       steps: result.steps.slice(0, 200),
+      skipped: result.skipped,
     });
   });
 

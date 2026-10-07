@@ -23,8 +23,10 @@ import type { IpcPolicy } from './ipc/context';
  *
  * - **工具节点** → `runTool`：与对话、手动执行**同一个注册表 + 同一个权限门**（批复要点①）。
  *   图执行期间的审批弹窗照常出现；用户拒绝 → 节点状态是 `denied`（不是普通失败，也不静默跳过）。
- * - **提示词节点** → 与对话**同一个 provider 流式层**（`streamChat`）：单轮补全，
+ * - **提示词 / 条件节点** → 与对话**同一个 provider 流式层**（`streamChat`）：单轮补全，
  *   用图自己的 `connectionId`（密钥仍在密钥库，图里只有 id）。
+ *   条件节点的"走 true 还是 false"**不在这里判** —— 判定在编排层（`canvas-run.ts`，纯规则），
+ *   这一层只负责把回答原样交出去（两个节点类型的执行是同一条代码路径，没有第二套）。
  *
  * 这个文件是"唯一允许把两者接起来"的地方 —— 接线锁会钉住：编排层不许自己引 provider / fetch / fs。
  */
@@ -89,11 +91,11 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
 
     async run(graphId, graph, fromNodeId) {
       if (controllers.has(graphId)) {
-        return { ok: false, reason: null, error: '这张图正在跑（先停止或等它跑完）', steps: [] };
+        return { ok: false, reason: null, error: '这张图正在跑（先停止或等它跑完）', steps: [], skipped: 0 };
       }
       // B2 局部重跑：起点必须是图里的节点 —— 明确说话，绝不"那就整图跑"
       if (fromNodeId !== undefined && !graph.nodes.some((n) => n.id === fromNodeId)) {
-        return { ok: false, reason: null, error: `图里没有这个节点：${fromNodeId}`, steps: [] };
+        return { ok: false, reason: null, error: `图里没有这个节点：${fromNodeId}`, steps: [], skipped: 0 };
       }
       const controller = new AbortController();
       controllers.set(graphId, controller);
@@ -133,7 +135,8 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
           };
         }
 
-        // 提示词节点：单轮补全，走与对话同一个 provider 流式层
+        // 提示词 / 条件节点：单轮补全，走与对话同一个 provider 流式层
+        // （条件节点的分支判定**不在这里** —— 判定在编排层，这一层只把回答交出去）
         const prompt = String(node.config['prompt'] ?? '');
         let text = '';
         let aborted = false;
@@ -181,6 +184,8 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
           reason: outcome.reason,
           error: outcome.reason === 'done' ? '' : summarizeRun(outcome),
           steps: outcome.steps.map((s) => `${String(s.step)}. ${s.nodeId} ${s.status} ${s.note}`),
+          // B3：被跳过（未选分支及下游）的节点数 —— 界面用它说"几个执行、几个被跳过"
+          skipped: Object.values(outcome.states).filter((s) => s === 'skipped').length,
         };
       } catch (err) {
         return {
@@ -188,6 +193,7 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
           reason: 'failed',
           error: err instanceof Error ? err.message : String(err),
           steps: [],
+          skipped: 0,
         };
       } finally {
         controllers.delete(graphId);

@@ -736,6 +736,62 @@
       "find": "window.jujia.canvasRun(graphId, nodeId);",
       "replace": "window.jujia.canvasRun(graphId);",
       "test": "apps/desktop/src/main/canvas-wiring.test.ts"
+    },
+    {
+      "id": "M93",
+      "desc": "条件判定失效：不管回答里有没有关键词都走 true 口（false 那一支永远轮不到）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "        const branch: 'true' | 'false' = result.output.includes(keyword) ? 'true' : 'false';",
+      "replace": "        const branch: 'true' | 'false' = 'true';",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M94",
+      "desc": "skipped 开始传播：被跳过节点的下游照常执行（拿「没走过的分支」的结果往下跑）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "        if (!alive.has(e.from)) return false;",
+      "replace": "        if (!alive.has(e.from)) return true;",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M95",
+      "desc": "走反口：命中关键词反而走 false 口（分支判定取反）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "        return src?.kind !== 'condition' || selected.get(e.from) === e.fromPort;",
+      "replace": "        return src?.kind !== 'condition' || selected.get(e.from) !== e.fromPort;",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M96",
+      "desc": "条件出边不再强制带 fromPort：没指明走哪个口的线也放行（跑起来两条口都成了死路）",
+      "file": "packages/shared-ipc/src/canvas-graph.ts",
+      "find": "    if (src?.kind === 'condition') {\n      if (e.fromPort === undefined) {",
+      "replace": "    if (src?.kind === 'condition') {\n      if (false) {",
+      "test": "packages/shared-ipc/src/canvas-graph.test.ts"
+    },
+    {
+      "id": "M97",
+      "desc": "界面出口映射断链：fromPort 不再映射成 sourceHandle（加载后条件出线挂不上口）",
+      "file": "apps/desktop/src/renderer/src/features/canvas/canvas-bridge.ts",
+      "find": "    ...(e.fromPort === undefined ? {} : { sourceHandle: e.fromPort }),",
+      "replace": "    ...(e.fromPort === undefined ? {} : {}),",
+      "test": "apps/desktop/src/renderer/src/features/canvas/canvas-bridge.test.ts"
+    },
+    {
+      "id": "M98",
+      "desc": "跳过计数归零：界面会把「跳过 3 个」报成「0 个被跳过」（声称比事实多）",
+      "file": "apps/desktop/src/main/canvas-runner.ts",
+      "find": "          skipped: Object.values(outcome.states).filter((s) => s === 'skipped').length,",
+      "replace": "          skipped: 0,",
+      "test": "apps/desktop/src/main/canvas-runner.test.ts"
+    },
+    {
+      "id": "M99",
+      "desc": "条件节点兜底失守：空关键词不再停下（回答.includes('') 恒真 = 静默「总走真口」）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "    if (node.kind === 'condition' && (typeof node.config['keyword'] !== 'string' || node.config['keyword'] === '')) {",
+      "replace": "    if (false) {",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
     }
   ]
 }

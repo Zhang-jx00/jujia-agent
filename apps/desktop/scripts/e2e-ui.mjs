@@ -1769,14 +1769,31 @@ try {
   /*
    * 这一步**不假设**面板里有会话：重启之后对话面板是全新的（`sessionId` 未定义时连「新会话」都不渲染）。
    * 有就重置一下，没有就直接发 —— 两种状态都对，断言的是"发出去之后落在哪"。
+   *
+   * 为什么两处都用**有界轮询**（2026-10-07 M9b 收口轮实测踩到，同第 27 步那次的同一类）：
+   * ① 「新会话」在不在场曾用一次性 `count()` 快照判断 —— 快照取在渲染之前时，"没有按钮"被
+   *    当成"全新面板"直接发，消息落进旧会话，清单里当然没有 T22 会话（红点就是这一处）；
+   * ② 清单按"发出去之后会出现"来等，而不是发完立即断言 —— 写入与清单刷新之间不留竞态窗口。
    */
   const newChatT22 = win3.locator('button', { hasText: '新会话' });
-  if ((await newChatT22.count()) > 0) await newChatT22.first().click();
+  let hadSessionT22 = false;
+  for (let i = 0; i < 20; i += 1) {
+    if ((await newChatT22.count()) > 0) {
+      hadSessionT22 = true;
+      break;
+    }
+    await win3.waitForTimeout(150);
+  }
+  if (hadSessionT22) await newChatT22.first().click();
   await askT22('T22_切页签前的第一问', 'ECHO n=1 sum=0');
 
-  const listT22 = await win3.evaluate(async () => await window.jujia.chatList());
+  let listT22 = await win3.evaluate(async () => await window.jujia.chatList());
+  for (let i = 0; i < 25 && !listT22.some((s) => s.title.includes('T22_切页签前')); i += 1) {
+    await win3.waitForTimeout(200);
+    listT22 = await win3.evaluate(async () => await window.jujia.chatList());
+  }
   const sT22 = listT22.find((s) => s.title.includes('T22_切页签前'));
-  if (!sT22) fail('T22 会话没出现在清单里', JSON.stringify(listT22).slice(0, 300));
+  if (!sT22) fail('T22 会话没出现在清单里（已按有界轮询等满 5 秒）', JSON.stringify(listT22).slice(0, 300));
   const jsonlT22 = join(dataDir, 'sessions', sT22.id, 'messages.jsonl');
   const linesT22 = () => readFileSync(jsonlT22, 'utf8').split('\n').filter(Boolean).length;
   const beforeLinesT22 = linesT22();
@@ -2061,6 +2078,32 @@ try {
     edges: [],
     viewport: { x: 0, y: 0, zoom: 1 },
   });
+  /**
+   * B3 的条件分支图也**和上面几张一起写**：画布侧栏的图列表只在面板首次挂载时拉一次
+   * （B3 步骤跑到时面板早挂着了）—— 写晚了它不会出现在列表里，点都点不到。
+   */
+  const branchId = 'e2e-canvas-branch-0001';
+  writeGraph(branchId, {
+    version: 1,
+    connectionId: seededEchoConnId,
+    nodes: [
+      { id: 'c1', kind: 'condition', x: 40, y: 20, config: { prompt: 'E2E_B3_命中关键词的提示', keyword: '命中关键词' } },
+      { id: 't1', kind: 'tool', x: 300, y: 0, config: { toolName: 'read_file', argsText: '{"path":"canvas-readme.txt"}' } },
+      { id: 'f1', kind: 'tool', x: 300, y: 120, config: { toolName: 'list_dir', argsText: '{"path":"."}' } },
+      { id: 'f1b', kind: 'tool', x: 540, y: 120, config: { toolName: 'list_dir', argsText: '{"path":"."}' } },
+      { id: 'c2', kind: 'condition', x: 40, y: 280, config: { prompt: 'E2E_B3_另一件小事', keyword: '绝不出现的词' } },
+      { id: 't2', kind: 'tool', x: 300, y: 280, config: { toolName: 'list_dir', argsText: '{"path":"."}' } },
+      { id: 'f2', kind: 'tool', x: 300, y: 400, config: { toolName: 'read_file', argsText: '{"path":"canvas-readme.txt"}' } },
+    ],
+    edges: [
+      { id: 'be1', from: 'c1', to: 't1', fromPort: 'true' },
+      { id: 'be2', from: 'c1', to: 'f1', fromPort: 'false' },
+      { id: 'be3', from: 'f1', to: 'f1b' },
+      { id: 'be4', from: 'c2', to: 't2', fromPort: 'true' },
+      { id: 'be5', from: 'c2', to: 'f2', fromPort: 'false' },
+    ],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  });
 
   step('M9a 画布：三节点链真的跑完（节点状态来自主进程事件，最后一步工具的输出在回执里）');
   await win3.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
@@ -2263,6 +2306,67 @@ try {
   if (n2Marked !== 1) fail('重跑的起点 n2 上没有"重跑"标');
   ok('从 n2 重跑：执行行说"2 个节点"、n2/n3 带重跑标、n1 保持 ok 且无标（上游未动）');
 
+  /**
+   * B3：条件分支。断言全部落在**节点真值**上（不看界面自述）：
+   * ① 条件卡片上真有一对可拖的口（`data-port` 标签）与判定关键词行；
+   * ② c1 命中关键词 → 真口那支跑、假口那支 skipped；c2 没命中 → 反过来；
+   * ③ "被跳过"不传播：f1 的下游 f1b 同样 skipped（执行行也如实报"几个执行、几个被跳过"）；
+   * ④ 出口（fromPort）过了**真实渲染层的存/读往返**还活着 —— 落盘文件里两个口都在。
+   * 覆盖边界：t1 / f2 的**输出文本**不在本步断（最终一行的 note 被最后事件占着）——
+   * 工具输出确实会进回执这条由 M9a 三节点链那步负责（那里读的就是 readme 的内容）。
+   */
+  step('B3 画布：条件分支 —— 选中的口执行、没选的那支与它的下游被跳过（都记在节点上）');
+  await win3.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  await win3.locator(`button[data-graph-id="${branchId}"]`).first().click();
+  if ((await waitText3(`已打开 ${branchId}`, 10_000)) !== true) {
+    fail('打开条件分支那张图失败', (await body3()).slice(0, 700));
+  }
+  const portTagCount = await win3.locator('[data-port]').count();
+  if (portTagCount !== 4) {
+    fail(`两张条件卡应各有两个出口标签（真/假），实际 ${String(portTagCount)} 个`);
+  }
+  if ((await win3.locator('.jj-canvas-node', { hasText: '含「命中关键词」走真口' }).count()) !== 1) {
+    fail('条件卡片上没有显示判定关键词（加载时 keyword 没带进卡片？）');
+  }
+  await win3.locator('button', { hasText: '运行这张图' }).first().click();
+  if ((await waitText3('跑完了（7 个节点：4 个执行、3 个被跳过）', 30_000)) !== true) {
+    fail('条件分支图没有按预期跑完（执行行没分开报数？）', (await body3()).slice(0, 900));
+  }
+  const branchStatus = async (i) =>
+    win3.locator('.react-flow__node').nth(i).locator('.jj-canvas-node').getAttribute('data-node-status');
+  const expectStatus = async (i, want, what) => {
+    const got = await branchStatus(i);
+    if (got !== want) fail(`${what}：期望 ${want}，实际 ${String(got)}`);
+  };
+  await expectStatus(0, 'ok', 'c1（条件）应该跑完');
+  await expectStatus(1, 'ok', 'c1 真口上的 t1 应该执行');
+  await expectStatus(2, 'skipped', 'c1 假口上的 f1 应该被跳过');
+  await expectStatus(3, 'skipped', '被跳过节点的下游 f1b 也该跳过');
+  await expectStatus(4, 'ok', 'c2（条件）应该跑完');
+  await expectStatus(5, 'skipped', 'c2 真口上的 t2 应该被跳过');
+  await expectStatus(6, 'ok', 'c2 假口上的 f2 应该执行');
+  const branchBody = await body3();
+  if (!branchBody.includes('f1b skipped') || !branchBody.includes('被跳过（上游分支没走这边）')) {
+    fail('被跳过的节点没有出现在执行行里（状态与原因都要能读出来）', branchBody.slice(-600));
+  }
+  const savedBranch = readFileSync(join(canvasDir, `${branchId}.json`), 'utf8');
+  if (!savedBranch.includes('"fromPort": "true"') || !savedBranch.includes('"fromPort": "false"')) {
+    fail('存下的图里出口（fromPort）没保住（界面往返把它丢了？）', savedBranch.slice(0, 600));
+  }
+  if (!savedBranch.includes('"keyword": "命中关键词"')) {
+    fail('存下的图里判定关键词没保住', savedBranch.slice(0, 600));
+  }
+  // 界面上也能一键建条件节点（按钮那条路；建出来的是空关键词的卡 —— 保存前会被校验拦，这里只验建得出）
+  const branchNodeCount = await win3.locator('.jj-canvas-node').count();
+  await win3.locator('button', { hasText: '+ 条件节点' }).first().click();
+  if ((await win3.locator('.jj-canvas-node').count()) !== branchNodeCount + 1) {
+    fail('点「+ 条件节点」没有建出节点');
+  }
+  if ((await win3.locator('.jj-canvas-node', { hasText: '还没填判定关键词' }).count()) !== 1) {
+    fail('新建的条件卡上没有"空关键词"的提示（卡片渲染不对？）');
+  }
+  ok('条件分支：c1 走真口 / c2 走假口，未选两支与下游都是 skipped，执行行分开报数，fromPort 与 keyword 落盘');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -2282,5 +2386,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 干净退出');
 process.exit(0);

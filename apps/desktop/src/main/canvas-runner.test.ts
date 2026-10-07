@@ -130,3 +130,57 @@ describe('createCanvasRunner：提示词节点的取消语义（复核 047 实�
     await first;
   });
 });
+
+/**
+ * B3 条件分支在真实 runner 里的两条真值：
+ * ① 条件节点与提示词节点走的是**同一条** streamChat 单轮路径（makeDeps 的 permission 会直接抛错 ——
+ *    条件节点若误碰工具那条路，测试立刻红）；
+ * ② 结果里带**跳过数**（界面那句"几个执行、几个被跳过"用的是它，不是拿总节点数冒充）。
+ */
+function branchGraph(keyword: string): CanvasGraph {
+  return {
+    version: 1,
+    connectionId: 'conn-1',
+    viewport: { x: 0, y: 0, zoom: 1 },
+    nodes: [
+      { id: 'c', kind: 'condition', x: 0, y: 0, config: { prompt: '判断一下', keyword } },
+      { id: 'ty', kind: 'prompt', x: 0, y: 0, config: { prompt: '真口的工作' } },
+      { id: 'fn', kind: 'prompt', x: 0, y: 0, config: { prompt: '假口的工作' } },
+    ],
+    edges: [
+      { id: 'e1', from: 'c', to: 'ty', fromPort: 'true' },
+      { id: 'e2', from: 'c', to: 'fn', fromPort: 'false' },
+    ],
+  };
+}
+
+describe('createCanvasRunner：B3 条件分支（同一条补全路径 + 跳过计数）', () => {
+  it('命中关键词 → true 口那支跑、false 口那支 skipped；结果带跳过数', async () => {
+    const baseUrl = await slowSseServer(); // 每个分片是 `tN `，全跑完的答案是 "t1 t2 … t30"
+    const events: CanvasEventPayload[] = [];
+    const runner = createCanvasRunner(makeDeps(baseUrl, events));
+    const r = await runner.run('g-branch-true', branchGraph('t30'));
+
+    expect(r.ok).toBe(true);
+    expect(r.skipped).toBe(1);
+    const statuses = (id: string) => events.filter((e) => e.nodeId === id).map((e) => e.status);
+    expect(statuses('c')).toEqual(['running', 'ok']); // 条件节点走的就是补全路径（碰权限的话 makeDeps 会抛）
+    expect(statuses('ty')).toEqual(['running', 'ok']);
+    expect(statuses('fn')).toEqual(['skipped']);
+    expect(r.steps.some((s) => s.includes('走 true 口'))).toBe(true);
+  }, 30_000);
+
+  it('没命中 → false 口那支跑、true 口那支 skipped', async () => {
+    const baseUrl = await slowSseServer();
+    const events: CanvasEventPayload[] = [];
+    const runner = createCanvasRunner(makeDeps(baseUrl, events));
+    const r = await runner.run('g-branch-false', branchGraph('绝不出现的词'));
+
+    expect(r.ok).toBe(true);
+    expect(r.skipped).toBe(1);
+    const statuses = (id: string) => events.filter((e) => e.nodeId === id).map((e) => e.status);
+    expect(statuses('fn')).toEqual(['running', 'ok']);
+    expect(statuses('ty')).toEqual(['skipped']);
+    expect(r.steps.some((s) => s.includes('走 false 口'))).toBe(true);
+  }, 30_000);
+});

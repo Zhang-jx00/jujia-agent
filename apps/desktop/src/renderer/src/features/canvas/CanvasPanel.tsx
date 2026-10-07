@@ -3,6 +3,8 @@ import type { MouseEvent as ReactMouseEvent, ReactElement } from 'react';
 import {
   Background,
   Controls,
+  Handle,
+  Position,
   ReactFlow,
   ViewportPortal,
   addEdge,
@@ -61,18 +63,48 @@ const rectOf = (n: FlowNode): Rect => ({
   height: n.measured?.height ?? DEFAULT_SIZE.height,
 });
 
-/** 节点卡片：把"哪个节点、什么状态、配的是什么"画在一张卡上（e2e 也靠这层文本断言） */
+/**
+ * 节点卡片：把"哪个节点、什么状态、配的是什么"画在一张卡上（e2e 也靠这层文本断言）。
+ *
+ * B3 起卡片上有 **Handle**（连通口）：所有节点左侧一个入端、右侧出端；条件节点右侧是
+ * **真 / 假两个口**（id 就是图契约里的 `fromPort`，`canvas-bridge.ts` 负责两个世界的名字互译）。
+ * 补这一段的账：M9a 表里写过"连线"，但当时卡片上没有 Handle —— 界面根本拖不出线
+ * （图一直是"写进盘再打开"验的）。条件节点的"两出口"没有可拖的口就是画着好看，
+ * 所以这一笔在 B3 一并补上（纯界面，零执行语义）。
+ */
 function CanvasNodeCard({ data }: { data: CanvasNodeData }): ReactElement {
+  const kindLabel = data.kind === 'prompt' ? '提示词' : data.kind === 'tool' ? '工具' : '条件';
+  const keyword = String(data.keywordText ?? '');
   return (
     <div className={`jj-canvas-node jj-canvas-node-${data.status}`} data-node-status={data.status}>
-      <div className="jj-canvas-node-kind">{data.kind === 'prompt' ? '提示词' : '工具'}</div>
+      <Handle type="target" position={Position.Left} />
+      <div className="jj-canvas-node-kind">{kindLabel}</div>
       <div className="jj-canvas-node-body">{data.configText}</div>
+      {data.kind === 'condition' && (
+        <div className="jj-canvas-node-keyword">
+          {keyword === '' ? '还没填判定关键词' : `含「${keyword}」走真口`}
+        </div>
+      )}
       <div className="jj-canvas-node-status">{data.status}</div>
       {/* B2：局部重跑的"重跑段"小标（随下一次整图运行 / 重开图清掉） */}
       {data.rerun === true && (
         <div className="jj-canvas-node-rerun" data-rerun="1">
           ↻ 重跑
         </div>
+      )}
+      {data.kind === 'condition' ? (
+        <>
+          <Handle type="source" id="true" position={Position.Right} style={{ top: '32%' }} />
+          <Handle type="source" id="false" position={Position.Right} style={{ top: '72%' }} />
+          <span className="jj-canvas-port-tag" data-port="true" style={{ top: '32%' }}>
+            真
+          </span>
+          <span className="jj-canvas-port-tag" data-port="false" style={{ top: '72%' }}>
+            假
+          </span>
+        </>
+      ) : (
+        <Handle type="source" position={Position.Right} />
       )}
     </div>
   );
@@ -150,11 +182,18 @@ export function CanvasPanel(): ReactElement {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  /** 连线合法性：与主进程保存前**同一套**规则（自环 / 重复 / 成环） */
+  /** 连线合法性：与主进程保存前**同一套**规则（自环 / 重复 / 成环 / 条件出口占用） */
   const isValidConnection = useCallback(
     (c: Connection | Edge): boolean => {
       if (c.source === c.target) return false;
       if (edges.some((e) => e.source === c.source && e.target === c.target)) return false;
+      // B3：条件节点的每个出口最多一条线（与保存前的 portKeys 规则同口径）
+      if (
+        (c.sourceHandle === 'true' || c.sourceHandle === 'false') &&
+        edges.some((e) => e.source === c.source && e.sourceHandle === c.sourceHandle)
+      ) {
+        return false;
+      }
       const probe: CanvasGraph = {
         ...toGraph(nodes, edges, connectionId, viewportRef.current),
         edges: [...edges.map((e) => ({ id: e.id, from: e.source, to: e.target })), { id: 'probe', from: c.source ?? '', to: c.target ?? '' }],
@@ -164,18 +203,24 @@ export function CanvasPanel(): ReactElement {
     [nodes, edges, connectionId],
   );
 
-  const addNodeAt = (kind: 'prompt' | 'tool', at?: { x: number; y: number }): void => {
+  const addNodeAt = (kind: 'prompt' | 'tool' | 'condition', at?: { x: number; y: number }): void => {
     const id = NODE_ID();
+    const data: CanvasNodeData =
+      kind === 'prompt'
+        ? { kind, configText: '把下面这段压成三条要点', status: 'pending' }
+        : kind === 'tool'
+          ? { kind, configText: 'list_dir', status: 'pending' }
+          : { kind, configText: '判断一下', keywordText: '', status: 'pending' };
     setNodes((prev) => [
       ...prev,
       {
         id,
         position: at ?? { x: 80 + prev.length * 40, y: 80 + prev.length * 30 },
-        data: { kind, configText: kind === 'prompt' ? '把下面这段压成三条要点' : 'list_dir', status: 'pending' },
+        data,
       },
     ]);
   };
-  const addNode = (kind: 'prompt' | 'tool'): void => addNodeAt(kind);
+  const addNode = (kind: 'prompt' | 'tool' | 'condition'): void => addNodeAt(kind);
 
   /**
    * B1：拖动位置 = **先网格、后对齐**（判定与吸附全在纯函数里）。
@@ -228,7 +273,7 @@ export function CanvasPanel(): ReactElement {
     setMenu({ x: e.clientX, y: e.clientY });
   };
 
-  const createFromMenu = (kind: 'prompt' | 'tool'): void => {
+  const createFromMenu = (kind: 'prompt' | 'tool' | 'condition'): void => {
     if (menu === null) return;
     const at = rfRef.current?.screenToFlowPosition({ x: menu.x, y: menu.y });
     setMenu(null);
@@ -300,8 +345,20 @@ export function CanvasPanel(): ReactElement {
       // 整图跑：状态与「重跑」标一起清（重跑段是"上一次局部重跑"的记号）
       setNodes((prev) => prev.map((n) => ({ ...n, data: { ...n.data, status: 'pending', rerun: false } })));
       const r = await window.jujia.canvasRun(graphId);
-      // 数量按**节点数**说（回执行是步骤事件的条数，会多一倍 —— 两种说法别混用）
-      setMsg(r.ok ? { kind: 'ok', text: `跑完了（${String(graph.nodes.length)} 个节点）` } : { kind: 'err', text: r.error });
+      // 数量按**节点数**说（回执行是步骤事件的条数，会多一倍 —— 两种说法别混用）；
+      // B3：有被跳过的节点时**分开说** —— 把没跑的算进"跑完了"就是声称比事实多
+      const total = graph.nodes.length;
+      setMsg(
+        r.ok
+          ? {
+              kind: 'ok',
+              text:
+                r.skipped === 0
+                  ? `跑完了（${String(total)} 个节点）`
+                  : `跑完了（${String(total)} 个节点：${String(total - r.skipped)} 个执行、${String(r.skipped)} 个被跳过）`,
+            }
+          : { kind: 'err', text: r.error },
+      );
     } finally {
       setBusy(false);
     }
@@ -356,6 +413,7 @@ export function CanvasPanel(): ReactElement {
   const paletteCommands: CanvasCommand[] = [
     { id: 'add-prompt', label: '添加提示词节点', run: () => addNode('prompt') },
     { id: 'add-tool', label: '添加工具节点', run: () => addNode('tool') },
+    { id: 'add-condition', label: '添加条件节点', run: () => addNode('condition') },
     { id: 'save', label: '保存这张图', run: () => void save() },
     { id: 'run', label: '运行这张图', run: () => void run() },
     { id: 'stop', label: '停止', run: () => void stop() },
@@ -373,6 +431,9 @@ export function CanvasPanel(): ReactElement {
           </button>
           <button type="button" className="w2-btn" onClick={() => addNode('tool')}>
             + 工具节点
+          </button>
+          <button type="button" className="w2-btn" onClick={() => addNode('condition')}>
+            + 条件节点
           </button>
           <button type="button" className="w2-btn" onClick={() => setPaletteOpen(true)}>
             命令面板（Ctrl+K）
@@ -426,7 +487,13 @@ export function CanvasPanel(): ReactElement {
               aria-label="节点配置"
               value={selectedNode.data.configText}
               onChange={(e) => patchSelected({ configText: e.target.value })}
-              placeholder={selectedNode.data.kind === 'prompt' ? '提示词' : '工具名（如 list_dir）'}
+              placeholder={
+                selectedNode.data.kind === 'prompt'
+                  ? '提示词'
+                  : selectedNode.data.kind === 'tool'
+                    ? '工具名（如 list_dir）'
+                    : '提示词（拿去问模型，回答里找关键词）'
+              }
             />
             {selectedNode.data.kind === 'tool' && (
               <input
@@ -434,6 +501,14 @@ export function CanvasPanel(): ReactElement {
                 value={String(selectedNode.data['argsText'] ?? '{}')}
                 onChange={(e) => patchSelected({ argsText: e.target.value } as Partial<CanvasNodeData>)}
                 placeholder='参数 JSON，如 {"path": "."}'
+              />
+            )}
+            {selectedNode.data.kind === 'condition' && (
+              <input
+                aria-label="判定关键词"
+                value={String(selectedNode.data['keywordText'] ?? '')}
+                onChange={(e) => patchSelected({ keywordText: e.target.value } as Partial<CanvasNodeData>)}
+                placeholder="回答里含这个词就走 true 口"
               />
             )}
             {/* B2：局部重跑入口 —— 走的是与「运行这张图」同一个 canvasRun（多带一个起点） */}
@@ -521,6 +596,9 @@ export function CanvasPanel(): ReactElement {
             </button>
             <button type="button" role="menuitem" onClick={() => createFromMenu('tool')}>
               加一个工具节点
+            </button>
+            <button type="button" role="menuitem" onClick={() => createFromMenu('condition')}>
+              加一个条件节点
             </button>
           </div>
         )}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CANVAS_GRAPH_VERSION, type CanvasGraph, type CanvasNode } from './canvas-graph';
+import { CANVAS_GRAPH_VERSION, type CanvasEdge, type CanvasGraph, type CanvasNode } from './canvas-graph';
 import { runGraph, summarizeRun, type NodeResult, type RunEvent } from './canvas-run';
 
 /**
@@ -15,7 +15,7 @@ const node = (id: string, kind: 'prompt' | 'tool' = 'prompt'): CanvasNode =>
 
 const edge = (from: string, to: string) => ({ id: `${from}-${to}`, from, to });
 
-const graph = (nodes: CanvasNode[], edges = [edge('a', 'b'), edge('b', 'c')]): CanvasGraph => ({
+const graph = (nodes: CanvasNode[], edges: CanvasEdge[] = [edge('a', 'b'), edge('b', 'c')]): CanvasGraph => ({
   version: CANVAS_GRAPH_VERSION,
   connectionId: 'conn-1',
   nodes,
@@ -226,5 +226,144 @@ describe('runGraph：startFrom（局部重跑）', () => {
     const outcome = await runGraph(three(), { maxSteps: 50, execute });
     expect(calls).toEqual(['a', 'b', 'c']);
     expect(outcome.states).toEqual({ a: 'ok', b: 'ok', c: 'ok' });
+  });
+});
+
+/**
+ * B3：条件分支（真 / 假两出口 + `skipped`）。口径写死三条：
+ * ① **关键词判定在纯层**：`回答.includes(keyword)` —— 和拓扑序、闭包一样是纯规则，不许散进执行器；
+ * ② 未选分支**不执行**、状态是 `skipped`（既不是 cancelled 也不是 failed —— 整体结论照旧可以是 done）；
+ * ③ `skipped` **不传播**：被跳过节点的下游同样 skipped；汇合点只要有一条**活路**进来就执行。
+ */
+const cond = (id: string, keyword: string): CanvasNode => ({
+  id,
+  kind: 'condition',
+  x: 0,
+  y: 0,
+  config: { prompt: `判断 ${id}`, keyword },
+});
+const portEdge = (from: string, to: string, fromPort: 'true' | 'false'): CanvasEdge => ({
+  id: `${from}-${to}`,
+  from,
+  to,
+  fromPort,
+});
+
+describe('runGraph：B3 条件分支', () => {
+  it('命中关键词 → true 口执行、false 口 skipped（整体仍是 done）', async () => {
+    const g = graph(
+      [cond('c', 'c'), node('t'), node('f')],
+      [portEdge('c', 't', 'true'), portEdge('c', 'f', 'false')],
+    );
+    const { calls, execute } = recorder(); // 假执行器默认输出 `${id}-ok`：c 的回答含关键词 'c'
+    const events: RunEvent[] = [];
+    const outcome = await runGraph(g, { maxSteps: 50, execute, onEvent: (e) => events.push(e) });
+
+    expect(calls).toEqual(['c', 't']);
+    expect(outcome.reason).toBe('done');
+    expect(outcome.states).toEqual({ c: 'ok', t: 'ok', f: 'skipped' });
+    const fEvent = events.find((e) => e.nodeId === 'f');
+    expect(fEvent?.status).toBe('skipped');
+    expect(fEvent?.note).toContain('没走');
+  });
+
+  it('没命中 → false 口执行（判定用的是"回答里含不含关键词"）', async () => {
+    const g = graph(
+      [cond('c', '绝不出现'), node('t'), node('f')],
+      [portEdge('c', 't', 'true'), portEdge('c', 'f', 'false')],
+    );
+    const { calls, execute } = recorder();
+    const outcome = await runGraph(g, { maxSteps: 50, execute });
+    expect(calls).toEqual(['c', 'f']);
+    expect(outcome.states).toEqual({ c: 'ok', f: 'ok', t: 'skipped' });
+  });
+
+  it('被跳过节点的下游同样 skipped ——"没走这条"要一路传下去', async () => {
+    const g = graph(
+      [cond('c', 'c'), node('t'), node('f'), node('f2')],
+      [portEdge('c', 't', 'true'), portEdge('c', 'f', 'false'), edge('f', 'f2')],
+    );
+    const { calls, execute } = recorder();
+    const outcome = await runGraph(g, { maxSteps: 50, execute });
+    expect(calls).toEqual(['c', 't']);
+    expect(outcome.states).toEqual({ c: 'ok', t: 'ok', f: 'skipped', f2: 'skipped' });
+  });
+
+  it('汇合点：有一条活路进来就执行（另一条死了不阻塞）', async () => {
+    const g = graph(
+      [cond('c', 'c'), node('t'), node('f'), node('j')],
+      [portEdge('c', 't', 'true'), portEdge('c', 'f', 'false'), edge('t', 'j'), edge('f', 'j')],
+    );
+    const { calls, execute } = recorder();
+    const outcome = await runGraph(g, { maxSteps: 50, execute });
+    expect(calls).toEqual(['c', 't', 'j']);
+    expect(outcome.states['j']).toBe('ok');
+  });
+
+  it('skipped 不占步号：跳过之后，继续执行的节点步号仍然连续', async () => {
+    const g = graph(
+      [cond('c', 'c'), node('t'), node('f'), node('t2')],
+      [portEdge('c', 't', 'true'), edge('t', 't2'), portEdge('c', 'f', 'false')],
+    );
+    const { execute } = recorder();
+    const events: RunEvent[] = [];
+    await runGraph(g, { maxSteps: 50, execute, onEvent: (e) => events.push(e) });
+    expect(events.filter((e) => e.status === 'running').map((e) => `${e.nodeId}:${String(e.step)}`)).toEqual([
+      'c:1',
+      't:2',
+      't2:3',
+    ]);
+    expect(events.find((e) => e.status === 'skipped')?.step).toBe(2);
+  });
+
+  it('取消优先于跳过：abort 之后剩下的节点是 cancelled（不是 skipped）', async () => {
+    const g = graph(
+      [cond('c', 'c'), node('t'), node('f')],
+      [portEdge('c', 't', 'true'), portEdge('c', 'f', 'false')],
+    );
+    const controller = new AbortController();
+    const calls: string[] = [];
+    const execute = async (n: CanvasNode): Promise<NodeResult> => {
+      calls.push(n.id);
+      if (n.id === 'c') controller.abort(); // 条件节点正常返回，但信号已经到
+      return { ok: true, output: `${n.id}-ok`, error: '' };
+    };
+    const outcome = await runGraph(g, { maxSteps: 50, execute, signal: controller.signal });
+    expect(calls).toEqual(['c']);
+    expect(outcome.states['t']).toBe('cancelled');
+    expect(outcome.states['f']).toBe('cancelled');
+    expect(outcome.reason).toBe('cancelled');
+  });
+
+  it('摘要说得清"跳过几个"，不把它们混进完成数', async () => {
+    const g = graph(
+      [cond('c', 'c'), node('t'), node('f')],
+      [portEdge('c', 't', 'true'), portEdge('c', 'f', 'false')],
+    );
+    const { execute } = recorder();
+    const outcome = await runGraph(g, { maxSteps: 50, execute });
+    expect(summarizeRun(outcome)).toBe('2 步完成，跳过 1 个');
+  });
+
+  it('条件节点没有可判定的关键词：显式失败（保存前本会拦，这里兜底）—— 绝不默认走 true', async () => {
+    const g = graph([{ id: 'c2', kind: 'condition', x: 0, y: 0, config: { prompt: 'p' } }], []);
+    const { calls, execute } = recorder();
+    const outcome = await runGraph(g, { maxSteps: 50, execute });
+    expect(calls).toEqual([]); // 连模型都不问 —— 没关键词就没有可判定的问题
+    expect(outcome.reason).toBe('failed');
+    expect(outcome.states['c2']).toBe('failed');
+    expect(outcome.steps.at(-1)?.note).toContain('关键词');
+  });
+
+  it('局部重跑：起点在被跳过分支的下游也照常跑（上游不在名单里，不参与活路判定）', async () => {
+    const g = graph(
+      [cond('c', 'zzz'), node('f'), node('f2')],
+      [portEdge('c', 'f', 'false'), edge('f', 'f2')],
+    );
+    const { calls, execute } = recorder();
+    const outcome = await runGraph(g, { maxSteps: 50, execute, startFrom: 'f' });
+    expect(calls).toEqual(['f', 'f2']);
+    expect(outcome.reason).toBe('done');
+    expect(outcome.states).toEqual({ f: 'ok', f2: 'ok' });
   });
 });

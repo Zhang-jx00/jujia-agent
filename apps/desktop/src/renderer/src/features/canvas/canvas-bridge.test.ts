@@ -169,3 +169,43 @@ describe('planDragPosition：先网格、后对齐', () => {
     expect(alignedAgain.x).toBe(260);
   });
 });
+
+/**
+ * B3：条件节点的映射与**出口的往返**。和 M9a 的 argsText 丢字段同一课：
+ * 形状转换这种"看着显然"的地方，要么测试钉住、要么等 e2e 跑起来才发现。
+ * 出口在两个世界各有一个名字：图里是 `fromPort`（'true' / 'false'），React Flow 里是 `sourceHandle`。
+ */
+describe('B3：条件节点与 fromPort ↔ sourceHandle 的往返', () => {
+  it('条件节点：prompt 与 keyword 都带过（少了 keyword 就永远判不出）', () => {
+    const flow = toFlowNode({ id: 'c1', kind: 'condition', x: 10, y: 20, config: { prompt: '判断', keyword: '好' } });
+    expect(flow.data).toMatchObject({ kind: 'condition', configText: '判断', keywordText: '好' });
+    const back = toGraph([flow], [], 'conn-1', { x: 0, y: 0, zoom: 1 });
+    expect(back.nodes[0]?.config).toEqual({ prompt: '判断', keyword: '好' });
+  });
+
+  it('条件节点缺 keyword 时给空串（不是 undefined —— 界面输入框直接绑它）', () => {
+    const flow = toFlowNode({ id: 'c1', kind: 'condition', x: 0, y: 0, config: { prompt: 'p' } });
+    expect(flow.data.keywordText).toBe('');
+  });
+
+  it('fromPort ↔ sourceHandle：图里是口、界面上是 handle id，往返不丢', () => {
+    const edge = { id: 'e1', from: 'c1', to: 't1', fromPort: 'true' as const };
+    const flow = toFlowEdge(edge);
+    expect(flow.sourceHandle).toBe('true');
+    const back = toGraph([], [flow], 'conn-1', { x: 0, y: 0, zoom: 1 });
+    expect(back.edges).toEqual([edge]);
+  });
+
+  it('没有口的连线（提示词 / 工具节点）往返后不带 fromPort（不许凭空长出一个口）', () => {
+    const flow = toFlowEdge({ id: 'e1', from: 'a', to: 'b' });
+    expect(flow.sourceHandle).toBeUndefined();
+    const back = toGraph([], [flow], 'conn-1', { x: 0, y: 0, zoom: 1 });
+    expect(back.edges).toEqual([{ id: 'e1', from: 'a', to: 'b' }]);
+  });
+
+  it('认不出的 handle id 不算口：不带 fromPort，让保存前的校验去点破（不静默塞一个值）', () => {
+    const weird = { id: 'e1', source: 'a', target: 'b', sourceHandle: 'yes' };
+    const back = toGraph([], [weird], 'conn-1', { x: 0, y: 0, zoom: 1 });
+    expect(back.edges).toEqual([{ id: 'e1', from: 'a', to: 'b' }]);
+  });
+});

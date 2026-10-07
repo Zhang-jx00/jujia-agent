@@ -16,7 +16,7 @@ import { downstreamClosure, topoOrder, type CanvasGraph, type CanvasNode } from 
  * （批复要点①：执行只经 runTool 与 agent-loop 那条链路）。
  */
 
-export type NodeStatus = 'pending' | 'running' | 'ok' | 'failed' | 'denied' | 'cancelled';
+export type NodeStatus = 'pending' | 'running' | 'ok' | 'failed' | 'denied' | 'cancelled' | 'skipped';
 
 export interface NodeResult {
   ok: boolean;
@@ -72,6 +72,12 @@ export interface RunOptions {
  *    图是一串依赖，前一步没做成就往下跑，等于拿半成品当输入；
  * 3. **取消要传下去**：外部 abort 之后当前节点会被 abort 信号打断，剩下的节点标 `cancelled`
  *    （不是留在 pending 里让人以为"还没跑"）。
+ *
+ * B3 追加两条（条件分支；都是"错了会静默出错"的同一类）：
+ * 4. **判定在纯层**：命中与否 = `回答.includes(keyword)` —— 与拓扑序、闭包同处一个层级；
+ *    执行器对条件节点与提示词节点走**同一条**单轮补全路径（那边没有第二套判定）；
+ * 5. **`skipped` 既不是取消也不是失败**：未选的口不传播 —— 那一支和它的下游都不执行、
+ *    状态写 `skipped`、**不占步号**，整体结论照旧可以是 `done`；取消（abort）优先于跳过。
  */
 const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true;
 
@@ -100,6 +106,23 @@ export async function runGraph(graph: CanvasGraph, options: RunOptions): Promise
   for (const id of runList) states[id] = 'pending';
 
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  /**
+   * B3：活路判定的三张表 ——
+   * `incoming` 每个节点的入边（**来自名单之外的入边不参与判定**：局部重跑里"上游未动"）；
+   * `selected` 条件节点实际走的口（执行完才写；被跳过的节点永远不写）；
+   * `alive` 会真的执行的节点（存在一条从根起、沿途条件都选对了的"活路"）。
+   */
+  const runSet = new Set(runList);
+  const incoming = new Map<string, { from: string; fromPort?: 'true' | 'false' }[]>();
+  for (const e of graph.edges) {
+    const list = incoming.get(e.to);
+    const item = e.fromPort === undefined ? { from: e.from } : { from: e.from, fromPort: e.fromPort };
+    if (list === undefined) incoming.set(e.to, [item]);
+    else list.push(item);
+  }
+  const selected = new Map<string, 'true' | 'false'>();
+  const alive = new Set<string>();
+
   const emit = (nodeId: string, status: NodeStatus, step: number, note: string): void => {
     states[nodeId] = status;
     // 事件里**只有节点**：图的归属（graphId）由调用方补 —— 编排层不该假装知道自己是哪张图
@@ -108,7 +131,8 @@ export async function runGraph(graph: CanvasGraph, options: RunOptions): Promise
     options.onEvent?.(event);
   };
 
-  // 上界按**本次要跑的名单**算（局部重跑只跑一段，不该拿全图节点数判它超限）
+  // 上界按**本次要跑的名单**算（局部重跑只跑一段，不该拿全图节点数判它超限）。
+  // 条件分支下名单里可能有最终被跳过的节点：事前不知道走哪边，只能按最坏情形（全跑）判 —— 宁可保守。
   if (runList.length > options.maxSteps) {
     for (const id of runList) emit(id, 'failed', 0, `超过单次执行的节点数上限（${String(options.maxSteps)}）`);
     return { states, steps, reason: 'failed' };
@@ -116,13 +140,37 @@ export async function runGraph(graph: CanvasGraph, options: RunOptions): Promise
 
   let step = 0;
   for (const id of runList) {
+    // 取消优先于跳过：abort 之后剩下的节点是 cancelled，不按"分支没走"处理
     if (isAborted(options.signal)) {
       emit(id, 'cancelled', step, '已取消');
       continue;
     }
     const node = byId.get(id);
     if (node === undefined) continue;
+
+    // B3 活路判定：名单外来的入边不参与；名单内要求"来源活着且在有效路径上"
+    const fromInside = (incoming.get(id) ?? []).filter((e) => runSet.has(e.from));
+    const live =
+      fromInside.length === 0 ||
+      fromInside.some((e) => {
+        if (!alive.has(e.from)) return false;
+        const src = byId.get(e.from);
+        return src?.kind !== 'condition' || selected.get(e.from) === e.fromPort;
+      });
+    if (!live) {
+      // 跳过不是取消也不是失败：它连跑都没轮到（整体结论照旧可以是 done）。不占步号。
+      emit(id, 'skipped', step, '被跳过（上游分支没走这边）');
+      continue;
+    }
+    alive.add(id);
     step += 1;
+
+    // 兜底：没有可判定的关键词就**停下**（保存前本会拦）—— 绝不拿空关键词当"总走真口"
+    if (node.kind === 'condition' && (typeof node.config['keyword'] !== 'string' || node.config['keyword'] === '')) {
+      emit(id, 'failed', step, '条件节点没有可用的判定关键词（保存前本会拦；这是兜底，绝不默认走真口）');
+      return { states, steps, reason: 'failed' };
+    }
+
     emit(id, 'running', step, '开始执行');
     try {
       const result = await options.execute(node, options.signal ?? new AbortController().signal);
@@ -134,7 +182,20 @@ export async function runGraph(graph: CanvasGraph, options: RunOptions): Promise
         emit(id, 'failed', step, result.error === '' ? '执行失败（没说原因）' : result.error);
         return { states, steps, reason: 'failed' };
       }
-      emit(id, 'ok', step, result.output.slice(0, 200));
+      if (node.kind === 'condition') {
+        // B3：判定就在这一处（纯规则）—— 执行器只负责产出回答，不参与判定
+        const keyword = String(node.config['keyword']);
+        const branch: 'true' | 'false' = result.output.includes(keyword) ? 'true' : 'false';
+        selected.set(id, branch);
+        emit(
+          id,
+          'ok',
+          step,
+          branch === 'true' ? `命中关键词「${keyword}」→ 走 true 口` : `没命中关键词「${keyword}」→ 走 false 口`,
+        );
+      } else {
+        emit(id, 'ok', step, result.output.slice(0, 200));
+      }
     } catch (err) {
       // 被取消与真失败要分开：前者不是错，不该让人以为工具坏了
       if (isAborted(options.signal)) {
@@ -151,10 +212,14 @@ export async function runGraph(graph: CanvasGraph, options: RunOptions): Promise
   return { states, steps, reason: cancelled ? 'cancelled' : 'done' };
 }
 
-/** 给界面/日志用的一句话摘要（"3 步完成 / 第 2 步被拒"） */
+/** 给界面/日志用的一句话摘要（"3 步完成 / 第 2 步被拒 / 跳过 1 个"） */
 export function summarizeRun(outcome: RunOutcome): string {
   const done = outcome.steps.filter((s) => s.status === 'ok').length;
-  if (outcome.reason === 'done') return `${String(done)} 步全部完成`;
+  const skipped = outcome.steps.filter((s) => s.status === 'skipped').length;
+  if (outcome.reason === 'done') {
+    // 被跳过的**不算完成数**：写进"全部完成"会让人以为整张图都跑过
+    return skipped === 0 ? `${String(done)} 步全部完成` : `${String(done)} 步完成，跳过 ${String(skipped)} 个`;
+  }
   const failed = outcome.steps.find((s) => s.status === 'failed' || s.status === 'denied');
   if (outcome.reason === 'cancelled') return `已取消（完成 ${String(done)} 步）`;
   return failed === undefined

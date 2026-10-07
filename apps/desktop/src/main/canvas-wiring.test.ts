@@ -88,6 +88,8 @@ describe('事件要有归属（DESIGN §九之二 a）', () => {
   it('契约层：graphId / nodeId 缺一个就拒，多一个字段也拒（.strict）', () => {
     const base = { graphId: 'g-1', nodeId: 'n-1', status: 'ok' as const, step: 1, note: '' };
     expect(canvasEventSchema.safeParse(base).success).toBe(true);
+    // B3：`skipped` 是合法状态（未选分支）
+    expect(canvasEventSchema.safeParse({ ...base, status: 'skipped' }).success).toBe(true);
     const { graphId: _g, ...noGraph } = base;
     expect(canvasEventSchema.safeParse(noGraph).success).toBe(false);
     const { nodeId: _n, ...noNode } = base;
@@ -120,5 +122,31 @@ describe('B2：局部重跑复用同一链路（不许第二套执行路径）',
   it('画布界面侧不出现第二套执行形状（runGraph / canvas-runner 都够不着界面）', () => {
     expect(panel).not.toContain('runGraph');
     expect(panel).not.toContain('canvas-runner');
+  });
+});
+
+/**
+ * B3（条件分支）的两条形状纪律：
+ * ① **判定在纯层**：命中与否是 `回答.includes(keyword)`，写死在编排层 —— 执行器不参与判定；
+ * ② **执行路径不分裂**：执行器里没有"条件节点"的第二种走法（它和提示词节点共用同一段补全调用），
+ *    有人将来在 runner 里给条件单开一条路（比如再包一层 provider 调用），这里先红。
+ */
+describe('B3：条件分支（判定在纯层、执行路径不分裂）', () => {
+  const runHandlers = read('../../../../packages/shared-ipc/src/canvas-run.ts');
+
+  it('关键词判定在编排层：`result.output.includes(keyword)`', () => {
+    expect(runHandlers).toContain('result.output.includes(keyword)');
+  });
+
+  it('执行器里没有条件节点的特判（condition 不是第二套执行路径）', () => {
+    expect(runner).not.toContain('condition');
+    expect(runner).not.toContain('includes(keyword)');
+  });
+
+  it('"被跳过"是编排层的概念：runner 只**数**（给界面用），判定与事件都在编排层', () => {
+    expect(runHandlers).toContain("emit(id, 'skipped'");
+    // runner 与 skipped 的唯一关系是数出个数（结果里的 skipped 字段）
+    expect(runner).toContain("s === 'skipped'");
+    expect(runner).not.toContain("emit(id, 'skipped'");
   });
 });

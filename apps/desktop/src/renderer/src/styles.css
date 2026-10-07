@@ -1511,8 +1511,9 @@ html[data-jj-bg-kind='glass'] .app-shell {
   overflow: hidden;
 }
 
-/* 节点卡片：状态一眼可见（pending / running / ok / failed / denied / cancelled） */
+/* 节点卡片：状态一眼可见（pending / running / ok / failed / denied / cancelled / skipped） */
 .jj-canvas-node {
+  position: relative;
   min-width: 140px;
   max-width: 220px;
   padding: 8px 10px;
@@ -1555,6 +1556,33 @@ html[data-jj-bg-kind='glass'] .app-shell {
   margin-top: 4px;
   color: var(--c-warning);
   font-size: 11px;
+}
+
+/* ---- B3：条件节点（判定关键词行 / 两出口的标签 / 被跳过态） ---- */
+.jj-canvas-node-keyword {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* "被跳过"是正常的"没走这条"：虚线加淡，一眼和失败 / 取消分开 */
+.jj-canvas-node-skipped {
+  border-style: dashed;
+  opacity: 0.55;
+}
+
+/* 真 / 假出口的小标签（贴在 Handle 旁；不吃鼠标事件，拖线还是拖在 Handle 上） */
+.jj-canvas-port-tag {
+  position: absolute;
+  right: 10px;
+  transform: translateY(-50%);
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--bg-container);
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+  pointer-events: none;
 }
 
 /* ---- B1：拖动对齐辅助线（ViewportPortal 里，坐标单位 = 流坐标） ---- */

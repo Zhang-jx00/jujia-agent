@@ -27,7 +27,7 @@ export const CANVAS_MAX_RUN_STEPS = 50;
 /** 当前图格式版本（迁移骨架见 `migrateGraph`） */
 export const CANVAS_GRAPH_VERSION = 1;
 
-export const canvasNodeKindSchema = z.enum(['prompt', 'tool']);
+export const canvasNodeKindSchema = z.enum(['prompt', 'tool', 'condition']);
 
 export const canvasNodeSchema = z
   .object({
@@ -38,6 +38,8 @@ export const canvasNodeSchema = z
     /**
      * - `prompt`：`{ prompt }`（跑起来就是一次单轮补全）
      * - `tool`：`{ toolName, argsText }`（argsText 是 JSON 文本，跑之前由工具自己的 parse 校验）
+     * - `condition`（B3）：`{ prompt, keyword }`（同样先跑一次单轮补全，再看回答含不含 keyword ——
+     *   判定本身在编排层，见 `canvas-run.ts`；keyword 必须非空，"空关键词永远命中"是静默的假分支）
      */
     config: z.record(z.string(), z.unknown()),
   })
@@ -51,6 +53,11 @@ export const canvasEdgeSchema = z
     from: z.string().min(1).max(64),
     /** 终点节点 id */
     to: z.string().min(1).max(64),
+    /**
+     * B3：条件节点出边的**出口**（`'true'` / `'false'`）。
+     * 只有条件节点的出边带它（校验层强制执行）；其它节点带了 = 写错了。
+     */
+    fromPort: z.enum(['true', 'false']).optional(),
   })
   .strict();
 export type CanvasEdge = z.infer<typeof canvasEdgeSchema>;
@@ -183,6 +190,16 @@ export function validateGraph(graph: CanvasGraph): GraphProblem[] {
     if (n.kind === 'tool' && typeof n.config['toolName'] !== 'string') {
       problems.push({ message: `工具节点「${n.id}」缺少 toolName`, nodeIds: [n.id] });
     }
+    if (n.kind === 'condition' && typeof n.config['prompt'] !== 'string') {
+      problems.push({ message: `条件节点「${n.id}」缺少 prompt`, nodeIds: [n.id] });
+    }
+    if (n.kind === 'condition' && typeof n.config['keyword'] !== 'string') {
+      problems.push({ message: `条件节点「${n.id}」缺少判定关键词 keyword`, nodeIds: [n.id] });
+    }
+    // 空关键词的 `includes('')` 永远为真 —— 那不是"永远走真口"的功能，是静默的假分支，必须拒
+    if (n.kind === 'condition' && n.config['keyword'] === '') {
+      problems.push({ message: `条件节点「${n.id}」的判定关键词不能为空（空关键词永远命中）`, nodeIds: [n.id] });
+    }
     const forbidden = findForbiddenKeys(n.config);
     if (forbidden.length > 0) {
       problems.push({
@@ -193,6 +210,9 @@ export function validateGraph(graph: CanvasGraph): GraphProblem[] {
   }
 
   const edgeKeys = new Set<string>();
+  /** B3：`节点#口` 只允许出现一次（条件节点的每个出口最多一条线） */
+  const portKeys = new Set<string>();
+  const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
   for (const e of graph.edges) {
     if (!ids.has(e.from) || !ids.has(e.to)) {
       problems.push({ message: `连线 ${e.id} 指向了不存在的节点`, nodeIds: [e.from, e.to] });
@@ -205,6 +225,29 @@ export function validateGraph(graph: CanvasGraph): GraphProblem[] {
       problems.push({ message: `重复的连线：${e.from} → ${e.to}`, nodeIds: [e.from, e.to] });
     }
     edgeKeys.add(`${e.from}->${e.to}`);
+
+    // B3 出口规则：条件节点的出边必须指明走哪个口；别的节点不许带口（端口是条件节点的语法）
+    const src = nodeById.get(e.from);
+    if (src?.kind === 'condition') {
+      if (e.fromPort === undefined) {
+        problems.push({
+          message: `条件节点「${e.from}」的连线 ${e.id} 没指明走哪个口（要带 fromPort："true" 或 "false"）`,
+          nodeIds: [e.from],
+        });
+      } else if (portKeys.has(`${e.from}#${e.fromPort}`)) {
+        problems.push({
+          message: `条件节点「${e.from}」的 ${e.fromPort} 口连了不止一条线（每个口只能连一条）`,
+          nodeIds: [e.from],
+        });
+      } else {
+        portKeys.add(`${e.from}#${e.fromPort}`);
+      }
+    } else if (e.fromPort !== undefined) {
+      problems.push({
+        message: `「${e.from}」不是条件节点，连线 ${e.id} 不该带 true / false 出口（fromPort）`,
+        nodeIds: [e.from],
+      });
+    }
   }
 
   const cycle = findCycle(graph);

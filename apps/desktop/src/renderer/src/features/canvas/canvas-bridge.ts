@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@xyflow/react';
-import { CANVAS_GRAPH_VERSION, type CanvasGraph, type CanvasNode } from '@jujia/shared-ipc';
+import { CANVAS_GRAPH_VERSION, type CanvasEdge, type CanvasGraph, type CanvasNode } from '@jujia/shared-ipc';
 
 /**
  * 界面 ↔ 图契约的**双向映射**（M9a）。抽出来是因为 e2e 当场抓到过一个真缺陷：
@@ -10,11 +10,13 @@ import { CANVAS_GRAPH_VERSION, type CanvasGraph, type CanvasNode } from '@jujia/
  */
 
 export interface CanvasNodeData extends Record<string, unknown> {
-  kind: 'prompt' | 'tool';
-  /** 提示词节点的 prompt / 工具节点的 toolName */
+  kind: 'prompt' | 'tool' | 'condition';
+  /** 提示词 / 条件节点的 prompt、工具节点的 toolName */
   configText: string;
-  /** 工具节点的参数（JSON 文本）；提示词节点不用 */
+  /** 工具节点的参数（JSON 文本）；提示词 / 条件节点不用 */
   argsText?: string;
+  /** B3：条件节点的判定关键词；其余节点不用 */
+  keywordText?: string;
   status: string;
   /** B2：本节点在**最近一次局部重跑**的范围里（卡片上打「重跑」标；整图跑/重开图时清掉） */
   rerun?: boolean;
@@ -27,19 +29,30 @@ export function toFlowNode(n: CanvasNode): FlowNode {
     position: { x: n.x, y: n.y },
     data: {
       kind: n.kind,
-      configText: n.kind === 'prompt' ? String(n.config['prompt'] ?? '') : String(n.config['toolName'] ?? ''),
+      configText: n.kind === 'tool' ? String(n.config['toolName'] ?? '') : String(n.config['prompt'] ?? ''),
       // **工具节点的参数必须带过来**：少了它，跑起来就是"参数不合法"（真缺陷的现场）
       ...(n.kind === 'tool' ? { argsText: String(n.config['argsText'] ?? '{}') } : {}),
+      // B3：条件节点的关键词同理 —— 少了它，判定永远判不出（空串在保存前会被拦）
+      ...(n.kind === 'condition' ? { keywordText: String(n.config['keyword'] ?? '') } : {}),
       status: 'pending',
     },
   };
 }
 
-export function toFlowEdge(e: { id: string; from: string; to: string }): Edge {
-  return { id: e.id, source: e.from, target: e.to };
+/** B3：图里的口 ↔ React Flow 的 handle id，只有这一对合法值（别处一律不认） */
+const portOf = (handle: string | null | undefined): 'true' | 'false' | undefined =>
+  handle === 'true' || handle === 'false' ? handle : undefined;
+
+export function toFlowEdge(e: CanvasEdge): Edge {
+  return {
+    id: e.id,
+    source: e.from,
+    target: e.to,
+    ...(e.fromPort === undefined ? {} : { sourceHandle: e.fromPort }),
+  };
 }
 
-/** 界面状态 → 图契约（保存与运行都走它；两种节点各自的 config 形状在这里收口） */
+/** 界面状态 → 图契约（保存与运行都走它；三种节点各自的 config 形状在这里收口） */
 export function toGraph(
   nodes: FlowNode[],
   edges: Edge[],
@@ -57,9 +70,14 @@ export function toGraph(
       config:
         n.data.kind === 'prompt'
           ? { prompt: n.data.configText }
-          : { toolName: n.data.configText, argsText: String(n.data.argsText ?? '{}') },
+          : n.data.kind === 'tool'
+            ? { toolName: n.data.configText, argsText: String(n.data.argsText ?? '{}') }
+            : { prompt: n.data.configText, keyword: String(n.data.keywordText ?? '') },
     })),
-    edges: edges.map((e) => ({ id: e.id, from: e.source, to: e.target })),
+    edges: edges.map((e) => {
+      const port = portOf(e.sourceHandle);
+      return { id: e.id, from: e.source, to: e.target, ...(port === undefined ? {} : { fromPort: port }) };
+    }),
     viewport,
   };
 }

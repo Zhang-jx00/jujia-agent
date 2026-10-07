@@ -279,3 +279,97 @@ describe('downstreamClosure：从某节点出发的下游闭包（含自身）',
     expect(downstreamClosure(chain(), 'nope')).toBeNull();
   });
 });
+
+/**
+ * B3：条件分支（真 / 假两出口）。契约层先定死四条口径：
+ * ① `kind` 多一档 `'condition'`，配置 `{ prompt, keyword }` —— keyword 必须**非空**：
+ *    空串的 `includes` 永远为真 = 静默"总走真口"，比报错坏得多；
+ * ② 条件节点的出边**必须带 `fromPort`**（`'true'` / `'false'`）：没有口的边不知道走哪边；
+ * ③ 每个口**最多一条线**（两条线"都走 true"是歧义，不是功能）；
+ * ④ 非条件节点的连线**不许**带 `fromPort` —— 端口是条件节点的语法，别处出现就是写错了。
+ */
+const condNode = (id: string, keyword = '好') => ({
+  id,
+  kind: 'condition' as const,
+  x: 0,
+  y: 0,
+  config: { prompt: `判断 ${id}`, keyword },
+});
+
+describe('B3：条件节点的契约与校验', () => {
+  it('条件节点（prompt + keyword）是合法形状；kind 三档都在', () => {
+    const g = graph({ nodes: [condNode('c')], edges: [] });
+    expect(canvasGraphSchema.safeParse(g).success).toBe(true);
+  });
+
+  it('条件节点的出边必须带 fromPort；带上就过', () => {
+    const noPort = graph({
+      nodes: [condNode('c'), node('t')],
+      edges: [{ id: 'e', from: 'c', to: 't' }],
+    });
+    expect(validateGraph(noPort).some((p) => p.message.includes('没指明'))).toBe(true);
+
+    const withPort = graph({
+      nodes: [condNode('c'), node('t')],
+      edges: [{ id: 'e', from: 'c', to: 't', fromPort: 'true' }],
+    });
+    expect(validateGraph(withPort)).toEqual([]);
+  });
+
+  it('同一个口连了不止一条线被拒；两个口各一条就合法', () => {
+    const dup = graph({
+      nodes: [condNode('c'), node('t'), node('u')],
+      edges: [
+        { id: 'e1', from: 'c', to: 't', fromPort: 'true' },
+        { id: 'e2', from: 'c', to: 'u', fromPort: 'true' },
+      ],
+    });
+    expect(validateGraph(dup).some((p) => p.message.includes('只能连一条'))).toBe(true);
+
+    const ok = graph({
+      nodes: [condNode('c'), node('t'), node('u')],
+      edges: [
+        { id: 'e1', from: 'c', to: 't', fromPort: 'true' },
+        { id: 'e2', from: 'c', to: 'u', fromPort: 'false' },
+      ],
+    });
+    expect(validateGraph(ok)).toEqual([]);
+  });
+
+  it('非条件节点的连线**不许**带 fromPort（端口是条件节点的语法）', () => {
+    const g = graph({
+      nodes: [node('a'), node('b')],
+      edges: [{ id: 'e', from: 'a', to: 'b', fromPort: 'true' }],
+    });
+    expect(validateGraph(g).some((p) => p.message.includes('不是条件节点'))).toBe(true);
+  });
+
+  it('schema 层就拦下乱写的出口值（只能 true / false）', () => {
+    const bad = {
+      ...graph({ nodes: [condNode('c'), node('t')], edges: [] }),
+      edges: [{ id: 'e', from: 'c', to: 't', fromPort: 'yes' }],
+    };
+    expect(canvasGraphSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('缺 prompt / 缺 keyword / 空 keyword 都被点名', () => {
+    const noPrompt = graph({
+      nodes: [{ id: 'c', kind: 'condition', x: 0, y: 0, config: { keyword: '好' } }],
+      edges: [],
+    });
+    expect(validateGraph(noPrompt as CanvasGraph).some((p) => p.message.includes('缺少 prompt'))).toBe(true);
+
+    const noKeyword = graph({
+      nodes: [{ id: 'c', kind: 'condition', x: 0, y: 0, config: { prompt: 'p' } }],
+      edges: [],
+    });
+    expect(validateGraph(noKeyword as CanvasGraph).some((p) => p.message.includes('keyword'))).toBe(true);
+
+    const emptyKeyword = graph({
+      nodes: [{ id: 'c', kind: 'condition', x: 0, y: 0, config: { prompt: 'p', keyword: '' } }],
+      edges: [],
+    });
+    const problems = validateGraph(emptyKeyword as CanvasGraph);
+    expect(problems.some((p) => p.message.includes('不能为空'))).toBe(true);
+  });
+});

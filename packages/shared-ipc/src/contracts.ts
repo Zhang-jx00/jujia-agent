@@ -390,6 +390,12 @@ export const canvasRunResultSchema = z
     error: z.string(),
     /** 逐步记录（成功时就是"真的跑了几步"的证据） */
     steps: z.array(z.string()),
+    /**
+     * B3：本次执行里**被跳过**（未选分支及下游）的节点数。
+     * 必填不是可选：界面那句"几个执行、几个被跳过"拿它说话 ——
+     * 漏传会让"跑完了（N 个节点）"把没跑的也算进去（声称比事实多，本项目头号禁区）。
+     */
+    skipped: z.number().int().nonnegative(),
   })
   .strict();
 export type CanvasRunResult = z.infer<typeof canvasRunResultSchema>;
@@ -399,7 +405,7 @@ export const canvasEventSchema = z
   .object({
     graphId: z.string().min(1),
     nodeId: z.string().min(1),
-    status: z.enum(['pending', 'running', 'ok', 'failed', 'denied', 'cancelled']),
+    status: z.enum(['pending', 'running', 'ok', 'failed', 'denied', 'cancelled', 'skipped']),
     step: z.number().int().nonnegative(),
     note: z.string(),
   })
