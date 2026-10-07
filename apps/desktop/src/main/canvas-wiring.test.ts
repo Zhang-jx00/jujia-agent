@@ -95,3 +95,30 @@ describe('事件要有归属（DESIGN §九之二 a）', () => {
     expect(canvasEventSchema.safeParse({ ...base, extra: 1 }).success).toBe(false);
   });
 });
+
+/**
+ * B2 硬要求（复核放行时点名的第二条）：局部重跑**复用同一条执行链路** ——
+ * 界面把起点交给与「运行这张图」**同一个 `canvasRun`**（多一个参数，不是新通道、不是新入口），
+ * runner 把它作为 `startFrom` 透传给**同一个编排函数**；范围计算界面与编排层共用同一份纯函数。
+ * 这条锁问的是"形状"：有人将来在画布侧自建第二套执行路径，这里先红。
+ */
+describe('B2：局部重跑复用同一链路（不许第二套执行路径）', () => {
+  const runHandlers = read('../../../../packages/shared-ipc/src/canvas-run.ts');
+
+  it('界面：重跑走的是同一个 window.jujia.canvasRun（带起点参数）', () => {
+    expect(panel).toContain('window.jujia.canvasRun(graphId, nodeId);');
+    // 范围用与编排层同一份纯函数（不是界面里自己数一遍"下游是谁"）
+    expect(panel).toContain('downstreamClosure(graph, nodeId)');
+    expect(runHandlers).toContain('downstreamClosure(graph, options.startFrom)');
+  });
+
+  it('runner：把起点原样作为 startFrom 交给编排层（同一方法、加参数）', () => {
+    expect(runner).toContain('{ startFrom: fromNodeId }');
+    expect(runner).toContain('run(graphId: string, graph: CanvasGraph, fromNodeId?: string)');
+  });
+
+  it('画布界面侧不出现第二套执行形状（runGraph / canvas-runner 都够不着界面）', () => {
+    expect(panel).not.toContain('runGraph');
+    expect(panel).not.toContain('canvas-runner');
+  });
+});

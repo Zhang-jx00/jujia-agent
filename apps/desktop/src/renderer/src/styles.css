@@ -1550,6 +1550,13 @@ html[data-jj-bg-kind='glass'] .app-shell {
   border-color: #ff7875;
 }
 
+/* ---- B2：局部重跑的"重跑段"小标 ---- */
+.jj-canvas-node-rerun {
+  margin-top: 4px;
+  color: var(--c-warning);
+  font-size: 11px;
+}
+
 /* ---- B1：拖动对齐辅助线（ViewportPortal 里，坐标单位 = 流坐标） ---- */
 .jj-align-line {
   position: absolute;

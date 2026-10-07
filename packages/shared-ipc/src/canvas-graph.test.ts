@@ -5,6 +5,7 @@ import {
   CANVAS_MAX_CONFIG_BYTES,
   CANVAS_MAX_NODES,
   canvasGraphSchema,
+  downstreamClosure,
   findCycle,
   migrateGraph,
   topoOrder,
@@ -239,5 +240,42 @@ describe('migrateGraph：迁移骨架真的会跑（批复要点②）', () => {
     const r = migrateGraph(CANVAS_GRAPH_VERSION + 1, graph());
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('更新');
+  });
+});
+
+/**
+ * B2：局部重跑的**范围计算**（纯函数，批复口径：范围 = 该节点 + 全部下游）。
+ * 界面与编排层共用这一个函数 —— 两处各写一套"下游是谁"必然会漂。
+ */
+describe('downstreamClosure：从某节点出发的下游闭包（含自身）', () => {
+  const chain = (): CanvasGraph =>
+    graph({
+      nodes: [node('a'), node('b', 'tool'), node('c')],
+      edges: [edge('a', 'b'), edge('b', 'c')],
+    });
+
+  it('链 a→b→c：从 b 出发 = {b, c}（上游 a 不在内）', () => {
+    const s = downstreamClosure(chain(), 'b');
+    expect(s).not.toBeNull();
+    expect([...(s ?? [])].sort()).toEqual(['b', 'c']);
+  });
+
+  it('从 a 出发 = 全部；从 c 出发 = {c}', () => {
+    expect([...(downstreamClosure(chain(), 'a') ?? [])].sort()).toEqual(['a', 'b', 'c']);
+    expect([...(downstreamClosure(chain(), 'c') ?? [])].sort()).toEqual(['c']);
+  });
+
+  it('菱形 a→b、a→c、b→d、c→d：从 b 出发只拿 b 与 d（c 是旁支，不牵连）', () => {
+    const diamond = graph({
+      nodes: [node('a'), node('b', 'tool'), node('c', 'tool'), node('d')],
+      edges: [edge('a', 'b'), edge('a', 'c'), edge('b', 'd'), edge('c', 'd')],
+    });
+    expect([...(downstreamClosure(diamond, 'b') ?? [])].sort()).toEqual(['b', 'd']);
+  });
+
+  it('孤立节点 = 只有自己；节点不存在 = null（明确拒绝，不是"当整图跑"）', () => {
+    const lonely = graph({ nodes: [node('x')], edges: [] });
+    expect([...(downstreamClosure(lonely, 'x') ?? [])]).toEqual(['x']);
+    expect(downstreamClosure(chain(), 'nope')).toBeNull();
   });
 });

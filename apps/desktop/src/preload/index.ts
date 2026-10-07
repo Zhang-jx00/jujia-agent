@@ -534,8 +534,9 @@ const api = {
     return canvasSaveResultSchema.parse(await ipcRenderer.invoke(IPC.CANVAS_SAVE, payload));
   },
 
-  async canvasRun(id: string): Promise<CanvasRunResult> {
-    const payload = canvasRunSchema.parse({ id });
+  async canvasRun(id: string, fromNodeId?: string): Promise<CanvasRunResult> {
+    // B2 局部重跑：`fromNodeId` 缺省 = 整图；带上 = 该节点 + 全部下游
+    const payload = canvasRunSchema.parse(fromNodeId === undefined ? { id } : { id, fromNodeId });
     return canvasRunResultSchema.parse(await ipcRenderer.invoke(IPC.CANVAS_RUN, payload));
   },
 

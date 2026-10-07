@@ -49,7 +49,11 @@ export interface CanvasRunnerDeps {
 }
 
 export interface CanvasRunner {
-  run(graphId: string, graph: CanvasGraph): Promise<CanvasRunResult>;
+  /**
+   * 跑一张图。**同一方法两用**（B2 硬要求：不许第二套执行路径）：
+   * `fromNodeId` 缺省 = 整图；带上 = 局部重跑（该节点 + 全部下游）。
+   */
+  run(graphId: string, graph: CanvasGraph, fromNodeId?: string): Promise<CanvasRunResult>;
   /** 停止一张正在跑的图（返回"是不是真的停了"） */
   stop(graphId: string): boolean;
   running(): string[];
@@ -83,9 +87,13 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
       return true;
     },
 
-    async run(graphId, graph) {
+    async run(graphId, graph, fromNodeId) {
       if (controllers.has(graphId)) {
         return { ok: false, reason: null, error: '这张图正在跑（先停止或等它跑完）', steps: [] };
+      }
+      // B2 局部重跑：起点必须是图里的节点 —— 明确说话，绝不"那就整图跑"
+      if (fromNodeId !== undefined && !graph.nodes.some((n) => n.id === fromNodeId)) {
+        return { ok: false, reason: null, error: `图里没有这个节点：${fromNodeId}`, steps: [] };
       }
       const controller = new AbortController();
       controllers.set(graphId, controller);
@@ -161,6 +169,8 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
           maxSteps: CANVAS_MAX_RUN_STEPS,
           execute,
           signal: controller.signal,
+          // B2：起点缺省 = 整图（exactOptionalPropertyTypes 下不能塞 undefined，条件展开）
+          ...(fromNodeId === undefined ? {} : { startFrom: fromNodeId }),
           onEvent: (e) => {
             // **归属在这里补上**：编排层只认识节点，graphId 是这一层的知识（批复要求 a）
             deps.emit({ graphId, nodeId: e.nodeId, status: e.status, step: e.step, note: e.note });

@@ -712,6 +712,30 @@
       "find": ".jj-palette-mask {",
       "replace": ".jj-palette-mask-hidden {",
       "test": "apps/desktop/src/renderer/src/styles-wiring.test.ts"
+    },
+    {
+      "id": "M90",
+      "desc": "局部重跑范围失效：编排层不按闭包过滤、把整图从头跑一遍（上游也被重跑，与批复口径相反）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "    runList = order.filter((id) => scope.has(id));",
+      "replace": "    runList = order;",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M91",
+      "desc": "闭包算成整图：从任意节点重跑都等于全图重跑（界面标与执行都错）",
+      "file": "packages/shared-ipc/src/canvas-graph.ts",
+      "find": "  const out = new Set<string>([startId]);",
+      "replace": "  const out = new Set<string>(graph.nodes.map((n) => n.id));",
+      "test": "packages/shared-ipc/src/canvas-graph.test.ts"
+    },
+    {
+      "id": "M92",
+      "desc": "重跑入口丢掉起点：点「从此节点重跑」实际发的是整图跑（用户以为只跑了一段）",
+      "file": "apps/desktop/src/renderer/src/features/canvas/CanvasPanel.tsx",
+      "find": "window.jujia.canvasRun(graphId, nodeId);",
+      "replace": "window.jujia.canvasRun(graphId);",
+      "test": "apps/desktop/src/main/canvas-wiring.test.ts"
     }
   ]
 }

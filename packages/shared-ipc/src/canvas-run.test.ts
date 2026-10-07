@@ -135,3 +135,96 @@ describe('runGraph：步数上界', () => {
     expect(outcome.steps[0]?.note).toContain('节点数上限');
   });
 });
+
+/**
+ * B2：局部重跑（`startFrom`）。批复口径：范围 = 该节点 + 全部下游、整体重置重跑、上游不动。
+ * 编排层只认"范围"这一个旋钮 —— 上游节点**不执行、不发事件、不在 states 里**
+ * （"没动"与"跑了"是两种事实，混在一起界面就画错了）。
+ */
+describe('runGraph：startFrom（局部重跑）', () => {
+  it('从 b 出发：只跑 {b, c}，a 一个事件都没有、也不在 states 里', async () => {
+    const { calls, execute } = recorder();
+    const events: RunEvent[] = [];
+    const outcome = await runGraph(three(), { maxSteps: 50, execute, startFrom: 'b', onEvent: (e) => events.push(e) });
+
+    expect(calls).toEqual(['b', 'c']);
+    expect(outcome.reason).toBe('done');
+    expect(outcome.states).toEqual({ b: 'ok', c: 'ok' }); // a 不在内 —— 上游没动
+    expect(events.every((e) => e.nodeId !== 'a')).toBe(true);
+    expect(events.filter((e) => e.status === 'running').map((e) => e.step)).toEqual([1, 2]);
+  });
+
+  it('步号从 1 重新数（局部重跑是它自己的那一段）', async () => {
+    const { execute } = recorder();
+    const events: RunEvent[] = [];
+    await runGraph(three(), { maxSteps: 50, execute, startFrom: 'c', onEvent: (e) => events.push(e) });
+    expect(events.filter((e) => e.status === 'running').map((e) => e.step)).toEqual([1]);
+  });
+
+  it('菱形图从 b 出发：c 是旁支不跑，d 要跑（它是 b 的下游）', async () => {
+    const g = graph(
+      [node('a'), node('b', 'tool'), node('c', 'tool'), node('d')],
+      [edge('a', 'b'), edge('a', 'c'), edge('b', 'd'), edge('c', 'd')],
+    );
+    const { calls, execute } = recorder();
+    const outcome = await runGraph(g, { maxSteps: 50, execute, startFrom: 'b' });
+    expect(calls).toEqual(['b', 'd']);
+    expect(Object.keys(outcome.states).sort()).toEqual(['b', 'd']);
+  });
+
+  it('startFrom 指向不存在的节点：整体拒绝、零执行（防御；主进程那一层会给更具体的说法）', async () => {
+    const { calls, execute } = recorder();
+    const outcome = await runGraph(three(), { maxSteps: 50, execute, startFrom: 'nope' });
+    expect(calls).toEqual([]);
+    expect(outcome.reason).toBe('failed');
+  });
+
+  it('局部重跑里失败同样即停：b 失败 → c 不跑，原因可读', async () => {
+    const { calls, execute } = recorder({ b: { ok: false, output: '', error: 'b 炸了' } });
+    const outcome = await runGraph(three(), { maxSteps: 50, execute, startFrom: 'b' });
+    expect(calls).toEqual(['b']);
+    expect(outcome.reason).toBe('failed');
+    expect(outcome.states['c']).toBe('pending');
+    expect(outcome.steps.at(-1)?.note).toContain('b 炸了');
+  });
+
+  it('局部重跑中取消（执行中抛 AbortError）：当前节点 cancelled、理由独立、上游不在 states 里', async () => {
+    const controller = new AbortController();
+    const calls: string[] = [];
+    const execute = async (n: CanvasNode): Promise<NodeResult> => {
+      calls.push(n.id);
+      if (n.id === 'b') {
+        controller.abort();
+        throw new Error('aborted');
+      }
+      return { ok: true, output: 'ok', error: '' };
+    };
+    const outcome = await runGraph(three(), { maxSteps: 50, execute, startFrom: 'b', signal: controller.signal });
+    expect(calls).toEqual(['b']);
+    expect(outcome.reason).toBe('cancelled');
+    expect(outcome.states['b']).toBe('cancelled');
+    expect('a' in outcome.states).toBe(false);
+  });
+
+  it('局部重跑中取消（不抛、由循环顶判断）：该段其余节点标 cancelled、不会再执行', async () => {
+    const controller = new AbortController();
+    const calls: string[] = [];
+    const execute = async (n: CanvasNode): Promise<NodeResult> => {
+      calls.push(n.id);
+      if (n.id === 'b') controller.abort(); // 信号到了，但这一跳正常返回 —— 与整图口径一致
+      return { ok: true, output: 'ok', error: '' };
+    };
+    const outcome = await runGraph(three(), { maxSteps: 50, execute, startFrom: 'b', signal: controller.signal });
+    expect(calls).toEqual(['b']); // c 不再执行
+    expect(outcome.states['c']).toBe('cancelled');
+    expect(outcome.reason).toBe('cancelled');
+    expect('a' in outcome.states).toBe(false);
+  });
+
+  it('不传 startFrom 时行为与从前一字不差（整图跑：三个都跑）', async () => {
+    const { calls, execute } = recorder();
+    const outcome = await runGraph(three(), { maxSteps: 50, execute });
+    expect(calls).toEqual(['a', 'b', 'c']);
+    expect(outcome.states).toEqual({ a: 'ok', b: 'ok', c: 'ok' });
+  });
+});

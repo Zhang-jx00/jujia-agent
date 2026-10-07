@@ -291,6 +291,30 @@ export function topoOrder(graph: CanvasGraph): string[] | null {
 }
 
 /**
+ * **从某节点出发的下游闭包（含自身）**（B2 局部重跑的"范围"定义，批复口径第一条）。
+ *
+ * 界面（标记"重跑段"、重置哪些卡片）与编排层（只跑哪些节点）**共用这一个函数** ——
+ * 两处各写一套"下游是谁"，迟早会漂成两种答案。节点不存在返回 `null`：
+ * "从空气重跑"必须**明确拒绝**，绝不能被当成"那就跑整图"。
+ */
+export function downstreamClosure(graph: CanvasGraph, startId: string): Set<string> | null {
+  if (!graph.nodes.some((n) => n.id === startId)) return null;
+  const out = new Set<string>([startId]);
+  // 边数有上限（400），直接往返扫到不动为止就够；不需要建邻接表
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const e of graph.edges) {
+      if (out.has(e.from) && !out.has(e.to)) {
+        out.add(e.to);
+        grew = true;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * 旧版本图 → 当前版本（迁移骨架；批复要点②要求"入口与测试都在，而不是写着好看"）。
  *
  * 现在只有 v1，所以：

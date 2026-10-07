@@ -86,9 +86,20 @@ export function registerCanvasIpc(ctx: IpcContext): void {
   });
 
   handle(IPC.CANVAS_RUN, async (_e, payload: unknown) => {
-    const id = (payload as { id?: unknown } | null)?.id;
+    const p = payload as { id?: unknown; fromNodeId?: unknown } | null;
+    const id = p?.id;
     if (typeof id !== 'string' || id === '') {
       return canvasRunResultSchema.parse({ ok: false, reason: null, error: '缺少图标识', steps: [] });
+    }
+    // B2：局部重跑的起点（可选）——现读现验，坏形状**明确拒绝**，不静默当整图跑
+    const fromNodeId = p?.fromNodeId;
+    if (fromNodeId !== undefined && (typeof fromNodeId !== 'string' || fromNodeId === '')) {
+      return canvasRunResultSchema.parse({
+        ok: false,
+        reason: null,
+        error: '重跑的起点不合法（要的是节点 id）',
+        steps: [],
+      });
     }
     const loaded = await store().load(id);
     if (!loaded.ok) {
@@ -104,7 +115,7 @@ export function registerCanvasIpc(ctx: IpcContext): void {
         steps: [],
       });
     }
-    const result = await runner().run(id, loaded.graph);
+    const result = await runner().run(id, loaded.graph, fromNodeId);
     return canvasRunResultSchema.parse({
       ok: result.ok,
       reason: result.reason,

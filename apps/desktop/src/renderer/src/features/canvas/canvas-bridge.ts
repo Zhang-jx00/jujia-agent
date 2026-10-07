@@ -16,6 +16,8 @@ export interface CanvasNodeData extends Record<string, unknown> {
   /** 工具节点的参数（JSON 文本）；提示词节点不用 */
   argsText?: string;
   status: string;
+  /** B2：本节点在**最近一次局部重跑**的范围里（卡片上打「重跑」标；整图跑/重开图时清掉） */
+  rerun?: boolean;
 }
 export type FlowNode = Node<CanvasNodeData>;
 

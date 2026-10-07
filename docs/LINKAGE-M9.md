@@ -11,7 +11,9 @@
 ```
 画布界面 (CanvasPanel)
    │  ① canvas:save —— 保存前过 validateGraph（成环/重复/缺配置/超限/疑似密钥字段）
-   │  ② canvas:run  —— 主进程重新加载 + **二次校验**（磁盘上的图可能被手改过）
+   │  ② canvas:run  —— 主进程重新加载 + **二次校验**（磁盘上的图可能被手改过）；
+   │                   **带 `fromNodeId` = 局部重跑**（B2：只跑该节点 + 全部下游闭包，
+   │                   **同一个 runner 方法**，上游不动；不新增通道）
    ▼
 编排层 packages/shared-ipc/src/canvas-run.ts   ← 纯逻辑：拓扑序、状态机、取消、步数上界
    │      它**不碰任何 IO**：执行能力由调用方注入

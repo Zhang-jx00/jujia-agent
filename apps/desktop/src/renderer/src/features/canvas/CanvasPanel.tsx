@@ -17,6 +17,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import {
   canvasGraphSchema,
+  downstreamClosure,
   findCycle,
   type CanvasEventPayload,
   type CanvasGraph,
@@ -67,6 +68,12 @@ function CanvasNodeCard({ data }: { data: CanvasNodeData }): ReactElement {
       <div className="jj-canvas-node-kind">{data.kind === 'prompt' ? '提示词' : '工具'}</div>
       <div className="jj-canvas-node-body">{data.configText}</div>
       <div className="jj-canvas-node-status">{data.status}</div>
+      {/* B2：局部重跑的"重跑段"小标（随下一次整图运行 / 重开图清掉） */}
+      {data.rerun === true && (
+        <div className="jj-canvas-node-rerun" data-rerun="1">
+          ↻ 重跑
+        </div>
+      )}
     </div>
   );
 }
@@ -290,9 +297,48 @@ export function CanvasPanel(): ReactElement {
         setMsg({ kind: 'err', text: `先修好再跑：${savedFirst.error}` });
         return;
       }
-      setNodes((prev) => prev.map((n) => ({ ...n, data: { ...n.data, status: 'pending' } })));
+      // 整图跑：状态与「重跑」标一起清（重跑段是"上一次局部重跑"的记号）
+      setNodes((prev) => prev.map((n) => ({ ...n, data: { ...n.data, status: 'pending', rerun: false } })));
       const r = await window.jujia.canvasRun(graphId);
-      setMsg(r.ok ? { kind: 'ok', text: `跑完了（${r.steps.length} 步）` } : { kind: 'err', text: r.error });
+      // 数量按**节点数**说（回执行是步骤事件的条数，会多一倍 —— 两种说法别混用）
+      setMsg(r.ok ? { kind: 'ok', text: `跑完了（${String(graph.nodes.length)} 个节点）` } : { kind: 'err', text: r.error });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * B2 局部重跑：**同一个 `canvasRun` 入口**（多带一个起点参数）——
+   * 范围 = 该节点 + 全部下游（`downstreamClosure`，与编排层同一份纯函数）；
+   * 上游不动、不引入"过期"概念（旧状态直接重置重跑，运行历史本来就不持久化）。
+   */
+  async function runFrom(nodeId: string): Promise<void> {
+    setBusy(true);
+    setMsg(null);
+    setRunState(null);
+    try {
+      const savedFirst = await window.jujia.canvasSave(graphId, graph);
+      if (!savedFirst.ok) {
+        setMsg({ kind: 'err', text: `先修好再跑：${savedFirst.error}` });
+        return;
+      }
+      const scope = downstreamClosure(graph, nodeId);
+      setNodes((prev) =>
+        prev.map((n) => ({
+          ...n,
+          data: { ...n.data, ...(scope?.has(n.id) === true ? { status: 'pending', rerun: true } : {}) },
+        })),
+      );
+      const r = await window.jujia.canvasRun(graphId, nodeId);
+      setMsg(
+        r.ok
+          ? {
+              kind: 'ok',
+              // 步数按**节点数**说（scope.size），不拿回执行数（那是步骤事件的条数，会多一倍）
+              text: `从 ${nodeId} 重跑：${String(scope?.size ?? 0)} 个节点（该段已重置重跑；上游未动）`,
+            }
+          : { kind: 'err', text: r.error },
+      );
     } finally {
       setBusy(false);
     }
@@ -390,6 +436,15 @@ export function CanvasPanel(): ReactElement {
                 placeholder='参数 JSON，如 {"path": "."}'
               />
             )}
+            {/* B2：局部重跑入口 —— 走的是与「运行这张图」同一个 canvasRun（多带一个起点） */}
+            <button
+              type="button"
+              className="w2-btn"
+              disabled={busy}
+              onClick={() => void runFrom(selectedNode.id)}
+            >
+              从此节点重跑
+            </button>
           </div>
         )}
 

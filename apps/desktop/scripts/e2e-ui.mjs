@@ -2222,6 +2222,47 @@ try {
   }
   ok('拖动中出辅助线、松手即清掉；节点真的贴到同一条竖线（±1.5px，先网格后对齐）');
 
+  /**
+   * B2：局部重跑。真值三层：① 整图先跑一遍（n1/n2/n3 都 ok，且**没有**重跑标）；
+   * ② 从中间节点 n2 重跑 → 执行行说"2 个节点"、n2/n3 带上重跑标；③ 上游 n1 保持 ok 且**没有**标
+   * （它没被重跑）—— 三个都用 DOM 真值断，不看界面文案自述之外的任何东西。
+   */
+  step('B2 画布：从中间节点重跑 —— 只跑该段、上游不动、重跑标点在节点上');
+  await win3.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  await win3.locator(`button[data-graph-id="e2e-canvas-chain-0001"]`).first().click();
+  if ((await waitText3('已打开 e2e-canvas-chain-0001', 10_000)) !== true) {
+    fail('重新打开三节点图失败（B2 步骤的起点）', (await body3()).slice(0, 700));
+  }
+  await win3.locator('button', { hasText: '运行这张图' }).first().click();
+  if ((await waitText3('跑完了（3 个节点）', 20_000)) !== true) {
+    fail('整图没有跑完（B2 的前置状态）', (await body3()).slice(0, 900));
+  }
+  if ((await win3.locator('[data-rerun="1"]').count()) !== 0) {
+    fail('整图跑完之后不该有"重跑"标（那是局部重跑的记号）');
+  }
+  await win3.locator('.react-flow__node').nth(1).click();
+  if ((await waitText3('从此节点重跑', 8_000)) !== true) {
+    fail('选中节点后没有出现"从此节点重跑"入口', (await body3()).slice(0, 700));
+  }
+  await win3.locator('button', { hasText: '从此节点重跑' }).first().click();
+  if ((await waitText3('从 n2 重跑：2 个节点', 20_000)) !== true) {
+    fail('从 n2 的重跑没有按"2 个节点"完成', (await body3()).slice(0, 900));
+  }
+  const rerunMarks = await win3.locator('[data-rerun="1"]').count();
+  if (rerunMarks !== 2) fail(`重跑标应该恰好在 2 个节点上（实际 ${String(rerunMarks)} 个）`);
+  const statusOf = (i) => win3.locator('.react-flow__node').nth(i).locator('.jj-canvas-node').getAttribute('data-node-status');
+  const s1 = await statusOf(0);
+  const s2 = await statusOf(1);
+  const s3 = await statusOf(2);
+  if (s1 !== 'ok' || s2 !== 'ok' || s3 !== 'ok') {
+    fail(`重跑之后三个节点的状态不对：n1=${String(s1)} n2=${String(s2)} n3=${String(s3)}`);
+  }
+  const n1Marked = await win3.locator('.react-flow__node').nth(0).locator('[data-rerun="1"]').count();
+  const n2Marked = await win3.locator('.react-flow__node').nth(1).locator('[data-rerun="1"]').count();
+  if (n1Marked !== 0) fail('上游 n1 被打上了"重跑"标 —— 它不该被重跑');
+  if (n2Marked !== 1) fail('重跑的起点 n2 上没有"重跑"标');
+  ok('从 n2 重跑：执行行说"2 个节点"、n2/n3 带重跑标、n1 保持 ok 且无标（上游未动）');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -2241,5 +2282,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ 干净退出');
 process.exit(0);

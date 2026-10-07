@@ -1,4 +1,4 @@
-import { topoOrder, type CanvasGraph, type CanvasNode } from './canvas-graph';
+import { downstreamClosure, topoOrder, type CanvasGraph, type CanvasNode } from './canvas-graph';
 
 /**
  * 画布执行器的**编排层**（M9a）
@@ -55,6 +55,12 @@ export interface RunOptions {
   onEvent?: (event: RunEvent) => void;
   /** 取消信号 */
   signal?: AbortSignal;
+  /**
+   * **局部重跑**（B2）：只跑"该节点 + 全部下游（闭包，含自身）"，其余节点不执行、不发事件、
+   * 不进 `states`（"没动"与"跑了"是两种事实，混在一起界面就画错了）。不传 = 整图。
+   * 指向不存在的节点 = **整体拒绝**（绝不"那就跑整图"）。
+   */
+  startFrom?: string;
 }
 
 /**
@@ -72,7 +78,6 @@ const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true;
 export async function runGraph(graph: CanvasGraph, options: RunOptions): Promise<RunOutcome> {
   const order = topoOrder(graph);
   const states: Record<string, NodeStatus> = {};
-  for (const n of graph.nodes) states[n.id] = 'pending';
   const steps: RunEvent[] = [];
 
   if (order === null) {
@@ -80,6 +85,19 @@ export async function runGraph(graph: CanvasGraph, options: RunOptions): Promise
     for (const n of graph.nodes) states[n.id] = 'failed';
     return { states, steps, reason: 'failed' };
   }
+
+  /** B2：本次要跑的名单 —— 整图 = 拓扑序；局部重跑 = 闭包内的节点（其余**不动**：不执行/不发事件/不进 states） */
+  let runList = order;
+  if (options.startFrom !== undefined) {
+    const scope = downstreamClosure(graph, options.startFrom);
+    if (scope === null) {
+      // 防御：主进程的 runner 会先给出更具体的说法；这里绝不"那就跑整图"
+      for (const n of graph.nodes) states[n.id] = 'failed';
+      return { states, steps, reason: 'failed' };
+    }
+    runList = order.filter((id) => scope.has(id));
+  }
+  for (const id of runList) states[id] = 'pending';
 
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const emit = (nodeId: string, status: NodeStatus, step: number, note: string): void => {
@@ -90,13 +108,14 @@ export async function runGraph(graph: CanvasGraph, options: RunOptions): Promise
     options.onEvent?.(event);
   };
 
-  if (order.length > options.maxSteps) {
-    for (const id of order) emit(id, 'failed', 0, `超过单次执行的节点数上限（${String(options.maxSteps)}）`);
+  // 上界按**本次要跑的名单**算（局部重跑只跑一段，不该拿全图节点数判它超限）
+  if (runList.length > options.maxSteps) {
+    for (const id of runList) emit(id, 'failed', 0, `超过单次执行的节点数上限（${String(options.maxSteps)}）`);
     return { states, steps, reason: 'failed' };
   }
 
   let step = 0;
-  for (const id of order) {
+  for (const id of runList) {
     if (isAborted(options.signal)) {
       emit(id, 'cancelled', step, '已取消');
       continue;

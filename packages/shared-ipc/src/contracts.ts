@@ -376,7 +376,13 @@ export const canvasSaveResultSchema = z
   .strict();
 export type CanvasSaveResult = z.infer<typeof canvasSaveResultSchema>;
 
-export const canvasRunSchema = z.object({ id: z.string().min(1).max(64) }).strict();
+export const canvasRunSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    /** B2 局部重跑：从这个节点起（该节点 + 全部下游）；缺省 = 整图 */
+    fromNodeId: z.string().min(1).max(64).optional(),
+  })
+  .strict();
 export const canvasRunResultSchema = z
   .object({
     ok: z.boolean(),
