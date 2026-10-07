@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactElement } from 'react';
+import type { MouseEvent as ReactMouseEvent, ReactElement } from 'react';
 import {
   Background,
   Controls,
   ReactFlow,
+  ViewportPortal,
   addEdge,
   type Connection,
   type Edge,
   type NodeChange,
   type EdgeChange,
+  type ReactFlowInstance,
   applyNodeChanges,
   applyEdgeChanges,
 } from '@xyflow/react';
@@ -21,26 +23,42 @@ import {
   type CanvasListItem,
 } from '@jujia/shared-ipc';
 import {
+  CANVAS_GRID,
+  planDragPosition,
   toFlowEdge,
   toFlowNode,
   toGraph,
+  type AlignLine,
   type CanvasNodeData,
   type FlowNode,
+  type Rect,
 } from './canvas-bridge';
+import { CommandPalette, type CanvasCommand } from './CommandPalette';
 
 /**
- * 无限画布（M9a）的界面层。
+ * 无限画布（M9a + B1）的界面层。
  *
- * 三条纪律写在这里：
+ * 纪律写在这里：
  * 1. **图只是编排**：这个组件从不执行任何东西 —— 跑图只调 `canvasRun`，节点状态从事件里来；
  * 2. **事件按归属收**：`onCanvasEvent` 推来的是**所有**图的事件，这里只认 `graphId === 当前图`
  *    （T5"事件按会话分发"的推广；批复追加要求 a）；
  * 3. **连线先用同一套纯规则判**（`findCycle` / 自环 / 重复边）：界面即时反馈用的是
- *    与主进程保存前**同一个** `canvas-graph.ts`，不是另一份规则。
+ *    与主进程保存前**同一个** `canvas-graph.ts`，不是另一份规则；
+ * 4. **B1 的拖动/对齐/面板都只是"看得更顺"**：判定与吸附全在 `canvas-bridge.ts` 的纯函数里
+ *    （**先网格、后对齐**），命令面板只是既有动作的**第二个入口**（与按钮共用同一批函数引用，接线锁钉住）。
  */
 
 const NEW_GRAPH_ID = (): string => crypto.randomUUID();
 const NODE_ID = (): string => `n-${Math.random().toString(36).slice(2, 8)}`;
+/** 实测尺寸出来之前的兜底（对齐判定要用到宽高） */
+const DEFAULT_SIZE = { width: 176, height: 64 };
+
+const rectOf = (n: FlowNode): Rect => ({
+  x: n.position.x,
+  y: n.position.y,
+  width: n.measured?.width ?? DEFAULT_SIZE.width,
+  height: n.measured?.height ?? DEFAULT_SIZE.height,
+});
 
 /** 节点卡片：把"哪个节点、什么状态、配的是什么"画在一张卡上（e2e 也靠这层文本断言） */
 function CanvasNodeCard({ data }: { data: CanvasNodeData }): ReactElement {
@@ -67,6 +85,15 @@ export function CanvasPanel(): ReactElement {
   const [runState, setRunState] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const viewportRef = useRef({ x: 0, y: 0, zoom: 1 });
+  const rfRef = useRef<ReactFlowInstance<FlowNode, Edge> | null>(null);
+  /** B1：拖动时的对齐辅助线（只画不判，判定在纯函数里） */
+  const [guides, setGuides] = useState<{ vertical: AlignLine | null; horizontal: AlignLine | null }>({
+    vertical: null,
+    horizontal: null,
+  });
+  /** B1：空白处右键的建节点菜单（屏幕坐标） */
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   /** 保存与运行都要用的当前图（纯函数，不做 IO） */
   const graph = useMemo(
@@ -104,6 +131,18 @@ export function CanvasPanel(): ReactElement {
     return off;
   }, [graphId]);
 
+  /** B1：Ctrl+K 打开命令面板（鼠标党走侧栏的按钮，两条路；e2e 从按钮进） */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   /** 连线合法性：与主进程保存前**同一套**规则（自环 / 重复 / 成环） */
   const isValidConnection = useCallback(
     (c: Connection | Edge): boolean => {
@@ -118,16 +157,83 @@ export function CanvasPanel(): ReactElement {
     [nodes, edges, connectionId],
   );
 
-  const addNode = (kind: 'prompt' | 'tool'): void => {
+  const addNodeAt = (kind: 'prompt' | 'tool', at?: { x: number; y: number }): void => {
     const id = NODE_ID();
     setNodes((prev) => [
       ...prev,
       {
         id,
-        position: { x: 80 + prev.length * 40, y: 80 + prev.length * 30 },
+        position: at ?? { x: 80 + prev.length * 40, y: 80 + prev.length * 30 },
         data: { kind, configText: kind === 'prompt' ? '把下面这段压成三条要点' : 'list_dir', status: 'pending' },
       },
     ]);
+  };
+  const addNode = (kind: 'prompt' | 'tool'): void => addNodeAt(kind);
+
+  /**
+   * B1：拖动位置 = **先网格、后对齐**（判定与吸附全在纯函数里）。
+   * 关键教训（由 e2e 抓出，2026-10-06）：① 吸附必须在 `onNodesChange` 的位置变更里改
+   * —— 写在 `onNodeDrag` 里的 setNodes 会被随后到来的位置变更覆盖；
+   * ② **松手瞬间还会再来一条 `dragging:false` 的位置变更**（React Flow 的
+   * `updateNodePositions(items, false)`），只改 `dragging:true` 的话，吸附结果会被它覆盖回纯网格值
+   * （表现：A 停在 256 而不是对齐的 260）。所以：**凡带位置的位置变更，一律过规划** ——
+   * 规划对新落点是幂等的（`plan(plan(p)) === plan(p)`，单测钉住）。
+   */
+  const applyDragChanges = (changes: NodeChange<FlowNode>[], prev: FlowNode[]): FlowNode[] => {
+    const adjusted = changes.map((c) => {
+      if (c.type === 'position' && c.position !== undefined) {
+        const me = prev.find((n) => n.id === c.id);
+        if (me === undefined) return c;
+        const plan = planDragPosition(
+          c.position,
+          { width: me.measured?.width ?? DEFAULT_SIZE.width, height: me.measured?.height ?? DEFAULT_SIZE.height },
+          prev.filter((n) => n.id !== c.id).map(rectOf),
+          { grid: CANVAS_GRID },
+        );
+        return { ...c, position: { x: plan.x, y: plan.y } };
+      }
+      return c;
+    });
+    return applyNodeChanges(adjusted, prev);
+  };
+
+  /** B1：辅助线只画不判 —— 判在同一个纯函数里（此时 node.position 已是吸附后的落点，规划是幂等的） */
+  const onNodeDrag = useCallback(
+    (_event: unknown, node: FlowNode): void => {
+      const plan = planDragPosition(
+        node.position,
+        { width: node.measured?.width ?? DEFAULT_SIZE.width, height: node.measured?.height ?? DEFAULT_SIZE.height },
+        nodes.filter((n) => n.id !== node.id).map(rectOf),
+        { grid: CANVAS_GRID },
+      );
+      setGuides({ vertical: plan.vertical, horizontal: plan.horizontal });
+    },
+    [nodes],
+  );
+
+  const onNodeDragStop = useCallback((): void => {
+    setGuides({ vertical: null, horizontal: null });
+  }, []);
+
+  /** B1：空白处右键 → 菜单（菜单项的落点用屏幕坐标换算，不猜 viewport） */
+  const onPaneContextMenu = (e: MouseEvent | ReactMouseEvent<Element>): void => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const createFromMenu = (kind: 'prompt' | 'tool'): void => {
+    if (menu === null) return;
+    const at = rfRef.current?.screenToFlowPosition({ x: menu.x, y: menu.y });
+    setMenu(null);
+    if (at !== undefined) addNodeAt(kind, at);
+  };
+
+  /** B1：双击空白处直接建一个提示词节点（落在双击点） */
+  const onCanvasDoubleClick = (e: ReactMouseEvent<HTMLDivElement>): void => {
+    const target = e.target as HTMLElement;
+    if (!target.classList.contains('react-flow__pane')) return; // 双击节点/连线不算
+    const at = rfRef.current?.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    if (at !== undefined) addNodeAt('prompt', at);
   };
 
   const patchSelected = (patch: Partial<CanvasNodeData>): void => {
@@ -196,6 +302,20 @@ export function CanvasPanel(): ReactElement {
     await window.jujia.canvasStop(graphId);
   }
 
+  /**
+   * B1：命令面板的命令集 —— **只是既有动作的第二个入口**：
+   * 每条 `run` 都调上面那两个函数（或 `addNode` / `rfRef.fitView`）的**同一个引用**，
+   * 面板里没有任何新的 IPC / 执行调用（接线锁钉住）。
+   */
+  const paletteCommands: CanvasCommand[] = [
+    { id: 'add-prompt', label: '添加提示词节点', run: () => addNode('prompt') },
+    { id: 'add-tool', label: '添加工具节点', run: () => addNode('tool') },
+    { id: 'save', label: '保存这张图', run: () => void save() },
+    { id: 'run', label: '运行这张图', run: () => void run() },
+    { id: 'stop', label: '停止', run: () => void stop() },
+    { id: 'fit', label: 'FitView 适应视图', run: () => rfRef.current?.fitView() },
+  ];
+
   const selectedNode = nodes.find((n) => n.id === selected) ?? null;
 
   return (
@@ -207,6 +327,9 @@ export function CanvasPanel(): ReactElement {
           </button>
           <button type="button" className="w2-btn" onClick={() => addNode('tool')}>
             + 工具节点
+          </button>
+          <button type="button" className="w2-btn" onClick={() => setPaletteOpen(true)}>
+            命令面板（Ctrl+K）
           </button>
         </div>
 
@@ -278,11 +401,11 @@ export function CanvasPanel(): ReactElement {
         )}
       </div>
 
-      <div className="jj-canvas-main" aria-label="画布">
+      <div className="jj-canvas-main" aria-label="画布" onDoubleClick={onCanvasDoubleClick}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={(changes: NodeChange<FlowNode>[]) => setNodes((prev) => applyNodeChanges(changes, prev))}
+          onNodesChange={(changes: NodeChange<FlowNode>[]) => setNodes((prev) => applyDragChanges(changes, prev))}
           onEdgesChange={(changes: EdgeChange[]) => setEdges((prev) => applyEdgeChanges(changes, prev))}
           onConnect={(c: Connection) => {
             if (!isValidConnection(c)) {
@@ -292,17 +415,63 @@ export function CanvasPanel(): ReactElement {
             setEdges((prev) => addEdge({ ...c, id: `e-${Math.random().toString(36).slice(2, 8)}` }, prev));
           }}
           onNodeClick={(_e, n) => setSelected(n.id)}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          onPaneClick={() => setMenu(null)}
+          onPaneContextMenu={onPaneContextMenu}
+          onInit={(instance: ReactFlowInstance<FlowNode, Edge>) => {
+            rfRef.current = instance;
+          }}
           onMoveEnd={(_e, vp) => {
             viewportRef.current = { x: vp.x, y: vp.y, zoom: vp.zoom };
           }}
           nodeTypes={NODE_TYPES}
           nodesDraggable
+          snapToGrid
+          snapGrid={[CANVAS_GRID, CANVAS_GRID]}
+          zoomOnDoubleClick={false}
           fitView
         >
           <Background />
           <Controls />
+          <ViewportPortal>
+            {guides.vertical !== null && (
+              <div
+                className="jj-align-line"
+                data-align="v"
+                style={{
+                  left: guides.vertical.pos,
+                  top: guides.vertical.from,
+                  height: Math.max(guides.vertical.to - guides.vertical.from, 1),
+                }}
+              />
+            )}
+            {guides.horizontal !== null && (
+              <div
+                className="jj-align-line"
+                data-align="h"
+                style={{
+                  top: guides.horizontal.pos,
+                  left: guides.horizontal.from,
+                  width: Math.max(guides.horizontal.to - guides.horizontal.from, 1),
+                }}
+              />
+            )}
+          </ViewportPortal>
         </ReactFlow>
+        {menu !== null && (
+          <div className="jj-canvas-menu" role="menu" style={{ left: menu.x, top: menu.y }}>
+            <button type="button" role="menuitem" onClick={() => createFromMenu('prompt')}>
+              加一个提示词节点
+            </button>
+            <button type="button" role="menuitem" onClick={() => createFromMenu('tool')}>
+              加一个工具节点
+            </button>
+          </div>
+        )}
       </div>
+
+      <CommandPalette open={paletteOpen} commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }

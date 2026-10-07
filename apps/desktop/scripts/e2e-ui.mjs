@@ -1465,9 +1465,20 @@ try {
   if ((await waitText2('还有 1 个请求在排队')) !== true) {
     fail('B 没有排进队列（弹窗应当一次只展示一张，但要如实说明还有几张在等）', (await body2()).slice(0, 900));
   }
-  await new Promise((r) => setTimeout(r, 3_600));
-
-  const t9Body = await body2();
+  /*
+   * 等 A 的过期说明出现 —— **有界轮询**，不是固定等待（2026-10-06 定位并修）：
+   * 原先固定 sleep 3.6s 的编舞在机器忙时会滑到 B 自己的 10 秒窗上（台账登记过的偶发红②，
+   * 本轮实测两连红：一次"A 的说明没来"、一次"B 的卡不见了"——同一根因）。
+   * 轮询在健康运行时 1 秒内命中；负载下最多再等 8 秒，且**读到同一帧**做下面三条断言、
+   * 随后**立刻**批 B，不再让它自己的时间窗被等待吃掉。
+   */
+  let t9Body = '';
+  const t9Deadline = Date.now() + 8_000;
+  while (Date.now() < t9Deadline) {
+    t9Body = await body2();
+    if (t9Body.includes('在主进程等待超时')) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
   if (!t9Body.includes('在主进程等待超时')) {
     fail('A 超时之后界面没有说明"按超时自动关闭、那一步没执行"', t9Body.slice(0, 900));
   }
@@ -2107,6 +2118,110 @@ try {
   }
   ok('工具节点过同一扇门：弹审批、拒绝后节点状态=被拒、磁盘上没有文件');
 
+  /**
+   * B1：命令面板 / 右键与双击建节点 / 对齐辅助线。全是界面行为，断言也全在界面上：
+   * 面板从**按钮**进（键盘 Ctrl+K 另验一次开关）；建节点用 DOM 计数；对齐用"拖动中出线、
+   * 松手后真的贴到同一条竖线（±1.5px）"两头验 —— 不碰任何执行语义。
+   */
+  step('B1 画布：命令面板（按钮与 Ctrl+K 两条路）过滤后建节点；右键菜单与双击在落点建节点');
+  await win3.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  await win3.locator(`button[data-graph-id="e2e-canvas-chain-0001"]`).first().click();
+  if ((await waitText3('已打开 e2e-canvas-chain-0001', 10_000)) !== true) {
+    fail('重新打开三节点图失败（B1 步骤的起点）', (await body3()).slice(0, 700));
+  }
+  const nodeCount = () => win3.locator('.jj-canvas-node').count();
+  const baseCount = await nodeCount();
+
+  await win3.locator('button', { hasText: '命令面板' }).first().click();
+  if ((await win3.locator('[aria-label="命令面板"]').count()) !== 1) {
+    fail('点了「命令面板」按钮，面板没有出来', (await body3()).slice(0, 500));
+  }
+  await win3.locator('input[aria-label="命令"]').fill('添加提示词');
+  await win3.locator('.jj-palette-item', { hasText: '添加提示词节点' }).first().click();
+  if ((await win3.locator('[aria-label="命令面板"]').count()) !== 0) fail('执行命令后面板没有关掉');
+  if ((await nodeCount()) !== baseCount + 1) {
+    fail(`命令面板执行"添加提示词节点"后节点数不对：${String(baseCount)} → ${String(await nodeCount())}`);
+  }
+  // 键盘那条路：Ctrl+K 开、Esc 关（只验开关，不重复执行命令）
+  await win3.keyboard.press('Control+k');
+  if ((await win3.locator('[aria-label="命令面板"]').count()) !== 1) fail('Ctrl+K 没有打开命令面板');
+  await win3.keyboard.press('Escape');
+  if ((await win3.locator('[aria-label="命令面板"]').count()) !== 0) fail('Esc 没有关掉命令面板');
+  ok('命令面板：按钮与 Ctrl+K 都能开，过滤后执行建节点（+1），执行后自动关、Esc 能关');
+
+  const mainBox = await win3.locator('.jj-canvas-main').boundingBox();
+  if (mainBox === null) fail('取不到画布区域的框');
+  // 双击空白处（右下角一带没有控件）：落点建一个提示词节点
+  await win3.mouse.dblclick(mainBox.x + mainBox.width - 90, mainBox.y + mainBox.height - 90);
+  if ((await nodeCount()) !== baseCount + 2) {
+    fail(`双击空白处没有建出节点：${String(baseCount + 1)} → ${String(await nodeCount())}`);
+  }
+  // 右键空白处：出菜单 → 选"加一个工具节点" → 再 +1，且新节点带"工具"字样
+  await win3.mouse.click(mainBox.x + mainBox.width - 160, mainBox.y + mainBox.height - 140, { button: 'right' });
+  if ((await waitText3('加一个工具节点', 8_000)) !== true) {
+    fail('空白处右键没有出现建节点菜单', (await body3()).slice(0, 700));
+  }
+  await win3.locator('button', { hasText: '加一个工具节点' }).first().click();
+  if ((await nodeCount()) !== baseCount + 3) {
+    fail(`右键菜单建节点后数量不对：${String(baseCount + 2)} → ${String(await nodeCount())}`);
+  }
+  if ((await win3.locator('.jj-canvas-node', { hasText: '工具' }).count()) < 1) {
+    fail('右键菜单建的节点不是工具节点（卡片上没有"工具"字样）');
+  }
+  ok('双击与右键都能建节点，落点与类型都对（DOM 计数为证）');
+
+  step('B1 画布：拖动时出现对齐辅助线，松手后真的贴到同一条竖线（先网格、后对齐）');
+  const nodeEls = win3.locator('.react-flow__node');
+  /** 节点的**流坐标**（React Flow 把 translate(x,y) 写在节点 wrapper 的 style 上） */
+  const flowPos = async (i) =>
+    win3.evaluate((idx) => {
+      const el = document.querySelectorAll('.react-flow__node')[idx];
+      if (!el) return null;
+      const m = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(el.style.transform);
+      return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
+    }, i);
+  /** 当前视口缩放（fitView 会改它 —— 屏幕像素差 ≠ 流坐标差，必须换算） */
+  const zoom = await win3.evaluate(() => {
+    const vp = document.querySelector('.react-flow__viewport');
+    const m = vp ? /scale\((-?[\d.]+)\)/.exec(vp.style.transform) : null;
+    return m ? Number(m[1]) : 1;
+  });
+  const pA0 = await flowPos(0);
+  const pB0 = await flowPos(1);
+  if (pA0 === null || pB0 === null) fail('读不到节点的流坐标（对齐断言的前提）');
+  const boxA0 = await nodeEls.nth(0).boundingBox();
+  if (boxA0 === null) fail('取不到第一个节点的屏幕框');
+  const startX = boxA0.x + boxA0.width / 2;
+  const startY = boxA0.y + boxA0.height / 2;
+  await win3.mouse.move(startX, startY);
+  await win3.mouse.down();
+  // 先小动一步"点火"（拖动有 1px 阈值），再往目标走
+  await win3.mouse.move(startX + 3, startY + 3, { steps: 2 });
+  const targetDx = (pB0.x - pA0.x) * zoom;
+  const targetDy = 60; // 屏幕像素：往下挪开一点，避免和对方重叠
+  let guideSeen = false;
+  // 网格取整最多把落点挪 ±8 流坐标 —— 在目标点周围按流坐标 ±12、步长 2 扫一圈找吸附窗口
+  for (let off = -12; off <= 12 && !guideSeen; off += 2) {
+    await win3.mouse.move(startX + targetDx + off * zoom, startY + targetDy, { steps: 3 });
+    if ((await win3.locator('.jj-align-line').count()) > 0) guideSeen = true;
+  }
+  const pADrag = await flowPos(0);
+  if (!guideSeen) {
+    await win3.mouse.up();
+    fail(
+      `拖动靠近对方左线时没有出现对齐辅助线（拖动是否生效：起点 ${JSON.stringify(pA0)} → 途中 ${JSON.stringify(pADrag)}；zoom=${String(zoom)}）`,
+      (await body3()).slice(0, 400),
+    );
+  }
+  await win3.mouse.up();
+  if ((await win3.locator('.jj-align-line').count()) !== 0) fail('松手之后辅助线没有清掉');
+  const pA1 = await flowPos(0);
+  if (pA1 === null) fail('松手后读不到节点位置');
+  if (Math.abs(pA1.x - pB0.x) > 1.5) {
+    fail(`松手后没有贴在对方的左线上：A.x=${pA1.x.toFixed(1)} B.x=${pB0.x.toFixed(1)}`);
+  }
+  ok('拖动中出辅助线、松手即清掉；节点真的贴到同一条竖线（±1.5px，先网格后对齐）');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -2126,5 +2241,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ 干净退出');
 process.exit(0);

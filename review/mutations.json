@@ -680,6 +680,30 @@
       "find": "      if (aborted) {",
       "replace": "      if (false) {",
       "test": "apps/desktop/src/main/canvas-runner.test.ts"
+    },
+    {
+      "id": "M86",
+      "desc": "对齐阈值差一：恰好 6px 的对齐被漏掉（拖到贴边了却不吸，观感是「时灵时不灵」）",
+      "file": "apps/desktop/src/renderer/src/features/canvas/canvas-bridge.ts",
+      "find": "      if (Math.abs(d) <= threshold && (best === null || Math.abs(d) < Math.abs(best.delta))) {",
+      "replace": "      if (Math.abs(d) < threshold && (best === null || Math.abs(d) < Math.abs(best.delta))) {",
+      "test": "apps/desktop/src/renderer/src/features/canvas/canvas-bridge.test.ts"
+    },
+    {
+      "id": "M87",
+      "desc": "吸附顺序反了：对齐结果又被网格拉回去（松手落在 256 而不是对齐的 260 —— e2e 抓到过的形状）",
+      "file": "apps/desktop/src/renderer/src/features/canvas/canvas-bridge.ts",
+      "find": "    x: gx + vertical.delta,\n    y: gy + horizontal.delta,",
+      "replace": "    x: Math.round((gx + vertical.delta) / grid) * grid,\n    y: Math.round((gy + horizontal.delta) / grid) * grid,",
+      "test": "apps/desktop/src/renderer/src/features/canvas/canvas-bridge.test.ts"
+    },
+    {
+      "id": "M88",
+      "desc": "命令面板执行的不是选中那条：回车永远落到第一条（过滤后选保存，跑了添加）",
+      "file": "apps/desktop/src/renderer/src/features/canvas/CommandPalette.tsx",
+      "find": "    const cmd = filtered[i];",
+      "replace": "    const cmd = filtered[0];",
+      "test": "apps/desktop/src/renderer/src/features/canvas/CommandPalette.test.tsx"
     }
   ]
 }
