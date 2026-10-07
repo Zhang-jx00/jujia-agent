@@ -61,8 +61,12 @@ function makeDeps(baseUrl: string, events: CanvasEventPayload[]): CanvasRunnerDe
   return {
     getWorkspaceRoot: async () => null,
     loadPolicy: async () => ({ mode: 'default', rules: [], alwaysAsk: [] }),
-    // 提示词节点不碰权限 / 注册表 / 钩子（那三样只挂在工具节点上）；这里只搭到"不会被碰到"的形状
-    permission: async () => 'allow',
+    // 提示词节点不碰权限 / 注册表 / 钩子（那三样只挂在工具节点上）——
+    // 不假返回：真被碰到就抛错，把"不该被调用"变成可执行的断言
+    // （原先是 `async () => 'allow'`：字面量根本不在 PermissionDecision 里，typecheck 红了两轮才被复核抓出）
+    permission: async () => {
+      throw new Error('提示词节点不该碰权限');
+    },
     registry: { get: () => undefined } as unknown as ToolRegistry,
     resolveConnection: async () => ({ record: { baseUrl, model: 'm' }, apiKey: 'test-key-not-real' }),
     hooks: {} as unknown as HookRunner,
