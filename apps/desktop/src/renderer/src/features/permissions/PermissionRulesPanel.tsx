@@ -106,7 +106,7 @@ export function PermissionRulesPanel(): ReactElement {
   const isDenyAll = action === 'deny' && (pattern.trim() === '*' || pattern.trim() === '**');
 
   return (
-    <div className="w2-panel jj-perm">
+    <div className="w2-panel">
       <section className="p0-card">
         <h2>权限模式（会话级意图）</h2>
         <p className="p0-subtitle">

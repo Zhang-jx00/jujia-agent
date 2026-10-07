@@ -704,6 +704,14 @@
       "find": "    const cmd = filtered[i];",
       "replace": "    const cmd = filtered[0];",
       "test": "apps/desktop/src/renderer/src/features/canvas/CommandPalette.test.tsx"
+    },
+    {
+      "id": "M89",
+      "desc": "样式规则整块失去（类名在样式表里不再整词命中）：'样式缺失类'事故（B1 的 styles.css 差点整份漏提交）从此机器可咬",
+      "file": "apps/desktop/src/renderer/src/styles.css",
+      "find": ".jj-palette-mask {",
+      "replace": ".jj-palette-mask-hidden {",
+      "test": "apps/desktop/src/renderer/src/styles-wiring.test.ts"
     }
   ]
 }

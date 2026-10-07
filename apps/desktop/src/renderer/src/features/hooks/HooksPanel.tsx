@@ -92,7 +92,7 @@ export function HooksPanel(): ReactElement {
   }
 
   return (
-    <div className="w2-panel jj-hooks">
+    <div className="w2-panel">
       <section className="p0-card">
         <h2>生命周期钩子</h2>
         <p className="p0-subtitle">

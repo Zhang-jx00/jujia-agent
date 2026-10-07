@@ -189,7 +189,7 @@ export function McpPanel(): ReactElement {
     });
 
   return (
-    <div className="w2-panel jj-mcp">
+    <div className="w2-panel">
       <section className="p0-card">
         <h2>MCP 服务端</h2>
         <p className="p0-subtitle">

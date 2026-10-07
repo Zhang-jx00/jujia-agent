@@ -809,7 +809,7 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
       {windowed.visible.map((b) => (
           <div key={b.id} className={b.role === 'user' ? 'w2-bubble-user' : 'w2-bubble-agent'}>
             <div className="w2-bubble-role">{b.role === 'user' ? '我' : 'Agent'}</div>
-            <div className="w2-bubble-body">
+            <div>
               {b.content || (b.streaming ? '…' : '')}
               {b.streaming && <span className="w2-caret" />}
               {b.error && <div className="p0-err">✗ {b.error}</div>}
@@ -819,10 +819,10 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
                 点它之后走的是 `append_note` 工具：写类操作照样要过权限门，路径守卫在写之前跑。
               */}
               {b.role === 'assistant' && !b.streaming && b.error === undefined && b.content !== '' && (
-                <div className="w2-bubble-tools">
+                <div>
                   <button
                     type="button"
-                    className="w2-btn w2-btn-quiet"
+                    className="w2-btn"
                     disabled={noteBusy}
                     onClick={() => void remember(b.content)}
                   >

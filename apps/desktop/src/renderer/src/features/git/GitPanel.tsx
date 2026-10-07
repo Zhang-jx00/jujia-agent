@@ -170,9 +170,9 @@ export function GitPanel(): ReactElement {
   }, [diff, showNoise]);
 
   return (
-    <div className="w2-panel jj-git">
+    <div className="w2-panel">
       <section className="p0-card">
-        <h2 className="p0-h2">Git 变更</h2>
+        <h2>Git 变更</h2>
         <p className="p0-subtitle">
           {isRepo ? `分支：${branch ?? '（无提交，HEAD 未指向任何分支）'}` : (hint ?? '不可用')}
         </p>
@@ -200,7 +200,7 @@ export function GitPanel(): ReactElement {
       {isRepo && (
         <>
           <section className="p0-card">
-            <h3 className="p0-h3">未暂存（{String(unstaged.length)}）</h3>
+            <h3>未暂存（{String(unstaged.length)}）</h3>
             {unstaged.length === 0 ? (
               <p className="jj-muted">没有未暂存的改动</p>
             ) : (
@@ -226,7 +226,7 @@ export function GitPanel(): ReactElement {
           </section>
 
           <section className="p0-card">
-            <h3 className="p0-h3">已暂存（{String(staged.length)}）</h3>
+            <h3>已暂存（{String(staged.length)}）</h3>
             {staged.length === 0 ? (
               <p className="jj-muted">暂存区是空的</p>
             ) : (
@@ -252,7 +252,7 @@ export function GitPanel(): ReactElement {
           </section>
 
           <section className="p0-card">
-            <h3 className="p0-h3">提交</h3>
+            <h3>提交</h3>
             <p className="p0-warn">会写入仓库历史，且每次都会要求确认 —— 这是硬确认，不能被「总是允许」跳过。</p>
             <textarea
               className="jj-git-message"
@@ -281,7 +281,7 @@ export function GitPanel(): ReactElement {
 
       {isRepo && (
         <section className="p0-card">
-          <h3 className="p0-h3">改动摘要</h3>
+          <h3>改动摘要</h3>
           <div className="w2-actions">
             <button
               type="button"
@@ -363,7 +363,7 @@ export function GitPanel(): ReactElement {
 
       {isRepo && log.length > 0 && (
         <section className="p0-card">
-          <h3 className="p0-h3">最近提交</h3>
+          <h3>最近提交</h3>
           <ul className="jj-git-list">
             {log.map((line) => (
               <li key={line}>{line}</li>
