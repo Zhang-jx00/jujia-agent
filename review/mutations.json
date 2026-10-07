@@ -605,8 +605,8 @@
       "id": "M76",
       "desc": "编排出错也继续往下跑：前一步失败后接着执行后面的节点（拿半成品当输入）",
       "file": "packages/shared-ipc/src/canvas-run.ts",
-      "find": "        return { states, steps, reason: 'failed' };\n      }\n      emit(id, 'ok', step, result.output.slice(0, 200));",
-      "replace": "        emit(id, 'ok', step, '变异：失败也当成功');\n      }\n      emit(id, 'ok', step, result.output.slice(0, 200));",
+      "find": "      if (!result.ok) {\n        emit(id, 'failed', step, result.error === '' ? '执行失败（没说原因）' : result.error);\n        return { states, steps, reason: 'failed' };\n      }",
+      "replace": "      if (!result.ok) {\n        emit(id, 'failed', step, result.error === '' ? '执行失败（没说原因）' : result.error);\n      }",
       "test": "packages/shared-ipc/src/canvas-run.test.ts"
     },
     {
@@ -629,7 +629,7 @@
       "id": "M79",
       "desc": "步数上界失效：一张几百节点的图会被一口气跑完（界面拖住、成本失控）",
       "file": "packages/shared-ipc/src/canvas-run.ts",
-      "find": "  if (order.length > options.maxSteps) {",
+      "find": "  if (runList.length > options.maxSteps) {",
       "replace": "  if (false) {",
       "test": "packages/shared-ipc/src/canvas-run.test.ts"
     },
