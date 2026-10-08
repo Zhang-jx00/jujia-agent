@@ -67,6 +67,80 @@
 | 死能力接线（git 写操作、记忆写入、疲劳提示） | 铺设计划（6）/ 拓展计划（5），逐个判定 |
 | utilityProcess 迁移 · main ≤300 行收敛 | 铺设计划（7，见排查报告 S4） |
 
+### 2.1 代码文件归轨索引（2026-10-08 新增 · 规整11）
+
+> §二 的映射表回答"**哪一批**属哪条轨道"；本节回答"**哪个文件**属哪条轨道"。两者并存、互不替代。
+>
+> **三条口径（缺一不可）**：
+> 1. **按目录 / 模块归类**，覆盖 `apps/` 与 `packages/` 下全部源文件，一个不漏；
+> 2. 判据取「**这个文件是干什么的**」，不取「它当年是在哪一轮诞生的」；
+> 3. **测试文件跟随被测对象所在轨道，不单独列**（避免双计）；一个模块沾两条轨道时写「主轨 + 次轨」；
+>    根配置（`package.json` / `tsconfig*.json` / `eslint.config.js` / `vitest.config.ts` / `electron.vite.config.ts` 等）统一归**规整**。
+>
+> **现扫对账（2026-10-08，`check:docs` 的护栏①机器盯目录级覆盖）**：`apps/` + `packages/` 下代码文件
+> （`.ts/.tsx/.js/.mjs/.cjs`，剥 `node_modules`/`out`/`dist`/`release`/`.tmp`/`.trash`）= **216 个**，
+> 加根配置 `eslint.config.js` 与 `vitest.config.ts` = **218**；含源文件的目录 = **42 个**。
+> 交接来的清单漏了 **9 个非测试文件**，已按判据补在表末（来历写明，不混进原表）。
+
+| 轨道 | 路径（相对仓库根） | 判据 |
+|------|--------------------|------|
+| 铺设1 | `packages/agent-core/src/loop/` · `packages/agent-core/src/providers/` · `packages/agent-core/src/index.ts` | Agent 循环 / provider·SSE / 包出口 |
+| 铺设1 | `packages/shared/src/index.ts` · `packages/shared-ipc/src/{channels,contracts,limits,index}.ts` | IPC 契约与通道常量 |
+| 铺设1 | `apps/desktop/src/main/{index,chat-service,workspace,model-history,ipc}.ts` | 主进程服务 = 核心链路宿主侧 |
+| 铺设1 | `apps/desktop/src/renderer/src/features/{chat,connections,workspace}/` | 对话与连接界面 |
+| 铺设2 | `packages/agent-core/src/permissions/` · `apps/desktop/src/main/{permission-bridge,permission-rules-store}.ts` | 权限门 |
+| 铺设2 | `apps/desktop/src/renderer/src/features/{permission,permissions}/` | 审批弹窗与规则页（近名目录收敛属规整） |
+| 铺设3 | `packages/agent-core/src/context/` · `packages/agent-core/src/memory/` | 上下文装配与记忆 |
+| 铺设4 | `packages/agent-core/src/terminal/` · `apps/desktop/src/main/terminal-service.ts` | 内置终端（PTY） |
+| 铺设4 | `apps/desktop/src/renderer/src/features/terminal/` | 终端界面 |
+| 铺设5 | `packages/agent-core/src/mcp/` · `apps/desktop/src/main/mcp/` | MCP 协议层 / 客户端 / 同意准入 / 服务编排 |
+| 铺设5 | `apps/desktop/src/renderer/src/features/mcp/` | MCP 界面 |
+| 铺设6a | `apps/desktop/src/main/{session-journal,session-lru,session-store}.ts` | 会话持久化 |
+| 铺设6b | `packages/agent-core/src/context/compaction.ts` | 会话压缩与摘要（与铺设3 同目录，按改动目的分轨） |
+| 铺设9 | `packages/agent-core/src/git/` · `apps/desktop/src/main/git-service.ts` | git 模块接线（`push` 归 R2） |
+| 铺设9 | `apps/desktop/src/renderer/src/features/git/` | git 界面 |
+| 铺设10 | `apps/desktop/src/main/pending-notes.ts` | M6 记忆写入侧（`append_note`） |
+| 加固1 | `packages/shared/src/json-store.ts` | 原子存储（tmp+fsync+rename+.bak+版本信封+损坏自愈） |
+| 加固1 | `packages/agent-core/src/tools/path-guard.ts` · `packages/agent-core/src/hooks/runner.ts` | 路径沙箱 · 钩子子进程 env 剔密 |
+| 加固1 | `apps/desktop/src/main/{security,secret,paths,config-write}.ts` | 安全基线 / 密钥 / 路径沙箱 / 配置白名单 |
+| 加固1 | `apps/desktop/src/main/{git-gate,hooks-gate,open-with-gate}.ts` | 审批硬 ask 分级 |
+| 加固1 | `apps/desktop/src/main/{config-store,connections-store,hooks-store,permission-rules-store}.ts` | 各功能自己的原子落盘 |
+| 加固1 | `apps/desktop/src/preload/index.ts` | IPC 边界安全基线 |
+| 加固1 | `apps/desktop/src/renderer/src/{ErrorBoundary.tsx,error-fallback.ts}` | 崩溃兜底 |
+| 加固2 | `apps/desktop/src/main/mcp/`（per-server `timeoutMs`/`enabled` 部分） | MCP 单服务端开关与描述漂移基线（未开工） |
+| 拓展2 | `packages/agent-core/src/hooks/{points,runner,types}.ts` · `apps/desktop/src/main/hooks-store.ts` | 生命周期钩子七类事件 |
+| 拓展2 | `apps/desktop/src/renderer/src/features/hooks/` | 钩子界面 |
+| 拓展3 | `packages/agent-core/src/{skills,plugins}/` · `apps/desktop/src/main/{skills,plugins}.ts` | 技能（渐进披露）与插件清单 |
+| 拓展3 | `apps/desktop/src/renderer/src/features/plugins/` | 插件界面 |
+| 拓展4 | `packages/ui-tokens/src/` · `apps/desktop/src/renderer/src/features/appearance/` | 外观与样式包（双色模式） |
+| 拓展5 | `packages/agent-core/src/commands/{argv,process}.ts` | 插件贡献的命令执行（仅识别、未接线） |
+| 扩容1 | `packages/agent-core/src/browser/` · `apps/desktop/src/main/{browser-service,open-with-service,open-with-launch}.ts` | 内置浏览器：导航策略 + 三档打开方式 |
+| 扩容1 | `apps/desktop/src/renderer/src/features/browser/` · `apps/desktop/src/renderer/src/markdown/` | 浏览器界面与 Markdown 渲染 |
+| 扩容2 | `packages/shared-ipc/src/{canvas-graph,canvas-run}.ts` · `apps/desktop/src/main/{canvas-runner,canvas-store}.ts` | 无限画布：图契约 / 纯规则 / 编排 / 执行 / 持久化 |
+| 扩容2 | `apps/desktop/src/renderer/src/features/canvas/` | 画布界面（React Flow） |
+| 扩容3 | `packages/shared-ipc/src/pdf-limits.ts` · `apps/desktop/src/main/ipc/pdf.ts` | 轻量 IDE 的 PDF 侧（零出站、大小上限） |
+| 扩容3 | `apps/desktop/src/renderer/src/features/{ide,docs}/` | 文件树 / 编辑器 / diff / 文档页 |
+| 接驳 | `apps/desktop/src/main/ipc/` · `apps/desktop/src/main/*-wiring.test.ts` | 渲染层↔IPC↔主进程↔引擎的对接面与接线锁 |
+| 规整 | `apps/desktop/src/renderer/src/{App.tsx,KeepAlive.tsx,styles.css,styles-wiring.test.ts}` · `apps/desktop/src/main/test-policy.test.ts` | 结构与规范（挂载保持 / 样式 / 测试策略） |
+| 规整 | `apps/desktop/scripts/` · `scripts/` | 门禁与工具链（check-docs / verify-pack / run-electron / license-check） |
+| 优化1 | `packages/shared/src/stream-batcher.ts` | 渲染合批（行为不变、更快） |
+| 优化2 | `apps/desktop/scripts/e2e-ui.mjs` | 零人工测试基建（可重复验证效率） |
+| 排查 | `scripts/mutation-check.mjs` · `scripts/count_coverage.py` · `scripts/gen_matrix.py` · `review/mutations.json` | 产出是问题清单与证据 |
+
+**本轮现扫补的 9 行**（交接清单未覆盖的非测试文件；判据同上，来历如实写明）：
+
+| 轨道 | 路径 | 判据 |
+|------|------|------|
+| 规整 | `apps/desktop/electron.vite.config.ts` | 构建配置（与根配置同类：结构与规范，不碰行为） |
+| 规整 | `apps/desktop/src/renderer/src/main.tsx` | 渲染层入口与挂载结构（与 `App.tsx` / `KeepAlive.tsx` 同批） |
+| 规整 | `apps/desktop/src/renderer/src/env.d.ts` | 环境类型声明（`window.jujia` 等；纯结构） |
+| 铺设2（次：铺设1） | `packages/agent-core/src/tools/executor.ts` | 工具执行器 = 判档与权限门的调用点 |
+| 铺设1 | `packages/agent-core/src/tools/registry.ts` | 工具注册表（"有哪些工具"的核心链路） |
+| 铺设1 | `packages/agent-core/src/tools/types.ts` | 工具类型契约 |
+| 铺设1（次：加固1） | `packages/agent-core/src/tools/builtin/file-tools.ts` | 读 / 写文件工具（走 `path-guard`） |
+| 铺设8 | `packages/agent-core/src/tools/builtin/exec-tool.ts` | 内置 exec `run_command`（每次硬 ask + 工作目录守卫 + 环境脱敏） |
+| 铺设10 | `packages/agent-core/src/tools/builtin/note-tool.ts` | 记忆写入 `append_note` 工具本体（与 `main/pending-notes.ts` 同批） |
+
 ## 三、记录规则（今后一律遵守）
 
 - **发现轨道编号冲突 → 不抢号、开新号，并在两处同时勘误**（先例：`v0.37.0-铺设10`。
@@ -81,6 +155,12 @@
 3. **review/REVIEW-LOG.md**：复核记录标题带轨道号（如 `复核 021 · 轨道回归计划1`）。
 4. **排查类产出**：统一放 `review/TRACK-SWEEP-N.md`；**接驳类**放 `docs/LINKAGE-N.md`。
 5. **编号连续**：同一轨道内严格递增，不复用；跨轨道不共享编号。
+6. **git 标签**（2026-10-08 新立，自 `v0.54.0-扩容2` 起）：标签名 = `vX.Y.Z-轨道简称N` —— **只取轨道段**，
+   不带任务号后缀、不含空格 / `·` / 全角括号（让"标签 ↔ 所属轨道"可机器对应）。
+   例：标题 `[v0.54.0-扩容2 · M9b（B3）]` → 标签 `v0.54.0-扩容2`。
+   **历史标签不回改**（`v0.53.0-M9b-B2` / `v0.52.0-M9b-B1` 等原样保留，靠 §二 与 §2.1 归类检索）；
+   文档里的"回退点"必须写**真实存在**的标签名 —— 幽灵标签会让回退在那一点失效
+   （先例：`v0.24.0-回归1` 的实际标签是 `v0.24.0-hg1`，2026-10-08 已修指向），`check:docs` 有断言盯着。
 
 ## 四、历史记录的同步方式（重要决策）
 

@@ -19,6 +19,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -328,6 +329,18 @@ const allScripts = new Set([
 }
 
 /**
+ * 十条轨道的**受控词表**（与 `docs/TRACK-PLANS.md` §一 同源，逐词核对它真实存在，
+ * 免得词表在两处漂移 —— 这是"凡枚举现状的锁一律现扫、不写死清单"那条纪律的例外处理：
+ * 词表本身是**规范**不是**现状**，但它的**拼写**必须与文档一致，所以仍要机器交叉核对）。
+ * 多处检查共用：CHANGELOG 标题轨道段 / 复核台账标题 / 标签格式。
+ */
+const TRACK_WORDS = ['回归', '铺设', '扩容', '拓展', '加固', '升级', '优化', '规整', '排查', '接驳'];
+
+/** 语义化版本比较 a > b（三处检查共用："历史不回改"的豁免边界都靠它） */
+const verAbove = (a, b) =>
+  a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] > b[2])));
+
+/**
  * CHANGELOG 标题的**轨道段**必须命中十条轨道的受控词表（2026-10-05 复核 047 的补账要求）。
  *
  * 为什么立它：标题曾长期只有任务号 —— `v0.46.0-M19a`、`v0.45.0-T22`、`v0.50.0-M9a`。
@@ -339,17 +352,14 @@ const allScripts = new Set([
  * 新规自 **v0.51.0** 起生效 —— 标题的轨道段里至少要出现一个受控轨道词。
  */
 {
-  const TRACKS = ['回归', '铺设', '扩容', '拓展', '加固', '升级', '优化', '规整', '排查', '接驳'];
   const plans = read('docs/TRACK-PLANS.md');
-  const missingVocab = TRACKS.filter((t) => !plans.includes(t));
+  const missingVocab = TRACK_WORDS.filter((t) => !plans.includes(t));
   const titles = [...read('CHANGELOG.md').matchAll(/^## \[v(\d+)\.(\d+)\.(\d+)-([^\]]+)\]/gm)].map((m) => ({
     v: [Number(m[1]), Number(m[2]), Number(m[3])],
     suffix: m[4],
   }));
   const FLOOR = [0, 50, 0]; // ≤ v0.50.0 = 历史（不回改）；自 v0.51.0 起按新规
-  const above = (a, b) =>
-    a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] > b[2])));
-  const bad = titles.filter((t) => above(t.v, FLOOR) && !TRACKS.some((w) => t.suffix.includes(w)));
+  const bad = titles.filter((t) => verAbove(t.v, FLOOR) && !TRACK_WORDS.some((w) => t.suffix.includes(w)));
   report(
     'CHANGELOG 标题的轨道段命中受控词表（v0.51.0 起；历史标题不回改）',
     missingVocab.length === 0 && titles.length > 0 && bad.length === 0,
@@ -677,6 +687,221 @@ const walkLiveFiles = (exts) => {
     '活文档（.md）里没有本机用户主目录（用户名不外泄；仓库路径作证据引用不受此限）',
     mdHits.length === 0,
     `命中 ${String(mdHits.length)} 个文件：${mdHits.join('；')}`,
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 10. 归轨索引必须覆盖每一个源码目录（规整11 护栏① · 2026-10-08）
+ *
+ * 为什么立它（也是三条里最重要的一条）：`docs/TRACK-PLANS.md` §2.1 的归轨索引是一份**清单**。
+ * 清单的失败模式不是"写错一行"，而是**悄悄不再完整** —— 新一轮交付新建了目录，
+ * 索引没人补，于是"按轨道检索代码"这件事从那天起就在漏东西，而且**漏了不报错**。
+ * 所以这里不看索引写了什么，只看**代码实际有哪些目录**（现扫），
+ * 一个都没登记过的目录就是红灯 —— 这正是"凡枚举现状的锁一律现扫、不写死清单"那条纪律。
+ *
+ * 判据（与 §2.1 的三条口径一一对应）：
+ * - 扫 `apps/` 与 `packages/` 下的代码文件（`.ts/.tsx/.js/.mjs/.cjs`，
+ *   依赖 / 产物 / 临时 / 回收站由 `walkLiveFiles` 剥掉）；
+ * - **目录级**要求：含源文件的目录必须被某个条目盖住（条目以 `/` 结尾 = 整目录；
+ *   也可能只登记了目录里的具体文件 —— 那样这个目录也算登记过）；
+ * - **全是测试文件的目录豁免**：口径③"测试跟随被测对象，不单独列" ——
+ *   硬要登记它等于逼双计，反而破坏口径。
+ *
+ * 防失焦：条目数下限（索引被清空 / 段落标题被改名时必须红，而不是"零条目 = 零违规"）。
+ * ------------------------------------------------------------------ */
+
+{
+  const plans = read('docs/TRACK-PLANS.md');
+  const from = plans.indexOf('### 2.1');
+  const to = plans.indexOf('\n## 三、', from);
+  const section = from >= 0 && to > from ? plans.slice(from, to) : '';
+
+  const isPathCell = (s) => /^(apps|packages|scripts|review)\//.test(s) && !/\s/.test(s);
+  /** 条目 = 表格行里反引号包住的代码路径；`{a,b}` 就地展开（索引里不嵌套花括号） */
+  const entries = [];
+  for (const line of section.split('\n')) {
+    if (!line.trim().startsWith('|')) continue;
+    for (const m of line.matchAll(/`([^`]+)`/g)) {
+      const cell = m[1];
+      const brace = /\{([^{}]*)\}/.exec(cell);
+      if (brace === null) {
+        if (isPathCell(cell)) entries.push(cell);
+        continue;
+      }
+      for (const alt of brace[1].split(',')) {
+        const p = cell.replace(brace[0], alt.trim());
+        if (isPathCell(p)) entries.push(p);
+      }
+    }
+  }
+
+  const globToRe = (g) =>
+    new RegExp('^' + g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*') + '$');
+  const fileCovered = (rel) =>
+    entries.some((e) =>
+      e.endsWith('/')
+        ? rel.startsWith(e)
+        : e.includes('*')
+          ? globToRe(e).test(rel)
+          : rel === e,
+    );
+  const dirCovered = (dir) => entries.some((e) => e.endsWith('/') && (dir === e || dir.startsWith(e)));
+
+  const codeFiles = walkLiveFiles(['.ts', '.tsx', '.js', '.mjs', '.cjs']).filter((rel) =>
+    /^(apps|packages)\//.test(rel),
+  );
+  const isTestFile = (rel) => /\.test\.(ts|tsx|js|mjs|cjs)$/.test(rel) || rel.includes('/__tests__/');
+
+  const dirs = new Map();
+  for (const rel of codeFiles) {
+    const dir = rel.slice(0, rel.lastIndexOf('/') + 1);
+    const rec = dirs.get(dir) ?? { nonTest: 0 };
+    if (!isTestFile(rel)) rec.nonTest += 1;
+    dirs.set(dir, rec);
+  }
+
+  const uncovered = [];
+  for (const [dir, rec] of dirs) {
+    if (dirCovered(dir)) continue;
+    if (rec.nonTest === 0) continue; // 纯测试目录：口径③跟随被测对象
+    // 目录本身没被整条登记，但里面的源文件逐个登记过 —— 也算覆盖
+    if (codeFiles.some((f) => f.startsWith(dir) && !isTestFile(f) && fileCovered(f))) continue;
+    uncovered.push(dir);
+  }
+
+  report(
+    `归轨索引（TRACK-PLANS §2.1）覆盖每一个源码目录（现扫 ${String(dirs.size)} 个目录，条目 ${String(entries.length)} 条）`,
+    section !== '' && entries.length > 10 && codeFiles.length > 0 && uncovered.length === 0,
+    section === ''
+      ? 'TRACK-PLANS.md 里找不到 `### 2.1` 这一段（护栏的靶子没了）'
+      : entries.length <= 10
+        ? `索引条目只有 ${String(entries.length)} 条，少于下限 10 —— 段落被清空？`
+        : `未登记的目录 ${String(uncovered.length)} 个：${uncovered.sort().join('、')}`,
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 11. 复核台账的**每条标题**要带轨道号（规整11 护栏②）
+ *
+ * 为什么立它：轨道号是"这批活属于哪条计划"的唯一检索键。CHANGELOG 标题已经有⑨（旧）那条盯，
+ * 但**复核台账**没有 —— 而所有者按轨道统计时两边都要读。
+ * 词表**现扫**自 TRACK-PLANS（复用上面同一条交叉核对，不在此重复写死第二份清单）。
+ *
+ * 边界（历史不回改）：**复核 050 起**才要求。049 及以前的标题按当时约定写，一个字不改。
+ * 防失焦：至少找到 5 条标题，且**确实检查过 ≥ 050 的那几条**（`checked > 0`）——
+ * 否则"正则改坏了、一条都没匹配上"会读成全绿。
+ * ------------------------------------------------------------------ */
+
+{
+  const log = read('review/REVIEW-LOG.md');
+  const heads = [...log.matchAll(/^## 复核 (\d+)(.*)$/gm)].map((m) => ({
+    n: Number(m[1]),
+    title: m[2],
+  }));
+  const FLOOR = 50; // 复核 050 起按新规；049 及以前 = 历史
+  const recent = heads.filter((h) => h.n >= FLOOR);
+  const bad = recent.filter((h) => !TRACK_WORDS.some((w) => h.title.includes(w)));
+  report(
+    `复核台账标题带轨道词（复核 ${String(FLOOR)} 起；现扫 ${String(heads.length)} 条标题、其中 ${String(recent.length)} 条受新规）`,
+    heads.length >= 5 && recent.length > 0 && bad.length === 0,
+    recent.length === 0
+      ? `没找到编号 ≥ ${String(FLOOR)} 的复核标题（台账格式变了？护栏要跟着改）`
+      : `缺轨道词的复核标题：${bad.map((h) => `复核 ${String(h.n).padStart(3, '0')}`).join('、')}`,
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 12. CHANGELOG 的「回退点」标签：格式合规 + 真实存在（规整11 护栏③）
+ *
+ * 为什么立它：这不是假想风险 —— 本轮实测抓到一处**幽灵标签**：文档写"回退点 `v0.24.0-回归1`"，
+ * 而真实标签是 `v0.24.0-hg1`。**"按标签回退"是本项目的安全网，指向不存在的标签等于没有安全网**，
+ * 而且它只在人最需要它的那一刻（出事想回退）才暴露。
+ *
+ * 两个判据：
+ * - **存在性**：用 `git tag --list` 现扫（又一次"现扫不写死"）。
+ *   **读不到 git 时跳过存在性、只查格式** —— 检查器不能在自己跑不了时谎报"标签丢了"。
+ * - **格式**：新规矩（复核 049 之后、v0.54.0 起）"标签只取轨道段"= `vX.Y.Z-<轨道词><流水号>`，
+ *   不带任务号后缀。≤ v0.53.0 的历史标签不回改，所以**不检查**。
+ *
+ * 防失焦：至少抓到 1 个回退点（CHANGELOG 的写法变了 → 护栏跟着改，不许静默空转）。
+ * ------------------------------------------------------------------ */
+
+{
+  const changelog = read('CHANGELOG.md');
+  /**
+   * 只认**指针写法本身**，不认"正文里出现『回退点』三个字的行上的任意反引号"。
+   * 第一版写成后者，**当场被自己咬红**：本轮 CHANGELOG 里有两句描述实验的话
+   * （"把回退点指向一个不存在的旧格式标签 `v0.54.0-M9b-B3`"）—— 那是在讲一个**故意不存在的靶子**，
+   * 不是回退点。判据因此收到 `回退点：X` / `上一版 X` 两种指针形态上。
+   */
+  const flat = (s) => s.split('*').join(''); // 容忍 **回退点**： 这种加粗写法
+  const refs = new Set();
+  for (const rawLine of changelog.split('\n')) {
+    const line = flat(rawLine);
+    for (const re of [/回退点[：:]\s*`(v\d[^`\s]*)`/g, /上一版\s?`(v\d[^`\s]*)`/g]) {
+      for (const m of line.matchAll(re)) refs.add(m[1]);
+    }
+  }
+  const refList = [...refs];
+
+  /**
+   * **本轮那条豁免存在性**：回退点写的是"这一版"的标签，而按流程标签是**门禁之后**才打的 ——
+   * 要求它先于自己存在，等于给每轮造一条必然的红灯；红灯常态化 = 以后没人当真，护栏自毁。
+   * 所以版本号等于 CHANGELOG **最新条目**的标签只查格式、不查存在；
+   * 从**下一轮**起它就是历史条目，存在性照常咬（真写错最多晚一轮暴露，不会漏）。
+   * 当天的人工核对由 WORK-PROTOCOL 第 2 条「打标签的强制动作」兜住（打完 `git tag --list` 现扫一遍）。
+   */
+  const vers = [...changelog.matchAll(/^## \[v(\d+)\.(\d+)\.(\d+)-/gm)].map((m) => [
+    Number(m[1]),
+    Number(m[2]),
+    Number(m[3]),
+  ]);
+  const newest = vers.reduce((a, b) => (verAbove(b, a) ? b : a), [0, 0, 0]);
+  const isCurrentRound = (t) => {
+    const m = /^v(\d+)\.(\d+)\.(\d+)-/.exec(t);
+    return (
+      m !== null &&
+      Number(m[1]) === newest[0] &&
+      Number(m[2]) === newest[1] &&
+      Number(m[3]) === newest[2]
+    );
+  };
+
+  let tags = null;
+  try {
+    tags = execFileSync('git', ['tag', '--list'], { cwd: repoRoot, encoding: 'utf8' })
+      .split(/\r?\n/)
+      .filter(Boolean);
+  } catch {
+    tags = null; // 没有 git（或跑不通）：只查格式，存在性如实跳过
+  }
+
+  const FLOOR = [0, 53, 0]; // 自 v0.54.0 起按新格式；v0.53.0 及以前 = 历史
+  const TAG_RE = new RegExp('^(' + TRACK_WORDS.join('|') + ')\\d*$');
+  const badFormat = [];
+  for (const t of refList) {
+    const m = /^v(\d+)\.(\d+)\.(\d+)-(\S+)$/.exec(t);
+    if (m === null) {
+      badFormat.push(`${t}（不是 vX.Y.Z-后缀 的形态）`);
+      continue;
+    }
+    const v = [Number(m[1]), Number(m[2]), Number(m[3])];
+    if (!verAbove(v, FLOOR)) continue;
+    if (!TAG_RE.test(m[4])) badFormat.push(`${t}（标签只取轨道段，不带任务号后缀）`);
+  }
+
+  const skipped = refList.filter(isCurrentRound);
+  const missing = tags === null ? [] : refList.filter((t) => !isCurrentRound(t) && !tags.includes(t));
+  report(
+    `CHANGELOG 的回退点标签真实存在且格式合规（现扫 ${String(refList.length)} 个引用，本轮 ${String(skipped.length)} 个只查格式${tags === null ? '；本机无 git，存在性跳过' : ''}）`,
+    refList.length > 0 && badFormat.length === 0 && missing.length === 0,
+    [
+      missing.length > 0 ? `标签不存在：${missing.join('、')}` : '',
+      badFormat.length > 0 ? `格式不符：${badFormat.join('、')}` : '',
+      refList.length === 0 ? 'CHANGELOG 里没抓到回退点标签（指针写法变了？护栏要跟着改）' : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
   );
 }
 
