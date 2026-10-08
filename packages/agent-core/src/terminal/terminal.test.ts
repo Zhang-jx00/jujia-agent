@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTerminalEnv,
   clampSize,
+  decideStart,
+  describeExitNotice,
   describeTerminalPermission,
   pickShell,
   sensitiveEnvKeys,
   stripUrlCredentials,
   splitChunks,
   TERMINAL_LIMITS,
+  trimTail,
 } from './terminal';
 
 /**
@@ -202,5 +205,95 @@ describe('终端环境变量：敏感项不得进入终端（2026-09-23）', () 
     expect(stripUrlCredentials('http://u:p@h:8080')).toBe('http://h:8080');
     expect(stripUrlCredentials('http://h:8080')).toBe('http://h:8080');
     expect(stripUrlCredentials('socks5://h')).toBe('socks5://h');
+  });
+});
+
+/**
+ * T23：终端会话的生命周期（pty 常驻但可手工关闭）。
+ *
+ * 这一组规则**必须**放在纯逻辑层，因为它们的后果全在"进程"上：
+ * - 接回已有会话 = 不再启动第二个进程（旧版切走页签会杀会话，回来点启动又新起一个 pty，
+ *   而渲染层已经忘了前一个的 id —— 那个进程直到应用退出都没人能关掉）；
+ * - 上限判定必须**排在权限门之前**（先弹审批再说"开不了"，等于骗用户点一次确认）；
+ * - 到上限时只拒绝、不"顺手关掉最旧那个"（那是替用户决定杀哪个会话，界面看不见）。
+ */
+describe('decideStart：接回 / 新起 / 拒绝', () => {
+  it('本工作区已有仍在跑的会话 → 接回，并把那个会话的 id 交回去', () => {
+    const d = decideStart({ liveSessionId: 's-1', liveCount: 0 });
+    expect(d.kind).toBe('adopt');
+    if (d.kind !== 'adopt') return;
+    expect(d.sessionId).toBe('s-1');
+  });
+
+  it('接回优先于上限（已到上限时用户只是想回到自己那个还在跑的终端里，不该被拒）', () => {
+    const d = decideStart({
+      liveSessionId: 's-1',
+      liveCount: TERMINAL_LIMITS.maxSessions,
+    });
+    expect(d.kind).toBe('adopt');
+  });
+
+  it('没有会话且未到上限 → 新起（新起才有东西要审批）', () => {
+    expect(decideStart({ liveSessionId: null, liveCount: 0 }).kind).toBe('spawn');
+  });
+
+  it('到上限 → 拒绝，理由里带上限数字与"先结束一个"', () => {
+    const d = decideStart({ liveSessionId: null, liveCount: TERMINAL_LIMITS.maxSessions });
+    expect(d.kind).toBe('refuse');
+    if (d.kind !== 'refuse') return;
+    expect(d.reason).toContain('上限');
+    expect(d.reason).toContain(String(TERMINAL_LIMITS.maxSessions));
+    expect(d.reason).toContain('结束');
+  });
+
+  it('拒绝时**不许**出现"自动关掉最旧的"（那是替用户决定杀哪个会话）', () => {
+    const d = decideStart({ liveSessionId: null, liveCount: 99 });
+    if (d.kind !== 'refuse') throw new Error('到上限必须拒绝');
+    expect(d.reason).not.toMatch(/自动(关闭|结束|关掉|杀)/);
+    expect(d.reason).not.toMatch(/最旧/);
+  });
+
+  it('liveCount 为负数（不该发生，但要收敛而不报错）按"可以新起"处理', () => {
+    expect(decideStart({ liveSessionId: null, liveCount: -1 }).kind).toBe('spawn');
+  });
+});
+
+/**
+ * 切走页签期间的输出去哪了：主进程留一段**有界**尾部，回来时补回视图。
+ * 有界是重点 —— 一段 `yes` 死循环的输出如果全留着，会话越活越久内存就无限涨。
+ */
+describe('trimTail：切走期间的输出只留尾部', () => {
+  it('没超长时原样拼接（一个字都不能丢）', () => {
+    expect(trimTail('abc', 'def', 100)).toBe('abcdef');
+  });
+
+  it('超长时留下的是**连续的尾部**（截中间会让终端里出现凭空少一段的假象）', () => {
+    const out = trimTail('a'.repeat(50), 'b'.repeat(50), 30);
+    expect(out.length).toBe(30);
+    expect(out).toBe('b'.repeat(30));
+  });
+
+  it('默认上限取自 TERMINAL_LIMITS.maxTailChars，且是正数', () => {
+    expect(TERMINAL_LIMITS.maxTailChars).toBeGreaterThan(0);
+    expect(trimTail('x'.repeat(TERMINAL_LIMITS.maxTailChars + 10), '').length).toBe(
+      TERMINAL_LIMITS.maxTailChars,
+    );
+  });
+
+  it('max 给 0 或负数一律收成空串（不留"负数长度"这种没定义的状态）', () => {
+    expect(trimTail('abc', 'def', 0)).toBe('');
+    expect(trimTail('abc', 'def', -5)).toBe('');
+  });
+});
+
+describe('describeExitNotice：切走期间进程退出了要看得见', () => {
+  it('提示里有"退出码"和具体数字（只写"已退出"用户会以为是页签切换导致的）', () => {
+    const text = describeExitNotice(1);
+    expect(text).toContain('退出码');
+    expect(text).toContain('1');
+  });
+
+  it('0 也照样说明（正常退出同样要让回来的人知道会话已经结束）', () => {
+    expect(describeExitNotice(0)).toContain('退出码');
   });
 });

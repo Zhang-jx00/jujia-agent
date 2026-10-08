@@ -89,3 +89,51 @@ describe('文档查看的安全底线（渲染第三方文件内容）', () => {
     expect(panelSource).toContain('已截断');
   });
 });
+
+/**
+ * T24：切页签不丢阅读位置（路径 / 分块进度 / 滚动偏移）。
+ *
+ * 与 `tab-state-wiring` 同一族理由：这条修复的"存活"靠的是**面板卸载之后还剩什么**，
+ * 而那不在面板里，在 `doc-view-state` 这个模块里。写成源码锁才抓得住三种退回去的做法：
+ * 把 state 放回组件（切走就没）、把内容也缓存起来（读到的是旧文件）、把位置写进配置文件（越界的新语义）。
+ */
+describe('T24：文档页的阅读状态', () => {
+  const stateSource = read('features/docs/doc-view-state.ts');
+
+  it('状态存在模块级 store 里，面板挂载时读、变化时写', () => {
+    expect(panelSource).toContain('currentDocView()');
+    expect(panelSource).toContain('rememberDocView(');
+    // 记录三样东西：路径、分块进度、滚动偏移 —— 少一样就还是不丢不了那一样
+    expect(panelSource).toMatch(/rememberDocView\(\{ path: target, shown: nextShown, scrollTop:/);
+    expect(panelSource).toContain('rememberDocView({ shown })');
+    expect(panelSource).toContain('rememberDocView({ scrollTop: e.currentTarget.scrollTop })');
+  });
+
+  it('恢复的是**路径**，内容回来时重新读（缓存内容会读到旧文件，那是另一种骗人）', () => {
+    expect(panelSource).toContain("toolRun('read_file', { path: target })");
+    expect(panelSource).not.toMatch(/setContent\(saved|contentCache|cache\.set\(/);
+  });
+
+  it('滚动偏移真的接到"应用"那一步（只记不恢复 = 记住了一半，等于没记）', () => {
+    expect(panelSource).toContain('pendingScrollRef.current = resume?.scrollTop ?? null');
+    // 应用的位置取自 store 里那个值，而不是重新读一次 DOM（DOM 这时还没渲染出来）
+    expect(panelSource).toContain('el.scrollTop = top');
+  });
+
+  it('读不到就**忘掉记录**（否则每次挂载都撞同一个坏路径，错误还会越切越多）', () => {
+    expect(panelSource).toContain('clearDocView()');
+    expect((panelSource.match(/clearDocView\(\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    // 而且只尝试恢复一次
+    expect(panelSource).toContain('restoredRef.current');
+  });
+
+  it('store 只在内存里：不落盘、不进 IPC、不碰配置文件', () => {
+    expect(stateSource).not.toMatch(/writeFile|readFile|localStorage|sessionStorage|ipcRenderer|fetch\(/);
+    expect(stateSource).toMatch(/let view: DocViewState \| null = null/);
+  });
+
+  it('恢复出来的数值都被收敛过（NaN 的 shown 会让"继续加载"永远不出现 = 看起来文档变短了）', () => {
+    expect(stateSource).toContain('Number.isFinite');
+    expect(stateSource).toContain('Math.floor');
+  });
+});

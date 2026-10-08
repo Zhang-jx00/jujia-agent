@@ -3,9 +3,13 @@ import * as pty from 'node-pty';
 import {
   buildTerminalEnv,
   clampSize,
+  decideStart,
+  describeExitNotice,
   describeTerminalPermission,
   pickShell,
   splitChunks,
+  TERMINAL_LIMITS,
+  trimTail,
   type PermissionResolver,
   type TerminalSize,
 } from '@jujia/agent-core';
@@ -13,18 +17,21 @@ import {
 /**
  * 内置终端的 PTY 服务（W9b · 主进程侧）。
  *
- * 三件事必须在这里做对：
+ * 四件事必须在这里做对：
  * 1. **权限门**：终端能执行任意命令 → 归 `exec` 类，**每次新建会话都要用户确认**。
  *    权限门永远在本机（见 docs/PRODUCT-GOAL.md），本服务只负责"问"和"被拒就不起"。
- * 2. **输出分块**：一次 `cat` 大文件可能吐几百 KB，单次 IPC 发送会卡死渲染层。
- * 3. **清理**：窗口关闭 / 应用退出时必须杀掉所有 PTY，否则会留下僵尸子进程。
+ * 2. **会话生命周期（T23）**：会话属于**工作区**，不属于某个页面实例。
+ *    页签切走时渲染层被卸载，会话在这里继续跑；回到终端页时先 `status()` 再接回。
+ *    配套的两条约束不能省：会话数有上界（`decideStart`）、切走期间的输出只留有界的尾部。
+ * 3. **输出分块**：一次 `cat` 大文件可能吐几百 KB，单次 IPC 发送会卡死渲染层。
+ * 4. **清理**：窗口关闭 / 应用退出时必须杀掉所有 PTY，否则会留下僵尸子进程。
  *
  * 原生依赖（node-pty）**只在这一处出现** —— 纯逻辑在 `@jujia/agent-core/terminal`，
  * 那里有单测覆盖，不需要加载 .node。
  */
 
 export type TerminalEvent =
-  | { type: 'data'; sessionId: string; chunk: string }
+  | { type: 'data'; sessionId: string; chunk: string; seq: number }
   | { type: 'exit'; sessionId: string; exitCode: number };
 
 export type TerminalEmitter = (event: TerminalEvent) => void;
@@ -37,17 +44,37 @@ export interface StartParams {
 }
 
 export type StartResult =
-  | { ok: true; sessionId: string }
+  | { ok: true; sessionId: string; adopted: boolean }
   | { ok: false; error: string };
+
+/** 给重新挂载的面板用：现在有没有可接回的会话、切走期间吐了什么、上一个会话是怎么结束的 */
+export interface TerminalStatus {
+  session: { sessionId: string; tail: string; seq: number } | null;
+  exited: { exitCode: number; notice: string } | null;
+  liveCount: number;
+  maxSessions: number;
+}
 
 interface Session {
   id: string;
   proc: pty.IPty;
   workspaceRoot: string;
+  /** 输出尾部（有界）：切走期间的输出靠它补回视图 */
+  tail: string;
+  /** 已发出的批次序号：渲染层用它过滤掉 tail 里已经包含的事件（重复显示比丢几行更好治，但两个都不想要） */
+  seq: number;
 }
 
 export class TerminalService {
   private readonly sessions = new Map<string, Session>();
+
+  /**
+   * 每个工作区**最近一次**的退出记录。
+   * 为什么需要：会话结束事件是推给渲染层的，而面板可能在别的页签上根本没订阅 ——
+   * 没有这份记录时，回来看到的是"未启动"，用户会以为是切页签把会话弄丢了。
+   * 与 sessions 同样有界（超出时按插入顺序丢最老的工作区）。
+   */
+  private readonly exits = new Map<string, number>();
 
   constructor(
     private readonly emit: TerminalEmitter,
@@ -59,15 +86,39 @@ export class TerminalService {
     return this.sessions.size;
   }
 
+  private findLive(workspaceRoot: string): Session | null {
+    for (const s of this.sessions.values()) {
+      if (s.workspaceRoot === workspaceRoot) return s;
+    }
+    return null;
+  }
+
   /**
-   * 新建终端会话。
-   * **先过权限门**：被拒 / 超时一律不启动，并如实返回原因（不静默降级成"假装成功"）。
+   * 新建终端会话，或接回本工作区已有的那个。
+   *
+   * 顺序是**接回 → 上限 → 审批 → 启动**：
+   * - 接回排在最前：本工作区已有会话时绝不再起进程（起了就没人能关掉前一个，直到应用退出）；
+   * - 上限排在审批前：先弹审批再说"开不了"，等于骗用户点一次确认；
+   * - 只有真的 `spawn` 才过权限门 —— "每次新建会话都要确认"这条语义一个字没变。
    */
   async start(params: StartParams): Promise<StartResult> {
+    const decision = decideStart({
+      liveSessionId: this.findLive(params.workspaceRoot)?.id ?? null,
+      liveCount: this.sessions.size,
+      maxSessions: TERMINAL_LIMITS.maxSessions,
+    });
+
+    if (decision.kind === 'adopt') {
+      return { ok: true, sessionId: decision.sessionId, adopted: true };
+    }
+    if (decision.kind === 'refuse') {
+      return { ok: false, error: decision.reason };
+    }
+
     const shell = pickShell(process.platform, process.env);
     const size = clampSize(params);
 
-    // ---- 权限门：exec 类，必须用户确认 ----
+    // ---- 权限门：exec 类，必须用户确认（仅新起进程时）----
     const answer = await this.permission({
       id: randomUUID(),
       toolName: 'terminal',
@@ -80,9 +131,9 @@ export class TerminalService {
     });
 
     // normalizeAnswer 在 executor 内部；这里只认字符串决策（权限桥返回的也是字符串）
-    const decision = typeof answer === 'string' ? answer : answer.decision;
-    if (decision === 'deny' || decision === 'timeout') {
-      return { ok: false, error: decision === 'deny' ? '你拒绝了启动终端' : '审批超时，未启动终端' };
+    const verdict = typeof answer === 'string' ? answer : answer.decision;
+    if (verdict === 'deny' || verdict === 'timeout') {
+      return { ok: false, error: verdict === 'deny' ? '你拒绝了启动终端' : '审批超时，未启动终端' };
     }
 
     // ---- 启动 PTY ----
@@ -100,22 +151,67 @@ export class TerminalService {
       return { ok: false, error: `终端启动失败：${err instanceof Error ? err.message : String(err)}` };
     }
 
-    const session: Session = { id: randomUUID(), proc, workspaceRoot: params.workspaceRoot };
+    const session: Session = {
+      id: randomUUID(),
+      proc,
+      workspaceRoot: params.workspaceRoot,
+      tail: '',
+      seq: 0,
+    };
     this.sessions.set(session.id, session);
+    // 新会话起来了，本工作区"上一个会话已退出"的提示就该让位
+    this.exits.delete(params.workspaceRoot);
 
     proc.onData((data: string) => {
+      // 先记账再推送：tail 与 seq 是"切走期间的输出"的唯一去处，与有没有人听无关
+      session.seq += 1;
+      session.tail = trimTail(session.tail, data);
       // 分块推送，避免一次性巨量输出打爆 IPC
       for (const chunk of splitChunks(data)) {
-        this.emit({ type: 'data', sessionId: session.id, chunk });
+        this.emit({ type: 'data', sessionId: session.id, chunk, seq: session.seq });
       }
     });
 
     proc.onExit(({ exitCode }: { exitCode: number }) => {
       this.sessions.delete(session.id);
+      this.rememberExit(session.workspaceRoot, exitCode);
       this.emit({ type: 'exit', sessionId: session.id, exitCode });
     });
 
-    return { ok: true, sessionId: session.id };
+    return { ok: true, sessionId: session.id, adopted: false };
+  }
+
+  /** 本工作区的会话现状（面板重新挂载时先问这个，再决定接回还是启动） */
+  status(workspaceRoot: string): TerminalStatus {
+    const live = this.findLive(workspaceRoot);
+    if (live) {
+      return {
+        session: { sessionId: live.id, tail: live.tail, seq: live.seq },
+        exited: null,
+        liveCount: this.sessions.size,
+        maxSessions: TERMINAL_LIMITS.maxSessions,
+      };
+    }
+    const exitCode = this.exits.get(workspaceRoot);
+    return {
+      session: null,
+      exited:
+        exitCode === undefined
+          ? null
+          : { exitCode, notice: describeExitNotice(exitCode) },
+      liveCount: this.sessions.size,
+      maxSessions: TERMINAL_LIMITS.maxSessions,
+    };
+  }
+
+  private rememberExit(workspaceRoot: string, exitCode: number): void {
+    // 只留最近 maxSessions 个工作区的退出记录：再多的话这个 Map 也会无限涨
+    while (this.exits.size >= TERMINAL_LIMITS.maxSessions) {
+      const oldest = this.exits.keys().next();
+      if (oldest.done) break;
+      this.exits.delete(oldest.value);
+    }
+    this.exits.set(workspaceRoot, exitCode);
   }
 
   /** 把用户在终端里的输入写进 PTY */
@@ -140,7 +236,7 @@ export class TerminalService {
     }
   }
 
-  /** 结束单个会话 */
+  /** 结束单个会话（**用户手工关闭**：这是 T23 之后会话唯一的结束入口之一，另一个是进程自己退出） */
   kill(sessionId: string): boolean {
     const s = this.sessions.get(sessionId);
     if (!s) return false;

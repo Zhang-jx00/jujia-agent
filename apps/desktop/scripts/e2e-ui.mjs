@@ -2484,6 +2484,129 @@ try {
   }
   ok(`推送：批准才发（远端 ${String(beforeAllow)} → ${String(afterAllow)}）、拒绝就不发（${String(beforePushDeny)} 不变），两次都弹硬确认且没有「总是允许」`);
 
+  step('T23 终端页：切走页签会话不结束，回来接回同一个会话（切走期间的输出补得回来，也不多出一个 PTY）');
+  /**
+   * 断言的落点是**主进程报的会话数**（`共用 1 /` 里那个 1 来自 `TerminalService.sessions.size`），
+   * 不是界面文案：如果"回来"走的是重新起进程，这里会变成 2 —— 而旧那个进程的 id 渲染层已经叫不出来，
+   * 只能等应用退出才回收。这就是 T23 修掉的那条缺陷的真值口径（复核 026 的 G-8 同一条纪律）。
+   */
+  await win3.locator('nav.app-tabs button', { hasText: '终端' }).first().click();
+  if ((await waitText3('启动终端（新会话需审批）', 12_000)) !== true) {
+    fail('终端页没挂上（看不到启动按钮）', await body3());
+  }
+  await win3.locator('button', { hasText: '启动终端（新会话需审批）' }).first().click();
+  if ((await waitText3('启动终端会话', 12_000)) !== true) {
+    fail('点启动没有弹权限确认（终端能跑任意命令，新建会话必须问过人手）', await body3());
+  }
+  await win3.locator('[role="dialog"][aria-label="权限请求"] button', { hasText: '允许一次' }).first().click();
+  if ((await waitText3('运行中', 15_000)) !== true) {
+    fail('批准之后终端页没有进入运行态', await body3());
+  }
+
+  /**
+   * 让子进程在**我们切走之后**才吐出 marker（2.5 秒的延时）。
+   * 否则补回来的可能只是切走前就已经在屏幕上的东西，这条断言就白写了。
+   */
+  await win3.locator('.jj-terminal-host').first().click();
+  await win3.keyboard.type("node -e \"setTimeout(function(){console.log('R4_LATE')},2500)\"");
+  await win3.keyboard.press('Enter');
+  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  // 这一句是**有意的定时等待**：要等的是子进程那边的定时器，而"输出发生在看不见的那一页"
+  // 这个条件本身没法用条件等待表达（切回去等就破坏被测语义）
+  await win3.waitForTimeout(4000);
+  await win3.locator('nav.app-tabs button', { hasText: '终端' }).first().click();
+
+  if ((await waitText3('已接回本工作区仍在运行的终端会话', 12_000)) !== true) {
+    fail('切回来没有接回会话（要么被杀了，要么当成新会话又起了一个）', await body3());
+  }
+  const askAgain = await win3.locator('[role="dialog"][aria-label="权限请求"]').count();
+  if (askAgain > 0) {
+    fail('接回已有会话时又弹了一次审批 —— 接回一个新进程都没起，第二次确认是凭空多出来的');
+  }
+  if ((await waitText3('R4_LATE', 12_000)) !== true) {
+    fail('切走期间子进程吐出的输出没有补回视图（tail 或 seq 的链路断了）', await body3());
+  }
+  if ((await waitText3('共用 1 /', 10_000)) !== true) {
+    fail(
+      '接回之后主进程报的会话数不是 1：要么旧会话被杀了，要么多起了一个没人能关的 PTY',
+      await body3(),
+    );
+  }
+
+  // 手工关闭：会话唯一的界面出口；关掉之后再回来，界面要讲清楚"它是自己结束的"
+  await win3.locator('button', { hasText: '结束会话' }).first().click();
+  if ((await waitText3('会话已由你结束', 12_000)) !== true) {
+    fail('点了「结束会话」界面没有反应', await body3());
+  }
+  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  await win3.locator('nav.app-tabs button', { hasText: '终端' }).first().click();
+  if ((await waitText3('上一个终端会话已结束（退出码', 12_000)) !== true) {
+    fail(
+      '会话结束之后再回来，界面只说"未启动"—— 它到底是怎么没的，用户看不见（会以为是切页签弄丢的）',
+      await body3(),
+    );
+  }
+  if ((await waitText3('共用 0 /', 10_000)) !== true) {
+    fail('手工结束之后主进程还报着会话没释放（kill 没真的收掉进程）', await body3());
+  }
+  ok('终端：审批才起、切走不杀、切回接回同一个会话（会话数 1，不多起）、切走期间的输出补回、手工结束之后退出码可见且会话数归 0');
+
+  step('T24 文档页：切走页签之后路径、分块进度与滚动位置都回来（内容是重读的，不是拿旧的糊）');
+  const r4DocFile = 'r4-doc.md';
+  const r4DocHeads = [];
+  for (let i = 1; i <= 600; i += 1) r4DocHeads.push(`## H${String(i)}`);
+  writeFileSync(join(wsDir, r4DocFile), `# R4 长文档\n\n${r4DocHeads.join('\n')}\n`, 'utf8');
+
+  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  await win3.locator('.jj-docs-head .jj-field').first().fill(r4DocFile);
+  await win3.locator('.jj-docs-head button', { hasText: '打开' }).first().click();
+  if ((await waitText3('已显示前 240 /', 15_000)) !== true) {
+    fail('长文档没有分块挂载（这一步后面三条断言都建立在"分了块"上）', await body3());
+  }
+  await win3.locator('button', { hasText: '继续加载' }).first().click();
+  if ((await waitText3('已显示前 480 /', 15_000)) !== true) {
+    fail('「继续加载」没有把分块进度推到 480', await body3());
+  }
+  // 程序化滚动同样会派发 scroll 事件 —— 面板就是靠它把偏移记进 store 的
+  const scrolledTop = await win3.evaluate(() => {
+    const el = document.querySelector('.jj-docs-body');
+    if (!el) return -1;
+    el.scrollTop = 900;
+    return el.scrollTop;
+  });
+  if (scrolledTop < 900) {
+    fail(`阅读容器没能滚到 900（读到 ${String(scrolledTop)}）—— 后面的"位置回来了"就无从判起`, await body3());
+  }
+  await win3.locator('nav.app-tabs button', { hasText: '终端' }).first().click();
+  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  if ((await waitText3('已恢复到上次打开的 r4-doc.md', 15_000)) !== true) {
+    fail('切回来没有恢复上次打开的文件（T24 的"记住路径"没兑现）', await body3());
+  }
+  if ((await waitText3('已显示前 480 /', 15_000)) !== true) {
+    fail('路径恢复了但分块进度没恢复（又从 240 段起步 = 阅读位置还是丢了）', await body3());
+  }
+  let restoredTop = -1;
+  try {
+    await win3.waitForFunction(
+      () => {
+        const el = document.querySelector('.jj-docs-body');
+        return el !== null && el.scrollTop >= 800;
+      },
+      null,
+      { timeout: 10_000 },
+    );
+  } catch {
+    // 不在这儿 fail：下面读一次真实值，把现场一起交出来
+  }
+  restoredTop = await win3.evaluate(() => {
+    const el = document.querySelector('.jj-docs-body');
+    return el === null ? -1 : el.scrollTop;
+  });
+  if (restoredTop < 800) {
+    fail(`滚动位置没恢复回去（切走前 900，回来读到 ${String(restoredTop)}）—— "记住阅读位置"只兑现了一半`, await body3());
+  }
+  ok(`文档：路径 + 分块进度（480）+ 滚动位置（${String(restoredTop)}）都跟着回来了，而内容是重新读的那一份`);
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -2503,5 +2626,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 干净退出');
 process.exit(0);

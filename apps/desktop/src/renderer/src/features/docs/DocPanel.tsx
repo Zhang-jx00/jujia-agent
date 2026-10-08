@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { parseMarkdown } from '../../markdown/parse';
 import { MarkdownView } from '../../markdown/MarkdownView';
+import { clearDocView, currentDocView, rememberDocView } from './doc-view-state';
 
 /**
  * 应用内文档查看（M10 收尾 · Markdown 那一半）。
@@ -17,6 +18,10 @@ import { MarkdownView } from '../../markdown/MarkdownView';
  *
  * "点开一个文件"这件事目前还没有文件树可点 —— 所以这里的入口是一行路径输入框。
  * 文件树、PDF 查看、以及"从 Git 面板直接点开某个改动文件"都归 M19 一起做（所有者 2026-09-26 拍板）。
+ *
+ * **T24（本轮）：切页签不丢阅读位置。** 页签切走时本面板会被卸载（`App.tsx` 只给对话页包了
+ * `KeepAlive`），所以路径 / 分块进度 / 滚动偏移存在 `doc-view-state` 那个模块里。
+ * 回来时**重读文件**而不是复用旧内容：文件可能已经改了，用旧内容"恢复"是另一种骗人。
  */
 
 const CHUNK = 240;
@@ -43,39 +48,89 @@ export function DocPanel(): ReactElement {
 
   const blocks = useMemo(() => (content === null ? [] : parseMarkdown(content)), [content]);
 
+  /** 阅读容器（滚动偏移存进模块级 store，见 doc-view-state） */
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  /** 待应用的滚动偏移：只在"恢复打开"那一次有值，应用完就清空 */
+  const pendingScrollRef = useRef<number | null>(null);
+  /** 本次挂载是否已经尝试过恢复（尝试过就不再试第二次，失败也不反复撞） */
+  const restoredRef = useRef(false);
+
   /** 长期记忆的固定位置（补偿条件①"看得到"的落点；路径由主进程的路径守卫把守，不在工作区内会被拒） */
   const NOTES_PATH = '.jujia/NOTES.md';
 
-  /** `override` 给「查看长期记忆」这类预置入口用：不依赖 setPath 之后的重渲染时机 */
-  const open = useCallback(async (override?: string): Promise<void> => {
-    const target = (override ?? path).trim();
-    if (target === '') {
-      setMessage({ kind: 'error', text: '请先输入工作区内的文件路径' });
-      return;
-    }
-    setPath(target);
-    setBusy(true);
-    setMessage(null);
-    try {
-      const result = await window.jujia.toolRun('read_file', { path: target });
-      if (!result.ok) {
-        setContent(null);
-        setMessage({ kind: 'error', text: `没读到：${result.content}` });
+  /**
+   * `override` 给「查看长期记忆」这类预置入口用：不依赖 setPath 之后的重渲染时机。
+   * `resume` 只给 T24 的恢复路径用：带着上次的分块进度与滚动偏移，读的是**同一个文件**。
+   */
+  const open = useCallback(
+    async (override?: string, resume?: { shown: number; scrollTop: number }): Promise<void> => {
+      const target = (override ?? path).trim();
+      if (target === '') {
+        setMessage({ kind: 'error', text: '请先输入工作区内的文件路径' });
         return;
       }
-      setContent(result.content);
-      setShown(CHUNK);
-      setMessage({
-        kind: 'info',
-        text: `已打开 ${target}（${String(result.durationMs)}ms）`,
-      });
-    } catch (err) {
-      setContent(null);
-      setMessage({ kind: 'error', text: err instanceof Error ? err.message : String(err) });
-    } finally {
-      setBusy(false);
-    }
-  }, [path]);
+      setPath(target);
+      setBusy(true);
+      setMessage(null);
+      try {
+        const result = await window.jujia.toolRun('read_file', { path: target });
+        if (!result.ok) {
+          setContent(null);
+          pendingScrollRef.current = null;
+          // 记住的路径读不到了（改名 / 删除 / 换了工作区）：**忘掉它**。
+          // 留着就是每次挂载再撞一遍同一个错误 —— 那比"没记住"更糟（T6 的静默回落教训反着用）。
+          clearDocView();
+          setMessage({ kind: 'error', text: `没读到：${result.content}` });
+          return;
+        }
+        const nextShown = resume !== undefined && resume.shown > 0 ? resume.shown : CHUNK;
+        setContent(result.content);
+        setShown(nextShown);
+        pendingScrollRef.current = resume?.scrollTop ?? null;
+        rememberDocView({ path: target, shown: nextShown, scrollTop: resume?.scrollTop ?? 0 });
+        setMessage({
+          kind: 'info',
+          text:
+            resume === undefined
+              ? `已打开 ${target}（${String(result.durationMs)}ms）`
+              : `已恢复到上次打开的 ${target}（第 ${String(nextShown)} 段附近，${String(result.durationMs)}ms）`,
+        });
+      } catch (err) {
+        setContent(null);
+        pendingScrollRef.current = null;
+        clearDocView();
+        setMessage({ kind: 'error', text: err instanceof Error ? err.message : String(err) });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [path],
+  );
+
+  // ---- T24：挂载时恢复"上次看的是哪个文件、看到哪" ----
+  // 只做一次（restoredRef）：恢复失败会 clearDocView，成功则不必重跑。
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const saved = currentDocView();
+    if (saved === null) return;
+    void open(saved.path, { shown: saved.shown, scrollTop: saved.scrollTop });
+  }, [open]);
+
+  // 分块进度一变就记下（切走时被卸载，这里是不丢的唯一办法）
+  useEffect(() => {
+    if (content === null) return;
+    rememberDocView({ shown });
+  }, [shown, content]);
+
+  // 恢复的滚动位置：等内容与分段都渲染完再应用，且只应用一次（之后归用户）
+  useEffect(() => {
+    const top = pendingScrollRef.current;
+    if (top === null) return;
+    pendingScrollRef.current = null;
+    const el = scrollRef.current;
+    if (el !== null && top > 0) el.scrollTop = top;
+  }, [content, shown, blocks.length]);
 
   /** 文档里的链接点开 = 与浏览器面板同一动作：交给外部程序，由主进程判档（外部档照样硬 ask） */
   const openLink = useCallback(async (href: string): Promise<void> => {
@@ -138,7 +193,11 @@ export function DocPanel(): ReactElement {
         </>
       ) : (
         <>
-          <div className="jj-docs-body">
+          <div
+            className="jj-docs-body"
+            ref={scrollRef}
+            onScroll={(e) => rememberDocView({ scrollTop: e.currentTarget.scrollTop })}
+          >
             <MarkdownView blocks={blocks} shown={shown} onOpenLink={(href) => void openLink(href)} />
             {blocks.length > CHUNK && (
               <p className="jj-muted">

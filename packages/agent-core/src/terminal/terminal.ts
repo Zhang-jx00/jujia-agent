@@ -25,6 +25,17 @@ export const TERMINAL_LIMITS = {
   maxRows: 300,
   /** 单个数据块上限（字符）：防止一次性巨量输出把 IPC 打爆 */
   maxChunkChars: 64 * 1024,
+  /**
+   * 同时在开的会话上限（跨工作区计数）。
+   * T23 之后会话**活得过页签切换**，所以这个数不能再靠"切走就杀"来兜底 ——
+   * 没有上界时，来回切工作区会攒出渲染层已经叫不出名字的 PTY。
+   */
+  maxSessions: 3,
+  /**
+   * 每个会话留存的输出尾部上限（字符）：切走期间的输出靠它补回视图。
+   * 必须有界 —— `yes` 这类一直吐的进程，留全量等于内存随运行时长无限涨。
+   */
+  maxTailChars: 128 * 1024,
 } as const;
 
 /**
@@ -141,4 +152,72 @@ export function splitChunks(text: string, max = TERMINAL_LIMITS.maxChunkChars): 
  */
 export function describeTerminalPermission(shell: ShellSpec, workspaceRoot: string): string {
   return `启动终端会话：${shell.file}（工作目录 ${workspaceRoot}）`;
+}
+
+/* ------------------------------------------------------------------ *
+ * T23：会话生命周期（"pty 常驻但可手工关闭"）
+ *
+ * 三条规则放在一起，是因为它们回答的是同一个问题：**什么时候真的会多出一个进程**。
+ * 权限门的语义（"每次新建会话都要确认"）由 `decideStart` 的结果决定 ——
+ * 只有 `spawn` 才需要审批，`adopt` 一个新进程都没起，因此不需要第二次确认。
+ * ------------------------------------------------------------------ */
+
+export type StartDecision =
+  /** 接回本工作区已有的会话：**不启动新进程**，也就不再要一次审批 */
+  | { kind: 'adopt'; sessionId: string; reason: string }
+  /** 确实要新建会话：调用方必须先过权限门 */
+  | { kind: 'spawn' }
+  /** 达到上限：直接拒绝，并把理由给用户（不偷偷杀掉别的会话） */
+  | { kind: 'refuse'; reason: string };
+
+/**
+ * 判断"点启动"该接回、该新起、还是该拒绝。
+ *
+ * 输入用 `liveSessionId` 而不是"有没有"的布尔：接回要把那个会话的 id 交回去；
+ * 让调用方自己再查一次，就等于允许两处对"谁活着"的判断各自漂移。
+ *
+ * 顺序是刻意的：**先看有没有可接回的会话，再看上限**。
+ * 反过来会导致"到上限时点启动被拒"，而其实用户只是想回到自己那个还在跑的终端里。
+ */
+export function decideStart(input: {
+  liveSessionId: string | null;
+  liveCount: number;
+  maxSessions?: number;
+}): StartDecision {
+  if (input.liveSessionId !== null) {
+    return {
+      kind: 'adopt',
+      sessionId: input.liveSessionId,
+      reason: '本工作区已有一个仍在运行的终端会话，直接接回（不会再启动第二个进程）',
+    };
+  }
+  const max = input.maxSessions ?? TERMINAL_LIMITS.maxSessions;
+  const live = Number.isFinite(input.liveCount) && input.liveCount > 0 ? input.liveCount : 0;
+  if (live >= max) {
+    return {
+      kind: 'refuse',
+      reason: `终端会话已达上限 ${String(max)} 个。请先在对应的终端页「结束会话」，再开新的`,
+    };
+  }
+  return { kind: 'spawn' };
+}
+
+/** 只保留末尾若干个字符（切走期间的输出靠它补回视图，见 TERMINAL_LIMITS.maxTailChars） */
+export function trimTail(
+  existing: string,
+  incoming: string,
+  max: number = TERMINAL_LIMITS.maxTailChars,
+): string {
+  const cap = Number.isFinite(max) ? Math.max(0, Math.floor(max)) : 0;
+  if (cap === 0) return '';
+  const merged = existing + incoming;
+  return merged.length <= cap ? merged : merged.slice(merged.length - cap);
+}
+
+/**
+ * 会话在用户切走页签期间退出了 —— 回来时必须看得见"是它自己结束的"。
+ * 只写"未启动"会让人以为是页签切换把会话弄丢了（这正是 T23 要修的错觉）。
+ */
+export function describeExitNotice(exitCode: number): string {
+  return `上一个终端会话已结束（退出码 ${String(exitCode)}），需要时请重新启动`;
 }

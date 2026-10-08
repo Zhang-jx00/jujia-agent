@@ -495,10 +495,51 @@ export const terminalStartSchema = z.object({
 export type TerminalStartPayload = z.infer<typeof terminalStartSchema>;
 
 export const terminalStartResultSchema = z.union([
-  z.object({ ok: z.literal(true), sessionId: z.string() }),
+  z.object({
+    ok: z.literal(true),
+    sessionId: z.string(),
+    /**
+     * `true` = **接回**了本工作区已有的会话（没起新进程，因此也没再要一次审批）。
+     * 渲染层靠它决定要不要显示"已连接"以外的说明，不许省：
+     * 把它当常量 false 写死，"点启动其实是接回"这件事就从界面上消失了（T23 的可见性要求）。
+     */
+    adopted: z.boolean(),
+  }),
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type TerminalStartResultPayload = z.infer<typeof terminalStartResultSchema>;
+
+/**
+ * 查询"这个工作区现在有没有活着的终端会话"（T23）。
+ *
+ * 页签切走时面板被卸载，但会话在主进程里继续跑 —— 重新挂载时必须先问一句，
+ * 否则会走到"启动"上去，而每次都启动正是一个会话变成两个 PTY 的起点。
+ */
+export const terminalStatusSchema = z.object({ workspaceRoot: z.string().min(1).max(1000) });
+
+export const terminalStatusResultSchema = z.object({
+  /** 该工作区当前仍在跑的会话；没有则为 null */
+  session: z
+    .object({
+      sessionId: z.string(),
+      /** 切走期间累积的输出尾部（有界，见 `TERMINAL_LIMITS.maxTailChars`） */
+      tail: z.string(),
+      /** 尾部对应到第几批输出：渲染层用它过滤已经包含在 tail 里的事件，避免重复显示 */
+      seq: z.number().int().nonnegative(),
+    })
+    .nullable(),
+  /** 该工作区**上一个**会话的退出信息（进程在自己看不见的时候退出了，回来要讲明白） */
+  exited: z
+    .object({
+      exitCode: z.number().int(),
+      /** 主进程用 `describeExitNotice` 生成的说明文本（渲染层不许引 agent-core，所以在这里给） */
+      notice: z.string(),
+    })
+    .nullable(),
+  liveCount: z.number().int().nonnegative(),
+  maxSessions: z.number().int().positive(),
+});
+export type TerminalStatusPayload = z.infer<typeof terminalStatusResultSchema>;
 
 export const terminalInputSchema = z.object({
   sessionId: z.string().min(1),
@@ -520,6 +561,12 @@ export const terminalEventSchema = z.union([
     type: z.literal('data'),
     sessionId: z.string(),
     chunk: z.string(),
+    /**
+     * 这批输出在主进程侧的序号（同一批切成的多个块共用一个号）。
+     * 为什么要：重新挂载时"取尾部"与"开始订阅"之间必然有一段间隙，
+     * 间隙里到达的块既在 tail 里又会被订阅收到 —— 没有这个号就只能二选一地重复或丢。
+     */
+    seq: z.number().int().nonnegative(),
   }),
   z.object({
     type: z.literal('exit'),

@@ -75,9 +75,12 @@ import {
   terminalResizeSchema,
   terminalStartResultSchema,
   terminalStartSchema,
+  terminalStatusResultSchema,
+  terminalStatusSchema,
   type TerminalEventPayload,
   type TerminalStartPayload,
   type TerminalStartResultPayload,
+  type TerminalStatusPayload,
   browserBoundsSchema,
   browserStateSchema,
   browserTextResultSchema,
@@ -261,12 +264,23 @@ const api = {
 
   /* ---------------------------- 内置终端（W9b） ---------------------------- */
 
-  /** 新建终端会话（主进程会先弹权限审批） */
+  /** 新建终端会话（主进程会先弹权限审批；本工作区已有会话时是接回，不审批） */
   async terminalStart(
     payload: TerminalStartPayload,
   ): Promise<TerminalStartResultPayload> {
     const parsed = terminalStartSchema.parse(payload);
     return terminalStartResultSchema.parse(await ipcRenderer.invoke(IPC.TERMINAL_START, parsed));
+  },
+
+  /**
+   * 查询当前工作区有没有仍在跑的会话（T23）。
+   * 面板**先问再接**：跳过这一步就等于把"回到终端页"变成"再起一个 PTY"。
+   */
+  async terminalStatus(workspaceRoot: string): Promise<TerminalStatusPayload> {
+    const parsed = terminalStatusSchema.parse({ workspaceRoot });
+    return terminalStatusResultSchema.parse(
+      await ipcRenderer.invoke(IPC.TERMINAL_STATUS, parsed),
+    );
   },
 
   async terminalInput(sessionId: string, data: string): Promise<boolean> {
