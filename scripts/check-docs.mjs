@@ -712,7 +712,14 @@ const walkLiveFiles = (exts) => {
 
 {
   const plans = read('docs/TRACK-PLANS.md');
-  const from = plans.indexOf('### 2.1');
+  /**
+   * 段落定位要求 `### 2.1` 后面**紧跟空白**（整词边界），不能用 `indexOf('### 2.1')`：
+   * 第一版用 indexOf，实验把标题改成 `### 2.1x …` 后护栏**照样绿** —— 前缀还在就匹配到了。
+   * 同一族教训已在 CSS 版接线锁上踩过一次（子串检查对"改名保前缀"不敏感，M89 逼出整词版）。
+   */
+  const headRe = /^### 2\.1[ \t]/m;
+  const hm = headRe.exec(plans);
+  const from = hm === null ? -1 : hm.index;
   const to = plans.indexOf('\n## 三、', from);
   const section = from >= 0 && to > from ? plans.slice(from, to) : '';
 
