@@ -1013,7 +1013,7 @@
       "id": "M127",
       "desc": "CHAT_SEND 的文本上限被摘掉（T30 的原样）：一次超长粘贴原样过 IPC、原样送去 provider",
       "file": "packages/shared-ipc/src/contracts.ts",
-      "find": "  text: z.string().min(1, '消息不能为空').max(32_000, '消息过长（上限 32000 字，更长的内容请放进文件再用工具读）'),",
+      "find": "  text: z.string().min(1, '消息不能为空').max(200_000, '消息过长（上限 20 万字符；更长的内容请放进文件，用文件工具读）'),",
       "replace": "  text: z.string().min(1, '消息不能为空'),",
       "test": "packages/shared-ipc/src/chat-send.test.ts"
     },
