@@ -247,7 +247,7 @@
 | **文档一致性** | `npm run check:docs`（**项数以自身输出为准**）+ `npm run check:docs:selftest`（注入的漂移必须全部被拦住） | 见 §5.4 |
 | 许可证 | `npm run license:check` | 强 copyleft 硬拒绝；清单自动生成于 `docs/DEPENDENCY-LICENSES.md` |
 | 清理 | `python scripts/cleanup.py --apply` | 移入项目内 `.trash/<时间戳>/`，30 天可反悔，**绝不直接删** |
-| CI | `.github/workflows/ci.yml` | lint / typecheck / test / **check:docs** / build；**CI 不跑 smoke/perf/e2e**（需真实图形环境，本地跑） |
+| CI | `.github/workflows/ci.yml` + `mutation.yml` | CI 跑 lint / typecheck / test / **check:docs** / **license:check**（T14 补上）/ build；**CI 不跑 smoke/perf/e2e**（需真实图形环境，本地跑）；**变异不在 CI 里** —— 独立的 `mutation.yml`，`workflow_dispatch` 手动触发（几十分钟一轮塞进每次 push 只会被关掉） |
 
 当前门禁（清单权威在 `docs/PROGRESS.md`）：typecheck / lint / test / smoke / perf / e2e / check:docs。
 
@@ -349,9 +349,13 @@ e2e 第 42–45 步为证（46 步全程）。**十轮闭环计划 R1 完成 = M
 撤回需要远端配合"，不复用 commit 那句）· `agent-core` 的 `push()` **过命令之前先校验名字形状**
 （`execFile` 挡不住"一个叫 `--force` 的远端名被读成选项"）· 分支留空推 `HEAD`（推当前分支；
 `git push origin` 无 refspec 在第一次推新分支时必然失败，这条是单测跑出来的）· 界面成功也有一行可见的话。
-**下一轮 = R3 修复批一**（T13 · T14 · T15 · T18）→ R4（T23/T24）→ R5（T16 核实批）
+**加固4 已交付（`v0.57.0-加固4` = R3 修复批一）**：T13（`passWithNoTests` 关掉 + 清掉一个从来没生效的**重复 `include` 键** + `check:docs` 新增"每个测试文件都必须在收集范围内"）·
+T14（`license:check` 进 CI；变异拆成独立 `workflow_dispatch` workflow + CI 一致性机器断言）·
+T15（`argv.ts` 补 **cmd.exe 专属**元字符 `% ^ !`，判据抽成 `goesThroughCmd()` 给检查与构造共用；首建 `argv.test.ts` 28 例）·
+T18（删掉脚手架死字段）。**T15 的报告定位按实测更正过**（详见 `TRACK-ROADMAP.md` §二 那一行）。
+**下一轮 = R4 修复批二**（T23 终端页 / T24 文档页）→ R5（T16 核实批）
 （十轮连续闭环，2026-10-07 起不再逐轮等批复）。
-新变异 **M71–M103** 已占用（M9a 71–85 + B1 86–88 + CSS 锁 89 + B2 90–92 + B3 93–99 + M8 push 100–103），**下一轮新变异从 M104 起**；
+新变异 **M71–M105** 已占用（M9a 71–85 + B1 86–88 + CSS 锁 89 + B2 90–92 + B3 93–99 + M8 push 100–103 + 加固4 104–105），**下一轮新变异从 M106 起**；
 **全量变异已在 M9b 收口轮复跑**（见复核 050）。
 **报备已交、等批后才施工**：`docs/DESIGN-M19-IDE.md`（范围切分 M19a/M19b、权限映射表、五条上限、覆盖保护、
 PDF 零出站、diff 扩 `GIT_DIFF` 而不新开通道，末尾九条开关）。
@@ -408,7 +412,11 @@ PDF 零出站、diff 扩 `GIT_DIFF` 而不新开通道，末尾九条开关）�
 
 - **会话历史仅内存**（重启即丢）——刻意设计，README 已标注；`sessions` Map 有 LRU 上限 20。
 - **`plan`/`dontAsk` 模式语义**：plan=只读、dontAsk=拒绝而不询问（与"不静默自动拒绝"的默认取向相反，需用户显式选择）。
-- **CI 与门禁的差异**：CI 只跑 lint/typecheck/test/check:docs/build；**smoke/perf/e2e 只在本地跑**（workflow 里有注释说明）。
+- **CI 与门禁的差异**：CI 跑 lint / typecheck / test / check:docs / **license:check** / build；
+  **smoke / perf / e2e 只在本地跑**（要真实图形环境，workflow 里有注释说明）；
+  **变异测试也只在本地或手动 workflow 跑**（`.github/workflows/mutation.yml`，`workflow_dispatch` 触发，
+  并且它第一步就是 `git diff --exit-code` —— 基线不干净时变异结果不可信，直接让它失败）。
+  这三句"CI 与声明一致"现在都有机器断言盯着（`check:docs` 第 14 条），不再是靠人看 YAML。
 - e2e 收尾清理**尽力而为**（失败只打印提示，旧目录交给 `cleanup.py`）—— 因为沙箱有"同轮删除次数"配额（见 §5.2）。
 
 ### 5.2 本机/沙箱环境坑（在这台开发机上实测过，换机器也可能遇到类似问题）

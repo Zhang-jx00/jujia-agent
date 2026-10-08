@@ -27,14 +27,21 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-/** 用脚本化的「每轮返回什么」来伪造 provider */
+/**
+ * 用脚本化的「每轮返回什么」来伪造 provider。
+ *
+ * 这里刻意**没有** `finish` 一类的"结束事件"入参（原来声明了一个 `finish?: ProviderEvent`
+ * 却从来没读过它 —— T18 清掉）。理由不是省代码：`ProviderEvent` 的联合类型里
+ * **没有 error 变体**（错误一律走 `throw`，见 `providers/openai-compat.ts`），
+ * 结束原因只有 `done` 那四种，而它们都能从"这一轮有没有 tool_calls"推出来。
+ * 留一个填了也不生效的字段，比没有更坏 —— 下一个人会以为它能控制收尾。
+ */
 function scriptedChat(
   script: Array<{
     text?: string;
     calls?: Array<{ name: string; args: unknown; id?: string }>;
     /** 这一段的用量（provider 在流尾给的 usage） */
     usage?: { in: number; out: number };
-    finish?: ProviderEvent;
   }>,
 ) {
   const seenMessages: ChatMessage[][] = [];

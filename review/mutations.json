@@ -824,6 +824,22 @@
       "find": "      return `发到远端「${where}」的${what} —— 别人看得见，撤回需要远端配合；本应用不做强推（--force）`;",
       "replace": "      return `执行 git 操作：${where}/${what}`;",
       "test": "apps/desktop/src/main/git-gate.test.ts"
+    },
+    {
+      "id": "M104",
+      "desc": "cmd 专属元字符表被清空（T15 的修法失效）：`%USERPROFILE%` 这类变量展开重新混进 MCP 与钩子的参数里",
+      "file": "packages/agent-core/src/commands/argv.ts",
+      "find": "const CMD_METACHAR = /[%^!]/;",
+      "replace": "const CMD_METACHAR = /zzz-never-matches-zzz/;",
+      "test": "packages/agent-core/src/commands/argv.test.ts"
+    },
+    {
+      "id": "M105",
+      "desc": "安全检查不再看「这条命令会不会经 cmd.exe」：判据与 buildArgvCommand 重新分叉，于是经 shell 的那条路拿到的是不经 shell 的宽松判定",
+      "file": "packages/agent-core/src/commands/argv.ts",
+      "find": "  const viaCmd = typeof command === 'string' && goesThroughCmd(command, platform);",
+      "replace": "  const viaCmd = false;",
+      "test": "packages/agent-core/src/commands/argv.test.ts"
     }
   ]
 }

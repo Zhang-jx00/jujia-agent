@@ -1,0 +1,37 @@
+name: 变异测试（手动触发）
+
+# 为什么单独成一个 workflow，而不是并进 ci.yml（T14）：
+# 变异测试要**逐条改坏源码再跑对应测试文件**，103 项一轮下来是几十分钟量级，
+# 且它必须在**已提交的干净基线**上跑（工作区有改动时结果不可信 —— 脚本本身会警告）。
+# 放进每次 push 的 CI 只有两种下场：要么拖慢所有 PR，要么人们把它关掉。
+# 所以：**CI 每次跑的是快档；变异留在这里，要跑就明确地跑一次。**
+#
+# 与本地门禁的分工如实写明：这条 workflow 只在 GitHub 的干净 runner 上跑，
+# 结果与本地 `npm run mut` 同口径（同一份 review/mutations.json、同一个脚本）。
+# 它**不代替**里程碑收口轮的本地全量变异 —— 本地那一次还带"还原后复跑 + 工作区洁净核对"。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  mutation:
+    runs-on: windows-latest
+    # 变异一轮要跑很多测试文件；给足时间，宁可慢也不要中途被砍掉后误判成"逃逸"
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      # 先确认基线干净：变异脚本靠"改文件→跑→还原"工作，工作区不干净时结果不可信
+      - name: 基线必须是干净的
+        run: git diff --exit-code
+
+      - name: 变异测试（逐条改坏源码，验证测试真拦得住）
+        run: npm run mut

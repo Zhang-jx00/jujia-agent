@@ -37,5 +37,11 @@ jobs:
       - name: 文档一致性
         run: npm run check:docs
 
+      # 依赖许可证门禁（T14 补上）。它此前只在本地门禁跑：
+      # 新增一个 copyleft 依赖要到发版前才被发现，比在 PR 里被拦住贵得多。
+      # 它只读 package.json / lock 文件，不需要构建，适合 CI。
+      - name: 依赖许可证
+        run: npm run license:check
+
       - name: 构建（main / preload / renderer）
         run: npm run build

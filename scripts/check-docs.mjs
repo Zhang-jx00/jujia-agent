@@ -341,6 +341,32 @@ const verAbove = (a, b) =>
   a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] > b[2])));
 
 /**
+ * glob → 正则：结尾带斜杠的双星号跨任意层目录、裸双星号跨任意字符、单星号只跨一层、`?` 单字符，其余按字面。
+ * 两处共用：归轨索引的条目匹配、测试收集范围的核对。
+ * 手写而不是引库，是为了让这个脚本仍然"任何一台装 node 的机器都能跑"。
+ * （注释里刻意不出现那个"双星号加斜杠"的连写 —— 它会把这段块注释当场截断，
+ * 而且截断是**静默**的：脚本会一路语法错误到几百行之外才炸。这条我自己踩过一次，见复核 053。）
+ */
+const globToRe = (glob) => {
+  let out = '';
+  for (let i = 0; i < glob.length; i += 1) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        i += 1;
+        if (glob[i + 1] === '/') {
+          i += 1;
+          out += '(?:[^/]+/)*';
+        } else out += '.*';
+      } else out += '[^/]*';
+      continue;
+    }
+    out += '.+^${}()|[]\\'.includes(c) ? '\\' + c : c;
+  }
+  return new RegExp('^' + out + '$');
+};
+
+/**
  * CHANGELOG 标题的**轨道段**必须命中十条轨道的受控词表（2026-10-05 复核 047 的补账要求）。
  *
  * 为什么立它：标题曾长期只有任务号 —— `v0.46.0-M19a`、`v0.45.0-T22`、`v0.50.0-M9a`。
@@ -742,8 +768,6 @@ const walkLiveFiles = (exts) => {
     }
   }
 
-  const globToRe = (g) =>
-    new RegExp('^' + g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*') + '$');
   const fileCovered = (rel) =>
     entries.some((e) =>
       e.endsWith('/')
@@ -906,6 +930,115 @@ const walkLiveFiles = (exts) => {
       missing.length > 0 ? `标签不存在：${missing.join('、')}` : '',
       badFormat.length > 0 ? `格式不符：${badFormat.join('、')}` : '',
       refList.length === 0 ? 'CHANGELOG 里没抓到回退点标签（指针写法变了？护栏要跟着改）' : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 13. 测试收集范围必须真的覆盖到每个测试文件（T13 · 2026-10-08）
+ *
+ * 为什么立它：`vitest.config.ts` 里曾经同时写着 `passWithNoTests: true` 和**两个同名 `include` 键**。
+ * 这两个东西的共同失败模式是"**少跑了东西但仍然全绿**"：
+ * - `passWithNoTests: true` = 一个测试文件都没收集到，也以退出码 0 收场；
+ * - 重复的 `include` 键 = 后者覆盖前者，于是改第一行的人在改**死代码**，
+ *   而 pattern 与磁盘上的测试文件一旦脱钩（新增目录、改名），那个文件就**永远不会被跑**，
+ *   并且没有任何地方会说"你今天没跑它"。
+ * 单测数量对得上不代表每个文件都被收进去了 —— 本仓原先只有"PROGRESS 的测试文件数 vs 实扫"这一条，
+ * 它盯得住"文件存在"，盯不住"被收集"。这条补的正是后半截。
+ *
+ * 判据全现扫：include 模式从配置里读，测试文件从磁盘扫，两边用同一套 glob 匹配。
+ * ------------------------------------------------------------------ */
+
+{
+  const cfgRaw = read('vitest.config.ts');
+  const includeBlocks = [...cfgRaw.matchAll(/include:\s*\[([\s\S]*?)\]/g)];
+  const patterns = includeBlocks.flatMap((b) => [...b[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
+  const testFiles = walkLiveFiles(['.ts', '.tsx']).filter(
+    (rel) => /^(apps|packages)\//.test(rel) && /\.test\.tsx?$/.test(rel),
+  );
+
+  const uncovered = testFiles.filter((f) => !patterns.some((p) => globToRe(p).test(f)));
+  const zeroOk = /passWithNoTests\s*:\s*true/.test(cfgRaw);
+
+  report(
+    `测试收集范围：include 只写一份、每个测试文件都在范围内、且不许"零测试也算过"（现扫 ${String(testFiles.length)} 个文件 / ${String(patterns.length)} 条模式）`,
+    includeBlocks.length === 1 &&
+      patterns.length > 0 &&
+      testFiles.length > 0 &&
+      uncovered.length === 0 &&
+      !zeroOk,
+    [
+      includeBlocks.length !== 1
+        ? `vitest.config.ts 里有 ${String(includeBlocks.length)} 个 include 键（同名键只有最后一个生效，其余是死代码）`
+        : '',
+      zeroOk ? 'passWithNoTests: true 回来了 —— 一个测试都没收集到也会绿' : '',
+      patterns.length === 0 ? '读不到 include 模式（配置写法变了？护栏要跟着改）' : '',
+      testFiles.length === 0 ? '磁盘上一个测试文件都没有 —— 门禁在跑空' : '',
+      uncovered.length > 0 ? `这些测试文件不在任何 include 模式里，永远不会被跑：${uncovered.join('、')}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 14. CI 的门禁清单必须与声明一致（T14 · 2026-10-08）
+ *
+ * 为什么立它：这条检查要防的事故是"**CI 说它跑了，其实没跑**"。
+ * R-06 那一轮把 `check:docs` 补进 CI 时，是靠人在 PR 里看一眼 workflow 文件；
+ * 而 workflow 是 YAML，没有任何东西盯着它 —— 删一行、改个脚本名、把变异测试塞回每次 push，
+ * 都不会让任何测试变红。声明与执行的分叉就是这么来的（本仓已经为同类分叉立过三条锁）。
+ *
+ * 判据（全部现扫 `.github/workflows/`）：
+ * - workflow 里每个 `npm run X` 都必须在 package.json 里真实存在（防"改个名字就静默少跑"）；
+ * - 快档里**能在无头环境跑的**那几项（lint / typecheck / test / check:docs）+ 许可证门禁必须在 ci.yml；
+ * - **`e2e` / `smoke` / `perf` 不许出现在 ci.yml**：它们要真实图形环境，塞进 CI 只会变成"偶尔红的噪声"，
+ *   而噪声比不跑更糟（见 `docs/PROGRESS.md` 的分档说明）；
+ * - 变异必须**独立成一条手动 workflow**，且不得混进 ci.yml（成本与触发方式要匹配，见该文件头部注释）。
+ * ------------------------------------------------------------------ */
+
+{
+  const WF_DIR = '.github/workflows';
+  const files = exists(WF_DIR)
+    ? readdirSync(join(repoRoot, WF_DIR)).filter((f) => /\.(yml|yaml)$/.test(f))
+    : [];
+  const text = (f) => (files.includes(f) ? read(`${WF_DIR}/${f}`) : '');
+  const ciText = text('ci.yml');
+  const mutText = text('mutation.yml');
+
+  const unknown = [];
+  let refs = 0;
+  for (const f of files) {
+    for (const m of text(f).matchAll(/npm run ([a-z][a-z0-9:_-]*)/gi)) {
+      refs += 1;
+      if (!allScripts.has(m[1])) unknown.push(`${f} → npm run ${m[1]}`);
+    }
+  }
+
+  const MUST_IN_CI = ['lint', 'typecheck', 'test', 'check:docs', 'license:check'];
+  const missingInCi = MUST_IN_CI.filter((s) => !ciText.includes(`npm run ${s}`));
+  const headlessOnly = ['e2e', 'smoke', 'perf'];
+  const wronglyInCi = headlessOnly.filter((s) => ciText.includes(`npm run ${s}`));
+  const mutOk = /workflow_dispatch/.test(mutText) && mutText.includes('npm run mut');
+
+  report(
+    `CI 门禁清单与声明一致（现扫 ${String(files.length)} 个 workflow、${String(refs)} 处 npm run 引用；变异独立手动触发）`,
+    files.length >= 2 &&
+      refs > 0 &&
+      unknown.length === 0 &&
+      missingInCi.length === 0 &&
+      wronglyInCi.length === 0 &&
+      mutOk &&
+      !ciText.includes('npm run mut'),
+    [
+      unknown.length > 0 ? `workflow 引用了 package.json 里没有的脚本：${unknown.join('、')}` : '',
+      missingInCi.length > 0 ? `ci.yml 少了必须跑的门禁：${missingInCi.join('、')}` : '',
+      wronglyInCi.length > 0 ? `ci.yml 里出现了需要真实图形环境的门禁（应在本地跑）：${wronglyInCi.join('、')}` : '',
+      !mutOk ? 'mutation.yml 缺失、没有 workflow_dispatch、或没跑 npm run mut' : '',
+      ciText.includes('npm run mut') ? '变异又被塞回每次 push 的 CI 了 —— 它必须在独立的手动 workflow 里' : '',
+      files.length < 2 ? `只扫到 ${String(files.length)} 个 workflow 文件（少于 2 个 = 有文件被删或改名）` : '',
     ]
       .filter(Boolean)
       .join('\n     '),

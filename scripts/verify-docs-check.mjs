@@ -225,6 +225,34 @@ const cases = [
     to: '### 归轨索引（段落标题改名实验）',
     expect: '归轨索引',
   },
+  {
+    // T13 第一半：**"零测试也算过"回来时必须红**。
+    // 这条比看上去重要：`passWithNoTests: true` 的失败模式不是报错，而是"收集到 0 个文件也退出 0"，
+    // 于是整条测试门禁变成空转，而所有其他门禁照旧全绿。
+    name: 'vitest 又允许"没有测试也算过"',
+    file: 'vitest.config.ts',
+    from: "    reporters: ['default'],",
+    to: "    passWithNoTests: true,\n    reporters: ['default'],",
+    expect: '测试收集范围',
+  },
+  {
+    // T13 第二半：include 模式与磁盘上的测试文件**脱钩**时必须红。
+    // 收窄一条模式 = 有一批文件永远不会被跑到，而这不会体现在任何计数里。
+    name: '有测试文件不在收集范围内',
+    file: 'vitest.config.ts',
+    from: "      'apps/*/src/**/*.test.ts',",
+    to: "      'apps/*/src/**/*.never-matches-selftest.ts',",
+    expect: '测试收集范围',
+  },
+  {
+    // T14：workflow 是一个没有任何东西盯着的 YAML —— 改个脚本名就静默少跑一步。
+    // 注入一条引用**不存在脚本**的步骤，CI 一致性断言必须咬。
+    name: 'workflow 引用了不存在的 npm 脚本',
+    file: '.github/workflows/ci.yml',
+    from: '      - name: 构建（main / preload / renderer）',
+    to: '      - name: 自检注入的不存在步骤\n        run: npm run selftest-bogus-ci-step\n\n      - name: 构建（main / preload / renderer）',
+    expect: 'CI 门禁清单',
+  },
 ];
 
 for (const c of cases) {

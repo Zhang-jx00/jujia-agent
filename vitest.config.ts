@@ -6,17 +6,25 @@ export default defineConfig({
   assetsInclude: ['**/*.bcmap', '**/*.pfb'],
   test: {
     environment: 'node',
-    include: ['packages/*/src/**/*.test.ts', 'apps/*/src/**/*.test.ts'],
-    // `.test.tsx` 是渲染层的**组件测试**（2026-09-27 批复：加 jsdom + @testing-library，
-    // 只作 devDependencies，不碰运行时）。它们各自在文件头写 `// @vitest-environment jsdom`，
-    // 所以默认的 node 环境不受影响。
+    /**
+     * 收集范围（**只写一份**）。
+     *
+     * 这里原先有**两个同名 `include` 键**：JS 对象字面量后者覆盖前者，所以第一份从头到尾没生效过。
+     * 后果不是报错，而是**安静地少跑东西** —— 一旦哪天有人以为"改第一行能收窄范围"，改的是死代码。
+     * `.test.tsx` 是渲染层的**组件测试**（2026-09-27 批复：加 jsdom + @testing-library，
+     * 只作 devDependencies，不碰运行时）。它们各自在文件头写 `// @vitest-environment jsdom`，
+     * 所以默认的 node 环境不受影响。
+     *
+     * **没有 `passWithNoTests`**（T13）：那一项为 true 时，"一个测试文件都没收集到"会以退出码 0 收场 ——
+     * 门禁看起来是绿的，其实什么都没跑。本仓的 `check:docs` 另有一条把这条配置钉住
+     * （不许回到"零测试也算过"），并核对**每个测试文件都落在 include 覆盖里**。
+     */
     include: [
       'packages/*/src/**/*.test.ts',
       'apps/*/src/**/*.test.ts',
       'packages/*/src/**/*.test.tsx',
       'apps/*/src/**/*.test.tsx',
     ],
-    passWithNoTests: true,
     reporters: ['default'],
 
     /**
