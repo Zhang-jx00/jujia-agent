@@ -183,4 +183,23 @@ describe('createCanvasRunner：B3 条件分支（同一条补全路径 + 跳过�
     expect(statuses('ty')).toEqual(['skipped']);
     expect(r.steps.some((s) => s.includes('走 false 口'))).toBe(true);
   }, 30_000);
+
+  /**
+   * 复核 050 第二遍的异常路径实验（转正）：关键词**横跨两条增量**才命中 ——
+   * 判定看的是拼接后的完整回答，不是任何单条增量。这条专门钉"把增量拼起来"那一步：
+   * 若有人把 `text += ev.delta` 写成 `text = ev.delta`（只留最后一片），上面两条用例仍会绿
+   * （它们的关键词落在单片里），只有这条会红 —— 校准实验见台账。
+   */
+  it('关键词跨分片：两段增量拼起来才命中（判定看完整回答，不是单条增量）', async () => {
+    const baseUrl = await slowSseServer(); // 分片是 `t1 ` `t2 ` …，关键词 "t5 t6" 横跨两条
+    const events: CanvasEventPayload[] = [];
+    const runner = createCanvasRunner(makeDeps(baseUrl, events));
+    const r = await runner.run('g-branch-span', branchGraph('t5 t6'));
+
+    expect(r.ok).toBe(true);
+    expect(r.skipped).toBe(1);
+    const statuses = (id: string) => events.filter((e) => e.nodeId === id).map((e) => e.status);
+    expect(statuses('ty')).toEqual(['running', 'ok']); // 真口那支
+    expect(statuses('fn')).toEqual(['skipped']);
+  }, 30_000);
 });
