@@ -76,15 +76,15 @@ describe('逐行 patch：复用读侧，不新开通道', () => {
     expect(gitPanel).toContain("{ mode: 'patch', path }");
   });
 
-  it('通道表里没有第二条 diff 通道（同一件事不要两个入口）', () => {
-    const gitChannels = [...channels.matchAll(/GIT_[A-Z_]+:/g)].map((m) => m[0]);
-    expect(gitChannels.sort()).toEqual([
-      'GIT_COMMIT:',
-      'GIT_DIFF:',
-      'GIT_LOG:',
-      'GIT_STAGE:',
-      'GIT_STATUS:',
-      'GIT_UNSTAGE:',
-    ]);
+  it('逐行 patch 不新开第二条 diff 通道（同一件事不要两个入口）', () => {
+    /**
+     * 判据只看**"diff 这一件事有几个入口"**，不冻结整张 git 通道清单。
+     * 原来这里写死六个名字 —— 那是一份"现状清单"，M8 加 `GIT_PUSH` 就得回来改它，
+     * 而且改的人还得先猜"这条锁到底想守什么"（治理铁律：凡枚举现状的锁一律现扫、不写死清单）。
+     * 守的东西没变窄：仍然只许一条 DIFF 通道，也不许另起 PATCH 类通道。
+     */
+    const diffChannels = [...channels.matchAll(/GIT_[A-Z_]*DIFF[A-Z_]*:/g)].map((m) => m[0]);
+    expect(diffChannels).toEqual(['GIT_DIFF:']);
+    expect(channels).not.toMatch(/GIT_PATCH|GIT_DIFF_PATCH/);
   });
 });

@@ -13,6 +13,7 @@ import {
   getStatus,
   isGitRepo,
   isNoisePath,
+  push,
   stagePaths,
   unstagePaths,
 } from './git';
@@ -296,5 +297,78 @@ describe('getDiffPatch：逐行原文，但有界', () => {
     expect(file?.lines).toBe(40);
     expect(file?.text).toContain('已截断');
     expect(file?.text).toContain('共');
+  });
+});
+
+describe('push（M8 收口：外发远端，调用方必须先过硬 ask）', () => {
+  /**
+   * 这一组测的是**跑得起、拒得掉**：
+   * - 真往一个 bare 仓库推一次，用 bare 侧的提交数做真值（不看界面文案）；
+   * - 远端名/分支名的形状**先校验再过命令** —— 这里守的是"参数不能被读成选项"
+   *   （`git push --all` / `git push -f` 与 `git push` 后跟一个名为 `--all` 的远端，是两回事）；
+   * - 不在仓库里 → 可读错误，不抛异常（与 commit/stage 同一口径）。
+   */
+  let bare = '';
+
+  beforeEach(async () => {
+    bare = await mkdtemp(join(tmpdir(), 'jujia-git-bare-'));
+    await g(['init', '--bare', '-q'], bare);
+    await g(['remote', 'add', 'origin', bare]);
+  });
+
+  afterEach(async () => {
+    await rm(bare, { recursive: true, force: true });
+  });
+
+  /** bare 侧收到几个提交（真值来源，不依赖本地仓库自述） */
+  async function bareCommitCount(): Promise<number> {
+    const r = await run('git', ['--git-dir', bare, 'rev-list', '--count', '--all'], { windowsHide: true });
+    return Number.parseInt(r.stdout.trim(), 10);
+  }
+
+  async function currentBranch(): Promise<string> {
+    const r = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repo, windowsHide: true });
+    return r.stdout.trim();
+  }
+
+  it('推到真远端：bare 侧真的多出那一个提交', async () => {
+    await writeFile(join(repo, 'pushable.txt'), 'to remote\n', 'utf8');
+    await g(['add', '--', 'pushable.txt']);
+    await g(['commit', '-qm', '给远端的那次提交']);
+    const before = await bareCommitCount();
+
+    const r = await push(repo, 'origin', await currentBranch());
+    expect(r.ok).toBe(true);
+    expect(await bareCommitCount()).toBeGreaterThan(before);
+  });
+
+  it('分支名留空 = 推当前分支，不猜、不拼字符串', async () => {
+    await writeFile(join(repo, 'pushable2.txt'), 'x\n', 'utf8');
+    await g(['add', '--', 'pushable2.txt']);
+    await g(['commit', '-qm', '第二条']);
+
+    const r = await push(repo, 'origin', null);
+    expect(r.ok).toBe(true);
+  });
+
+  it.each(['--all', '-f', '--force', '--receive-pack=/tmp/evil.sh', '', '   ', 'origin --mirror'])(
+    '远端名 %p 的形状不被允许（拒绝在过命令之前）',
+    async (bad) => {
+      const r = await push(repo, bad, 'main');
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('远端名');
+    },
+  );
+
+  it('分支名里塞选项同样被拒', async () => {
+    const r = await push(repo, 'origin', 'main --force');
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('分支');
+  });
+
+  it('不在仓库里 → 可读错误而不是抛异常', async () => {
+    const r = await push(plainDir, 'origin', null);
+    expect(r.ok).toBe(false);
+    expect(typeof r.error).toBe('string');
   });
 });

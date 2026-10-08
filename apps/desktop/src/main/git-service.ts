@@ -7,6 +7,7 @@ import {
   getStatus,
   getRecentCommits,
   isGitRepo,
+  push as gitPushRun,
   resolveInsideWorkspace,
   stagePaths,
   unstagePaths,
@@ -23,7 +24,6 @@ import {
   shouldRememberAlwaysAllow,
   type GitAction,
 } from './git-gate';
-
 /**
  * git 服务的运行期胶水（M8 接线）。
  *
@@ -71,6 +71,11 @@ export interface GitService {
   stage(paths: ReadonlyArray<string>): Promise<GitActionResult>;
   unstage(paths: ReadonlyArray<string>): Promise<GitActionResult>;
   commit(message: string): Promise<GitActionResult>;
+  /**
+   * 推送到远端（M8 收口）。`branch` 传 null = 推 `HEAD`（当前分支），
+   * 我们不去猜分支名。**这是外发不可逆动作，硬 ask 且永不可被「总是允许」压掉**（判档在 `git-gate.ts`）。
+   */
+  push(remote: string, branch: string | null): Promise<GitActionResult>;
   /** 会话内「总是允许」白名单（只对软 ask 开放；测试要能看见它） */
   alwaysAllowed(): ReadonlyArray<string>;
 }
@@ -78,7 +83,7 @@ export interface GitService {
 const NO_WORKSPACE = '还没有选择工作区目录，无法使用 git';
 const NOT_A_REPO = '当前工作区不是 Git 仓库';
 
-type GateAction = Extract<GitAction, 'stage' | 'unstage' | 'commit'>;
+type GateAction = Extract<GitAction, 'stage' | 'unstage' | 'commit' | 'push'>;
 /** agent-core 各 git 函数的返回形状（`GitResult`）；`data` 对 stage/unstage 就是 null */
 type GitOutcome = { ok: boolean; data?: string | null; error?: string };
 
@@ -123,7 +128,7 @@ export function createGitService(deps: GitServiceDeps): GitService {
    */
   const guarded = async (
     action: GateAction,
-    detail: { paths?: string[]; message?: string },
+    detail: { paths?: string[]; message?: string; remote?: string; branch?: string | null },
     execute: (root: string) => Promise<GitOutcome>,
   ): Promise<GitActionResult> => {
     const opened = await openRepo();
@@ -151,7 +156,15 @@ export function createGitService(deps: GitServiceDeps): GitService {
       // "这次要写历史"的提示由 summary 承担 —— commit 那条明确写「会写入仓库历史」。
       kind: 'write',
       summary: gitRequestSummary(action, detail),
-      args: { action, paths: detail.paths ?? [], message: detail.message ?? '' },
+      args: {
+        action,
+        paths: detail.paths ?? [],
+        message: detail.message ?? '',
+        // push 的两个参数进 args：弹窗与审计都要能看见"发到哪个远端、哪条分支"，
+        // 而不是只有一句文案 —— 事后对账看的是字段。
+        ...(detail.remote === undefined ? {} : { remote: detail.remote }),
+        ...(detail.branch === undefined ? {} : { branch: detail.branch }),
+      },
       paths: detail.paths ?? [],
       // 档位一路带到按钮上：commit 是硬 ask，这里给 false，弹窗就不该长出「总是允许」
       bypassable: gate.bypassable,
@@ -210,6 +223,12 @@ export function createGitService(deps: GitServiceDeps): GitService {
     stage: (paths) => guardedPaths('stage', paths, (root, p) => stagePaths(root, p)),
     unstage: (paths) => guardedPaths('unstage', paths, (root, p) => unstagePaths(root, p)),
     commit: (message) => guarded('commit', { message }, (root) => gitCommitRun(root, message)),
+    /**
+     * push 与 commit **共用同一个 `guarded`** —— 这是刻意的：外发动作绝不能有第二条路
+     * （`git-wiring.test.ts` 钉这一条：服务里 `gitPushRun` 只出现在 `guarded` 的回调里）。
+     */
+    push: (remote, branch) =>
+      guarded('push', { remote, branch }, (root) => gitPushRun(root, remote, branch)),
     alwaysAllowed: () => [...remembered],
   };
 }

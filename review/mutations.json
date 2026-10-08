@@ -1,5 +1,5 @@
 {
-  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）；M20–M21 来自扩容 3（文档查看：innerHTML 不许回来 / 链接协议白名单不许放宽）；M22–M23 来自铺设 6（记忆写入：路径守卫不许退化成拼字符串 / 写类档位不许降成读）；M26–M32 来自安全内核修复轮（外部审查 T1 只读绕过敏感判定 / T2 NTFS 备用数据流 / T3 钩子子进程环境 / T4 钩子配置写入过门）；M33–M37 来自外部审查修复 2（P1 第一批：T7 流式两条时间界限 / T5 会话闸门 / T6 落盘记账与清单串行）；M40 来自组件测试首批（错误边界的捕获状态）；M41–M44 来自外部审查修复 3（T19 硬 ask 不渲染「总是允许」/ T9 超时精准关闭与批准计划回读）；M71–M81 来自无限画布 M9a 前三步（图契约与键名扫描 · 编排层纯规则 · 豁免清单）；M82–M84 来自 M9a 接线锁（界面归属判别 · 事件归属字段 · 执行链路不许另起）；M85 来自复核 047 第二遍实验（停止被判成完成）。基线：本轮主提交",
+  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）；M20–M21 来自扩容 3（文档查看：innerHTML 不许回来 / 链接协议白名单不许放宽）；M22–M23 来自铺设 6（记忆写入：路径守卫不许退化成拼字符串 / 写类档位不许降成读）；M26–M32 来自安全内核修复轮（外部审查 T1 只读绕过敏感判定 / T2 NTFS 备用数据流 / T3 钩子子进程环境 / T4 钩子配置写入过门）；M33–M37 来自外部审查修复 2（P1 第一批：T7 流式两条时间界限 / T5 会话闸门 / T6 落盘记账与清单串行）；M40 来自组件测试首批（错误边界的捕获状态）；M41–M44 来自外部审查修复 3（T19 硬 ask 不渲染「总是允许」/ T9 超时精准关闭与批准计划回读）；M71–M81 来自无限画布 M9a 前三步（图契约与键名扫描 · 编排层纯规则 · 豁免清单）；M82–M84 来自 M9a 接线锁（界面归属判别 · 事件归属字段 · 执行链路不许另起）；M85 来自复核 047 第二遍实验（停止被判成完成）；M86–M88 来自 M9b B1（对齐辅助线 / 命令面板 / 吸附时机）；M89 来自 CSS 版接线锁（样式规则整块失去）；M90–M92 来自 B2 局部重跑；M93–M99 来自 B3 条件分支；M100–M103 来自 M8 push 收口（推送被降成软 ask / 推送绕过权限门 / 远端名形状校验失守 / 外发文案被换成中性一句）。基线：本轮主提交",
   "mutations": [
     {
       "id": "M1",
@@ -792,6 +792,38 @@
       "find": "    if (node.kind === 'condition' && (typeof node.config['keyword'] !== 'string' || node.config['keyword'] === '')) {",
       "replace": "    if (false) {",
       "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M100",
+      "desc": "推送被降成软 ask：一次「本次会话总是允许」之后，这台机器以后往远端发东西都不再问（外发不可逆，所有者明确要求永不可压）",
+      "file": "apps/desktop/src/main/git-gate.ts",
+      "find": "const SOFT_ACTIONS: ReadonlyArray<GitAction> = ['stage', 'unstage'];",
+      "replace": "const SOFT_ACTIONS: ReadonlyArray<GitAction> = ['stage', 'unstage', 'push'];",
+      "test": "apps/desktop/src/main/git-gate.test.ts"
+    },
+    {
+      "id": "M101",
+      "desc": "推送拿只读动作的档位去过门：等于点「推送」直接发出去，一次确认都不弹（用户完全不知道发生了什么）",
+      "file": "apps/desktop/src/main/git-service.ts",
+      "find": "    push: (remote, branch) =>\n      guarded('push', { remote, branch }, (root) => gitPushRun(root, remote, branch)),",
+      "replace": "    push: (remote, branch) =>\n      guarded('stage', { remote, branch }, (root) => gitPushRun(root, remote, branch)),",
+      "test": "apps/desktop/src/main/git-service.test.ts"
+    },
+    {
+      "id": "M102",
+      "desc": "远端名形状校验失守：一个叫 --all 或 --force 的「远端名」会被 git 读成选项 —— 强推与批量推送就这样从参数里溜进来",
+      "file": "packages/agent-core/src/git/git.ts",
+      "find": "  if (!SAFE_REMOTE.test(r)) {",
+      "replace": "  if (false) {",
+      "test": "packages/agent-core/src/git/git.test.ts"
+    },
+    {
+      "id": "M103",
+      "desc": "推送的确认文案被换成中性一句（不告诉用户「这是外发、别人看得见、撤回要远端配合」）：确认框还在，但点下去的人不知道自己在批准什么",
+      "file": "apps/desktop/src/main/git-gate.ts",
+      "find": "      return `发到远端「${where}」的${what} —— 别人看得见，撤回需要远端配合；本应用不做强推（--force）`;",
+      "replace": "      return `执行 git 操作：${where}/${what}`;",
+      "test": "apps/desktop/src/main/git-gate.test.ts"
     }
   ]
 }

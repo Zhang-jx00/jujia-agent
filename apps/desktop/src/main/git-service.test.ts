@@ -272,3 +272,111 @@ describe('策略优先于弹窗（与工具执行同一套语义）', () => {
     expect(r.decision).toBe('policy:deny');
   });
 });
+
+describe('push（M8 收口）：真远端做真值', () => {
+  /**
+   * 这里看的不是返回值说了什么，而是**bare 仓库那边到底收到没收到** ——
+   * 与 commit 那一组同一个道理（复核 026 的 G-8 教训：拒绝必须拿磁盘/仓库证据，不能拿文案）。
+   */
+  let bare = '';
+
+  async function bareCount(): Promise<number> {
+    const r = await run('git', ['--git-dir', bare, 'rev-list', '--count', '--all'], { windowsHide: true });
+    return Number.parseInt(r.stdout.trim(), 10);
+  }
+
+  async function branchName(): Promise<string> {
+    const r = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repo, windowsHide: true });
+    return r.stdout.trim();
+  }
+
+  /** 提交一个已 staged 的新文件，让远端有新东西可收 */
+  async function commitSomething(label: string): Promise<void> {
+    const name = await newFile();
+    const svc = makeService();
+    answer = 'allow_once';
+    expect((await svc.stage([name])).ok).toBe(true);
+    expect((await svc.commit(label)).ok).toBe(true);
+  }
+
+  beforeAll(async () => {
+    bare = await mkdtemp(join(tmpdir(), 'jujia-git-bare-svc-'));
+    await run('git', ['init', '--bare', '-q'], { cwd: bare, windowsHide: true });
+    await run('git', ['remote', 'add', 'origin', bare], { cwd: repo, windowsHide: true });
+  });
+
+  afterAll(async () => {
+    await rm(bare, { recursive: true, force: true });
+  });
+
+  it('批准 → 远端真的多出那一次', async () => {
+    answer = 'allow_once';
+    await commitSomething('要推上去的第一次');
+    const before = await bareCount();
+
+    const svc = makeService();
+    const r = await svc.push('origin', await branchName());
+    expect(r.ok).toBe(true);
+    expect(r.asked).toBe(true);
+    expect(await bareCount()).toBeGreaterThan(before);
+  });
+
+  it('拒绝 → **远端一个字节都没多**（不是"显示了拒绝文案"就算过）', async () => {
+    // 顺序有讲究：commitSomething() 内部会把回答改回 allow_once（它自己要过两次门），
+    // 所以"拒绝"必须设在它**之后** —— 写在前面会被它覆盖掉，测出来的是"批准也算拒绝"的假绿。
+    await commitSomething('本地有、远端不该有');
+    answer = 'deny';
+    const before = await bareCount();
+
+    const svc = makeService();
+    const r = await svc.push('origin', await branchName());
+    expect(r.ok).toBe(false);
+    expect(r.decision).toBe('deny');
+    expect(await bareCount()).toBe(before);
+  });
+
+  it('每次都问：allow_always 也压不掉，白名单里绝不出现 git_push', async () => {
+    answer = 'allow_always';
+    const svc = makeService();
+    const b = await branchName();
+
+    asked.length = 0;
+    expect((await svc.push('origin', b)).ok).toBe(true);
+    expect(asked.filter((a) => a.toolName === 'git_push').length).toBe(1);
+
+    expect((await svc.push('origin', b)).ok).toBe(true);
+    // 第二次**仍然要问** —— 外发不给"本次会话总是允许"这条捷径
+    expect(asked.filter((a) => a.toolName === 'git_push').length).toBe(2);
+    expect(svc.alwaysAllowed()).not.toContain('git_push');
+  });
+
+  it('acceptEdits 不覆盖外发（那个模式说的是"编辑文件"）', async () => {
+    answer = 'deny';
+    const svc = makeService({ mode: 'acceptEdits' });
+    const before = await bareCount();
+    const r = await svc.push('origin', await branchName());
+    expect(r.asked).toBe(true); // 真的问了，而不是自动放行
+    expect(r.ok).toBe(false);
+    expect(await bareCount()).toBe(before);
+  });
+
+  it('弹窗带远端与分支，且 bypassable=false（按钮不会长出「总是允许」）', async () => {
+    answer = 'deny';
+    const svc = makeService();
+    const b = await branchName();
+    await svc.push('origin', b);
+    const req = asked.find((a) => a.toolName === 'git_push');
+    expect(req?.bypassable).toBe(false);
+    expect(req?.summary).toContain('origin');
+    expect(req?.summary).toContain(b);
+  });
+
+  it('远端不存在时给可读错误，不抛异常', async () => {
+    answer = 'allow_once';
+    const svc = makeService();
+    const r = await svc.push('没有配过的远端', await branchName());
+    expect(r.ok).toBe(false);
+    expect(typeof r.error).toBe('string');
+    expect(r.error).not.toBe('');
+  });
+});

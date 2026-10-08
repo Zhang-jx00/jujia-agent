@@ -7,6 +7,7 @@ import {
   gitLogResultSchema,
   gitLogSchema,
   gitPathsSchema,
+  gitPushSchema,
   gitStatusResultSchema,
 } from '@jujia/shared-ipc';
 import { createGitService } from '../git-service';
@@ -83,5 +84,25 @@ export function registerGitIpc(ctx: IpcContext): void {
       });
     }
     return gitActionResultSchema.parse(await git.commit(parsed.data.message));
+  });
+
+  /**
+   * 推送（M8 收口）。入参先过 zod 收窄形状，**再进服务层的权限门** ——
+   * 顺序是刻意的：一个连形状都不对的参数（比如把 `--force` 当远端名传进来）
+   * 不该有机会弹到用户面前求确认，那等于让用户替越界背书（与 `gitWrite` 同一个理由）。
+   */
+  handle(IPC.GIT_PUSH, async (_e, payload: unknown) => {
+    const parsed = gitPushSchema.safeParse(payload);
+    if (!parsed.success) {
+      return gitActionResultSchema.parse({
+        ok: false,
+        data: null,
+        error: '推送参数不合法（远端名为空或过长；分支可留空）',
+        asked: false,
+        decision: null,
+      });
+    }
+    const branch = parsed.data.branch ?? null;
+    return gitActionResultSchema.parse(await git.push(parsed.data.remote, branch));
   });
 }

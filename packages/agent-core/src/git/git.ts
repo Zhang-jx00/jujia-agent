@@ -405,3 +405,54 @@ export async function commit(cwd: string, message: string): Promise<GitResult<st
   if (!r.ok) return { ok: false, error: r.error };
   return { ok: true, data: r.stdout.split('\n')[0] ?? '' };
 }
+
+/**
+ * 远端名 / 分支名的允许形状（M8 `push`）。
+ *
+ * **为什么要在过命令之前先校验形状**：`execFile` 不经过 shell，所以没有"注入一条命令"这回事，
+ * 但 git 会把以 `-` 开头的参数**读成选项** —— 一个叫 `--all` 的"远端名"实际会是 `git push --all`，
+ * 一个叫 `--force` 的"分支名"实际会是强推。名字必须只能**是名字**，不能是选项。
+ * 首字符限定为字母或数字（顺带排掉 `.` 与 `-` 开头），其后允许 `._-/`（分支里常见 `feature/x`）。
+ */
+const SAFE_REMOTE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const SAFE_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+
+/**
+ * 推送到远端（**外发、别人看得见、撤回需要远端配合**）。
+ *
+ * 调用方**必须先过硬 ask 权限门**（`main/git-gate.ts` 把 `push` 钉成不可被「总是允许」压掉的那一档），
+ * 这里只负责"形状对不对"和"命令怎么跑"：
+ * - 参数走数组、不拼 shell，也不接受任意 git 参数（与 `stage`/`commit` 同一套做法）；
+ * - **不做 force / --mirror / 删除远端分支**这些形态 —— 形状校验已经把它们挡在名字之外；
+ * - 分支名为空 = 推 `HEAD`（当前这条分支），我们不去猜分支名。
+ */
+export async function push(
+  cwd: string,
+  remote: string,
+  branch: string | null,
+): Promise<GitResult<string>> {
+  const r = remote.trim();
+  if (!SAFE_REMOTE.test(r)) {
+    return { ok: false, error: `远端名不被允许：「${r.slice(0, 40)}」（只允许字母数字开头，后接 . _ - 的名字）` };
+  }
+  const b = branch === null || branch === '' ? null : branch.trim();
+  if (b !== null && !SAFE_BRANCH.test(b)) {
+    return { ok: false, error: `分支名不被允许：「${b.slice(0, 40)}」（不许以 - 或 . 开头，也不能含空格）` };
+  }
+  if (!(await isGitRepo(cwd))) return { ok: false, error: '当前目录不是 Git 仓库' };
+
+  /**
+   * 分支留空时用 `HEAD` 而不是"什么都不传"：
+   * `git push origin`（无 refspec）走 `push.default=simple`，**要求当前分支已有同名上游**，
+   * 第一次推一条新分支会直接失败在"The current branch xxx has no upstream branch" ——
+   * 那是配置课，不是用户此刻想做的事。`git push origin HEAD` 的语义正好是我们想要的：
+   * 把"现在这条"推到远端同名的那条，没有就建，且不需要同名上游。（这条是单测跑出来的，不是想出来的。）
+   */
+  const args = b === null ? ['push', r, 'HEAD'] : ['push', r, b];
+  // 8MB 上限：一次 push 的输出是远端那几行进度，正常远小于此；给大是为了"大量对象"时不被截成半成品
+  const res = await git(cwd, args, 8 * 1024 * 1024);
+  if (!res.ok) return { ok: false, error: res.error };
+  // git 把进度写到 stderr，成功时给人看的那一行取最后一行非空输出
+  const last = res.stdout.split('\n').map((l) => l.trim()).filter((l) => l !== '').pop() ?? '';
+  return { ok: true, data: last === '' ? `已推送到 ${r}` : last };
+}

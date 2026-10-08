@@ -1948,6 +1948,14 @@ try {
   const trackedFile = 'README-e2e-seed.md';
   writeFileSync(join(wsDir, trackedFile), 'seed\n新增一行给 patch 看\n', 'utf8');
   await win3.locator('nav.app-tabs button', { hasText: 'Git' }).first().click();
+  /**
+   * **先有界等到那行出现在界面里，再点**（复核 051 R-7）。
+   * 原来是直接 `.click()`：元素没出现时走的是 Playwright 自己的 30 秒超时，
+   * 现场什么都不留 —— 上一轮就是这样红了一次而只能重跑碰运气。现在超时会把当时的面板正文交出来。
+   */
+  if ((await waitText3(trackedFile, 12_000)) !== true) {
+    fail('Git 页签里没有那条改动的文件（切回页签后 status 没刷新？），点不到逐行 patch 的入口', await body3());
+  }
   await win3.locator('button.jj-git-link', { hasText: trackedFile }).first().click();
   if ((await waitText3('逐行 patch', 12_000)) !== true) {
     fail('没有出现逐行 patch 视图', (await body3()).slice(0, 900));
@@ -2366,6 +2374,115 @@ try {
     fail('新建的条件卡上没有"空关键词"的提示（卡片渲染不对？）');
   }
   ok('条件分支：c1 走真口 / c2 走假口，未选两支与下游都是 skipped，执行行分开报数，fromPort 与 keyword 落盘');
+
+  step('M8 收口：推送是外发 —— 批准才发得出去、拒绝就一个字节都不发，弹窗里也没有「总是允许」');
+  /**
+   * 真远端 = 一个 bare 仓库（放在本轮的临时目录里，不碰任何真实仓库）。
+   * 断言看的是 **bare 侧的提交数**，不是界面文案 —— 与第 17/18 步同一套做法（复核 026 的 G-8 教训）。
+   */
+  const remoteDir = join(TMP_ROOT, 'e2e-remote.git');
+  mkdirSync(remoteDir, { recursive: true });
+  await runGit('git', ['init', '--bare', '-q'], { cwd: remoteDir, windowsHide: true });
+  await runGit('git', ['remote', 'add', 'origin', remoteDir], { cwd: wsDir, windowsHide: true });
+
+  const remoteCount = async () => {
+    try {
+      const r = await runGit('git', ['--git-dir', remoteDir, 'rev-list', '--count', '--all'], { windowsHide: true });
+      return Number.parseInt(r.stdout.trim(), 10);
+    } catch {
+      return 0; // 空的 bare 仓库一个引用都没有：这里按 0 次算，不当成失败
+    }
+  };
+
+  /** 在工作区里造一次本地提交（走命令行，是为了把"推"这一步单独隔离出来看） */
+  let pushSeq = 0;
+  /**
+   * **带退避地等 git 的 index.lock 松开**。
+   * 为什么需要：这个仓库同时被两边用 —— 应用在里面跑 status/diff/log/push，测试脚本在外面写文件并提交。
+   * git 用 `.git/index.lock` 互斥，撞到就当场 `Unable to create ...: File exists` 抛异常
+   * （这一步第一次红就是红在这儿，不是产品缺陷）。重试是有界的：等不到就把现场交出来。
+   */
+  const gitInWs = async (args, tries = 20) => {
+    for (let i = 0; i < tries; i += 1) {
+      try {
+        await runGit('git', args, { cwd: wsDir, windowsHide: true });
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.includes('index.lock') || i === tries - 1) {
+          fail(`在测试工作区跑 git 失败：${args.join(' ')}`, msg.slice(0, 600));
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    }
+  };
+
+  const localCommit = async () => {
+    pushSeq += 1;
+    const f = `push-${String(pushSeq)}.txt`;
+    writeFileSync(join(wsDir, f), `给远端看的一行 ${String(pushSeq)}\n`, 'utf8');
+    await gitInWs(['add', '--', f]);
+    await gitInWs(['commit', '-qm', `第 ${String(pushSeq)} 次给远端的提交`]);
+  };
+
+  await localCommit();
+  await win3.locator('nav.app-tabs button', { hasText: 'Git' }).first().click();
+  if ((await waitText3('推送到远端', 12_000)) !== true) {
+    fail('Git 页签里没有"推送到远端"这一块（界面没挂上？）', await body3());
+  }
+  /**
+   * 再等一步"**分支名也读到了**"才能点。
+   * 只等区块标题会抢在 `git status` 回来之前点下去 —— 那时 `branch` 还是 null，
+   * 面板会老实地回一句"HEAD 没指向任何分支，无从推送"，测试就红在界面上（这一条就是这么抓出来的）。
+   */
+  if ((await waitText3('当前分支', 15_000)) !== true) {
+    fail('Git 页签一直没读到当前分支（status 没回来？），推送按钮点下去只会得到"无从推送"', await body3());
+  }
+
+  // ① 批准那一次：远端真的收到
+  const beforeAllow = await remoteCount();
+  await win3.locator('button', { hasText: '推送「origin」' }).first().click();
+  if ((await waitText3('需要你确认：发到远端', 12_000)) !== true) {
+    fail('点推送没有弹出硬确认（外发动作必须问过人手）', await body3());
+  }
+  const dialogBox = win3.locator('[role="dialog"][aria-label="权限请求"]');
+  const alwaysOnPush = await dialogBox.locator('button', { hasText: '本次会话总是允许' }).count();
+  if (alwaysOnPush > 0) {
+    fail('推送的确认框里出现了「本次会话总是允许」—— 外发不可逆，这条捷径绝不能给（T19 同族的空承诺）');
+  }
+  await dialogBox.locator('button', { hasText: '允许一次' }).first().click();
+  await win3.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 15_000 });
+  /**
+   * 弹窗在"**决定送出去**"那一刻就关了，**不等 `git push` 跑完** ——
+   * 所以完成信号取面板上那一行"已推送到…"，不是弹窗消失（上一版直接在这里数远端，读到的必然是 0）。
+   */
+  if ((await waitText3('已推送到', 25_000)) !== true) {
+    fail('批准之后面板没有出现"已推送到"那一行：外发要么失败要么静默（理由见现场）', await body3());
+  }
+  const afterAllow = await remoteCount();
+  if (afterAllow <= beforeAllow) {
+    fail(
+      `界面说已推送，远端却没收到提交（${String(beforeAllow)} → ${String(afterAllow)}）—— 话与事实打脸`,
+      await body3(),
+    );
+  }
+
+  // ② 拒绝那一次：远端一个字节都不许多
+  await localCommit();
+  const beforePushDeny = await remoteCount();
+  await win3.locator('button', { hasText: '推送「origin」' }).first().click();
+  if ((await waitText3('需要你确认：发到远端', 12_000)) !== true) {
+    fail('第二次推送没有再弹确认 —— 硬 ask 不该有"记住"这条路', await body3());
+  }
+  await win3.locator('[role="dialog"][aria-label="权限请求"] button', { hasText: '拒绝' }).first().click();
+  if ((await waitText3('你拒绝了这次操作', 12_000)) !== true) {
+    fail('拒绝之后界面没给可读理由', await body3());
+  }
+  const afterPushDeny = await remoteCount();
+  if (afterPushDeny !== beforePushDeny) {
+    fail(`拒绝了却仍然发出去了（${String(beforePushDeny)} → ${String(afterPushDeny)}）—— 外发被静默执行`);
+  }
+  ok(`推送：批准才发（远端 ${String(beforeAllow)} → ${String(afterAllow)}）、拒绝就不发（${String(beforePushDeny)} 不变），两次都弹硬确认且没有「总是允许」`);
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();

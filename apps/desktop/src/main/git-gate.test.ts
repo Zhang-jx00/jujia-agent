@@ -35,17 +35,18 @@ describe('git 动作的档位清单（所有者给定的映射，一处定义）
     ['stage', 'soft'],
     ['unstage', 'soft'],
     ['commit', 'hard'],
+    ['push', 'hard'],
   ] as const)('%s → %s', (action, expected) => {
     expect(gitAskClass(action)).toBe(expected);
   });
 
-  it('清单覆盖六个动作，没有漏网的', () => {
-    expect([...GIT_ACTIONS]).toEqual(['status', 'diff', 'log', 'stage', 'unstage', 'commit']);
+  it('清单覆盖七个动作，没有漏网的', () => {
+    expect([...GIT_ACTIONS]).toEqual(['status', 'diff', 'log', 'stage', 'unstage', 'commit', 'push']);
     for (const a of GIT_ACTIONS) expect(() => gitAskClass(a)).not.toThrow();
   });
 
   it('未知动作不"默认不问"，而是直接抛（fail-closed）', () => {
-    expect(() => gitAskClass('push' as never)).toThrow(/未知动作/);
+    expect(() => gitAskClass('reset' as never)).toThrow(/未知动作/);
   });
 
   it('工具名带 git_ 前缀 —— 用户才能在规则表里按名字写规则', () => {
@@ -156,6 +157,58 @@ describe('自证断言：档位说是硬 ask，结果却可被压掉 → 中止�
     assertHardAskInert('stage', { action: 'ask', reason: 'r', risk: 'low', bypassable: true });
     assertHardAskInert('commit', { action: 'allow', reason: 'r', risk: 'low' });
     assertHardAskInert('commit', { action: 'deny', reason: 'r', risk: 'medium' });
+  });
+});
+
+describe('push（M8 收口）：外发远端 = 硬 ask，且**永远不可被「总是允许」压掉**', () => {
+  /**
+   * 这组断言的口径来自所有者（`docs/HANDOVER.md` §3.2 / `WORK-PROTOCOL` 速查表）：
+   * `push` 把提交发到远端，**别人看得见、撤回需要远端配合**，所以与 `commit` 同级甚至更严 ——
+   * 而且刻意**不给**"本次会话总是允许"这条捷径（commit 都不给，push 更不给）。
+   */
+  it('default 下是 ask 且 bypassable=false（变异 M100 的靶子：改回 true 必须红）', () => {
+    const gate = decideGitAction({ action: 'push', mode: 'default' });
+    expect(gate.action).toBe('ask');
+    if (gate.action === 'ask') expect(gate.bypassable).toBe(false);
+  });
+
+  it('acceptEdits 不自动放行外发（它说的是"编辑文件"，不是"发到远端"）', () => {
+    const gate = decideGitAction({ action: 'push', mode: 'acceptEdits' });
+    expect(gate.action).toBe('ask');
+    if (gate.action === 'ask') expect(gate.bypassable).toBe(false);
+  });
+
+  it('plan / dontAsk 下 push 直接被拒（连问都不问）', () => {
+    for (const mode of ['plan', 'dontAsk'] as const) {
+      expect(decideGitAction({ action: 'push', mode }).action).toBe('deny');
+    }
+  });
+
+  it('用户自己写了 allow 规则才算显式让路（与 commit 同一口径，不搞第二套）', () => {
+    expect(decideGitAction({ action: 'push', mode: 'default', rules: [rule('git_push', 'allow')] }).action).toBe('allow');
+    expect(decideGitAction({ action: 'push', mode: 'default', rules: [rule('git_push', 'deny')] }).action).toBe('deny');
+  });
+
+  it('硬 ask 的判定不会被误记进"总是允许"', () => {
+    const gate = decideGitAction({ action: 'push', mode: 'default' });
+    expect(shouldRememberAlwaysAllow('push', gate, 'allow_always')).toBe(false);
+  });
+
+  it('自证：说好的硬 ask 变成可压掉时，宁可抛也不静默放行', () => {
+    const good = decideGitAction({ action: 'push', mode: 'default' });
+    expect(() => assertHardAskInert('push', good)).not.toThrow();
+    if (good.action === 'ask') {
+      expect(() => assertHardAskInert('push', { ...good, bypassable: true })).toThrow(/git_push 应为硬 ask/);
+    }
+  });
+
+  it('弹窗文案点明"发到远端、别人看得见"，而不是复用 commit 那句"写入仓库历史"', () => {
+    const s = gitRequestSummary('push', { remote: 'origin', branch: 'main' });
+    expect(s).toContain('origin');
+    expect(s).toContain('main');
+    expect(s).toMatch(/远端|外发/);
+    // commit 专用那句不能出现在 push 上（两个动作的后果不一样，文案不能一份通用）
+    expect(s).not.toContain('revert');
   });
 });
 

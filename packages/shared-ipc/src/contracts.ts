@@ -861,6 +861,18 @@ export const gitCommitSchema = z.object({
 });
 export type GitCommitPayload = z.infer<typeof gitCommitSchema>;
 
+/**
+ * 推送（M8 收口）：**只有"远端名 + 可选分支"两个字段**，刻意不给 refspec、不给 force、不给任意参数。
+ * 长度上限与 `agent-core` 的 SAFE_REMOTE / SAFE_BRANCH 对齐 —— 契约先把形状收窄，
+ * 服务层再按字符集判（两层都做，是因为这活儿的失败模式是"越界的那一次静默成功"）。
+ */
+export const gitPushSchema = z.object({
+  remote: z.string().min(1).max(64),
+  /** 省略或 null = 推 `HEAD`（当前分支）；我们不替用户猜分支名 */
+  branch: z.string().min(1).max(128).nullable().optional(),
+});
+export type GitPushPayload = z.infer<typeof gitPushSchema>;
+
 /** diff 看的是暂存区还是工作区 */
 export const gitDiffSchema = z.object({
   staged: z.boolean().optional(),

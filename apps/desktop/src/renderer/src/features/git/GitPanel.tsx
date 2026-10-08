@@ -37,6 +37,10 @@ export function GitPanel(): ReactElement {
   const [log, setLog] = useState<string[]>([]);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [message, setMessage] = useState('');
+  /** 推送目标远端名（默认 origin）。刻意做成可改的输入框而不是写死：一台机器上常有多个远端。 */
+  const [remote, setRemote] = useState('origin');
+  /** 推送成功那一行（失败走下面的 error 区）。见 `doPush` 里"成功也要看得见"的理由。 */
+  const [pushNote, setPushNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showNoise, setShowNoise] = useState(false);
   /** 逐行 patch（M19：点某个文件才去取那一份，不一次拉全部） */
@@ -164,6 +168,25 @@ export function GitPanel(): ReactElement {
       return r;
     });
 
+  /**
+   * 推送（M8 收口）。分支名**取当前状态里的 branch**，为空就直说没分支 ——
+   * 不去猜"大概是 main"：猜错的推送会发到一条不存在的分支上，那是**新建**，不是用户想要的。
+   */
+  const doPush = (): Promise<void> =>
+    run(async () => {
+      const target = remote.trim();
+      if (target === '') return { ok: false, error: '远端名不能为空', data: null };
+      if (branch === null) return { ok: false, error: 'HEAD 没指向任何分支（还没有提交），无从推送', data: null };
+      const r = await window.jujia.gitPush(target, branch);
+      /**
+       * 成功也要有一行可见的话。**外发这件事"什么都没显示"是最糟的**：
+       * 用户分不清"没点着 / 被拒了 / 已经发出去了"，只能反复点 —— 而每点一次都是一次新的确认与一次新的外发。
+       * （这行同时是 e2e 的完成信号：弹窗在"决定送出"时就关了，不等 push 跑完。）
+       */
+      setPushNote(r.ok ? `已推送到「${target}」：${r.data ?? ''}` : null);
+      return r;
+    });
+
   const visibleFiles = useMemo(() => {
     if (diff === null) return [];
     return showNoise ? diff.files : diff.files.filter((f) => !f.noise);
@@ -253,8 +276,7 @@ export function GitPanel(): ReactElement {
 
           <section className="p0-card">
             <h3>提交</h3>
-            <p className="p0-warn">会写入仓库历史，且每次都会要求确认 —— 这是硬确认，不能被「总是允许」跳过。</p>
-            <textarea
+            <p className="p0-warn">会写入仓库历史，且每次都会要求确认 —— 这是硬确认，不能被「总是允许」跳过。</p>            <textarea
               className="jj-git-message"
               aria-label="提交信息"
               rows={3}
@@ -275,6 +297,41 @@ export function GitPanel(): ReactElement {
                 提交（会写入仓库历史）
               </button>
             </div>
+          </section>
+
+          <section className="p0-card">
+            <h3>推送到远端</h3>
+            <p className="p0-warn">
+              把提交交到<strong>别人看得见的地方</strong>，撤回需要远端配合 —— 所以每次都会要求确认，
+              而且这一项<strong>没有「总是允许」</strong>可用。本应用不做强推（--force）。
+            </p>
+            <input
+              className="jj-git-remote"
+              aria-label="远端名"
+              value={remote}
+              maxLength={64}
+              placeholder="origin"
+              onChange={(ev) => {
+                setRemote(ev.target.value);
+              }}
+            />
+            <div className="w2-actions">
+              <button
+                type="button"
+                className="w2-btn-danger"
+                disabled={busy || remote.trim() === ''}
+                onClick={() => void doPush()}
+              >
+                {branch === null
+                  ? `推送「${remote.trim() || 'origin'}」（HEAD 无分支）`
+                  : `推送「${remote.trim() || 'origin'}」：当前分支 ${branch}`}
+              </button>
+            </div>
+            {pushNote !== null && (
+              <p className="p0-subtitle" role="status">
+                {pushNote}
+              </p>
+            )}
           </section>
         </>
       )}

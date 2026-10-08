@@ -1296,6 +1296,17 @@ html[data-jj-bg-kind='glass'] .app-shell {
   resize: vertical;
 }
 
+/* 推送目标远端名（M8 收口）。刻意与提交信息同一套排版：
+   这两个框是"改完之后要交出去"的两步，视觉上该看得出是一组。 */
+.jj-git-remote {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 8px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
 /* 应用内文档查看（M10 收尾 · Markdown）。
    版式刻意保持朴素：这一块显示的是**第三方文件内容**，样式只负责可读，
    不做任何"按内容决定布局"的花活（避免一份恶意文档把界面撑坏）。 */

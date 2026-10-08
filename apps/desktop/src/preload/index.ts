@@ -101,6 +101,7 @@ import {
   canvasSaveResultSchema,
   canvasSaveSchema,
   gitPathsSchema,
+  gitPushSchema,
   gitStatusResultSchema,
   type BrowserBoundsPayload,
   type BrowserExePickResult,
@@ -574,6 +575,15 @@ const api = {
   async gitCommit(message: string): Promise<GitActionResultView> {
     const parsed = gitCommitSchema.parse({ message });
     return gitActionResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_COMMIT, parsed));
+  },
+
+  /**
+   * 推送到远端（M8 收口）：**每次都会弹确认，而且没有「总是允许」这条路**（硬 ask 不可压）。
+   * `branch` 留空 = 推 `HEAD`（当前分支）—— 界面不猜分支名，主进程也不猜。
+   */
+  async gitPush(remote: string, branch: string | null): Promise<GitActionResultView> {
+    const parsed = gitPushSchema.parse({ remote, branch });
+    return gitActionResultSchema.parse(await ipcRenderer.invoke(IPC.GIT_PUSH, parsed));
   },
 
   /* -------------------- 6b：会话压缩与「结束记要点」 -------------------- *

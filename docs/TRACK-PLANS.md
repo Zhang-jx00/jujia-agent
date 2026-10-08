@@ -97,7 +97,7 @@
 | 铺设5 | `apps/desktop/src/renderer/src/features/mcp/` | MCP 界面 |
 | 铺设6a | `apps/desktop/src/main/{session-journal,session-lru,session-store}.ts` | 会话持久化 |
 | 铺设6b | `packages/agent-core/src/context/compaction.ts` | 会话压缩与摘要（与铺设3 同目录，按改动目的分轨） |
-| 铺设9 | `packages/agent-core/src/git/` · `apps/desktop/src/main/git-service.ts` | git 模块接线（`push` 归 R2） |
+| 铺设9 | `packages/agent-core/src/git/` · `apps/desktop/src/main/git-service.ts` | git 模块接线（M8 已收口：`push` 于 `v0.56.0-铺设9` 交付，硬 ask 不可压） |
 | 铺设9 | `apps/desktop/src/renderer/src/features/git/` | git 界面 |
 | 铺设10 | `apps/desktop/src/main/pending-notes.ts` | M6 记忆写入侧（`append_note`） |
 | 加固1 | `packages/shared/src/json-store.ts` | 原子存储（tmp+fsync+rename+.bak+版本信封+损坏自愈） |

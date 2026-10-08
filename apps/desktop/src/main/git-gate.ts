@@ -14,15 +14,19 @@ import { decideGate, type GateDecision, type PermissionMode, type PermissionRule
  * | `status` / `diff` / `log` | 只读，不改任何东西 | **不问**（只读不打扰） |
  * | `stage` / `unstage` | 改暂存区，**可逆**（再 unstage 就回来了） | **软 ask**（可以「本次会话总是允许」） |
  * | `commit` | **写仓库历史**，事后只能靠 revert 补救 | **硬 ask**（任何"总是允许"都压不掉） |
- * | `push`（尚未实现） | 外发远端，别人看得见，**不可逆** | 将来必须**硬 ask 且永不可被压掉** |
+ * | `push` | **外发远端**，别人看得见，撤回需要远端配合 | **硬 ask，且永远不可被「总是允许」压掉**（M8 收口） |
  */
 
-export const GIT_ACTIONS = ['status', 'diff', 'log', 'stage', 'unstage', 'commit'] as const;
+export const GIT_ACTIONS = ['status', 'diff', 'log', 'stage', 'unstage', 'commit', 'push'] as const;
 export type GitAction = (typeof GIT_ACTIONS)[number];
 
 const READ_ACTIONS: ReadonlyArray<GitAction> = ['status', 'diff', 'log'];
 const SOFT_ACTIONS: ReadonlyArray<GitAction> = ['stage', 'unstage'];
-const HARD_ACTIONS: ReadonlyArray<GitAction> = ['commit'];
+/**
+ * 硬 ask 的两个动作**理由不同**，所以文案分开写（见 `gitRequestSummary`）：
+ * `commit` 改的是本地历史，`push` 是把它交到别人手里。两件事都不能被"总是允许"糊过去。
+ */
+const HARD_ACTIONS: ReadonlyArray<GitAction> = ['commit', 'push'];
 
 export type GitAskClass = 'none' | 'soft' | 'hard';
 
@@ -108,10 +112,15 @@ export function shouldRememberAlwaysAllow(
 }
 
 /**
- * 弹窗要展示的摘要。**commit 这一条必须写清"会写入仓库历史"**（所有者的原话要求）：
- * 只说"确认执行 git commit 吗"等于没提示 —— 用户分不清"暂存"和"改历史"的区别。
+ * 弹窗要展示的摘要。**两条硬 ask 各自写清自己的后果**（所有者的原话要求：
+ * 只说"确认执行 git commit 吗"等于没提示 —— 用户分不清"暂存"和"改历史"，更分不清"改历史"和"交给别人"）：
+ * - `commit` → 会写入仓库历史（可 revert 补救，但不会自动撤销）
+ * - `push` → 发到远端、别人看得见（撤回要远端配合，我们不做强推）
  */
-export function gitRequestSummary(action: GitAction, detail: { paths?: ReadonlyArray<string>; message?: string }): string {
+export function gitRequestSummary(
+  action: GitAction,
+  detail: { paths?: ReadonlyArray<string>; message?: string; remote?: string; branch?: string | null },
+): string {
   const head = gitAskClass(action) === 'hard' ? `会写入仓库历史（可用 revert 补救，但不会自动撤销）：` : '';
   switch (action) {
     case 'stage':
@@ -120,6 +129,13 @@ export function gitRequestSummary(action: GitAction, detail: { paths?: ReadonlyA
       return `取消暂存 ${String(detail.paths?.length ?? 0)} 个文件：${(detail.paths ?? []).slice(0, 5).join('、')}`;
     case 'commit':
       return `${head}提交信息「${(detail.message ?? '').slice(0, 80)}」`;
+    case 'push': {
+      const where = detail.remote ?? '远端';
+      const what = detail.branch === null || detail.branch === undefined || detail.branch === ''
+        ? '当前分支（HEAD）'
+        : `分支「${detail.branch}」`;
+      return `发到远端「${where}」的${what} —— 别人看得见，撤回需要远端配合；本应用不做强推（--force）`;
+    }
     default:
       return `${gitToolName(action)}（只读，不需要确认）`;
   }
