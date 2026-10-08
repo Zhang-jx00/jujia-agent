@@ -188,6 +188,24 @@ export const streamEventSchema = z.discriminatedUnion('type', [
 ]);
 export type StreamEvent = z.infer<typeof streamEventSchema>;
 
+/**
+ * 发一条消息的**入参**（T30）。此前只有出参，入参是主进程里一句句 `typeof` 手写校验，
+ * `text` / `connectionId` / `sessionId` **都没有长度上限** —— 一次超长粘贴会原样过 IPC、
+ * 原样送给 provider。同族字段其实都有上限（历史查询的 `sessionId ≤ 64`、连接那组的 64/300/128/500），
+ * 所以这是**漏了一处**而不是全局口径。
+ *
+ * 上限定这么几个数的理由：文本 20 万字符 —— **这个数是量着产品自己的用例定的**：6b 的压缩阈值场景就会发一条 66000 字的消息来跨过阈值，上限必须明显高于它；20 万既容得下「粘一大段」，又仍是有限的上界；
+ * 会话 id 与其他通道同口径 64；连接 id 128（内部 id 的既有量级）。
+ * **超限一律拒绝并把上限写进理由** —— 截断是静默改用户输入，本仓不做。
+ * 两条既有文案（"请先选择一个连接" / "消息不能为空"）原样搬进来，别让界面上的话变样。
+ */
+export const chatSendSchema = z.object({
+  connectionId: z.string().min(1, '请先选择一个连接').max(128, '连接标识过长（上限 128）'),
+  text: z.string().min(1, '消息不能为空').max(200_000, '消息过长（上限 20 万字符；更长的内容请放进文件，用文件工具读）'),
+  sessionId: z.string().max(64, '会话标识过长（上限 64）').optional(),
+});
+export type ChatSendPayload = z.infer<typeof chatSendSchema>;
+
 export const chatSendResultSchema = z.object({
   sessionId: z.string(),
   messageId: z.string(),

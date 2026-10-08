@@ -3,6 +3,7 @@ import {
   IPC,
   chatHistoryQuerySchema,
   chatSendResultSchema,
+  chatSendSchema,
   compactApplySchema,
   connectionInputSchema,
   pendingPreviewSchema,
@@ -102,13 +103,13 @@ export function registerChatIpc(ctx: IpcContext): void {
   /* -------------------------------- 对话 -------------------------------- */
 
   handle(IPC.CHAT_SEND, async (_e, payload: unknown): Promise<ChatSendResult> => {
-    const { connectionId, text, sessionId } = (payload ?? {}) as {
-      connectionId?: unknown;
-      text?: unknown;
-      sessionId?: unknown;
-    };
-    if (typeof connectionId !== 'string' || connectionId === '') throw new Error('请先选择一个连接');
-    if (typeof text !== 'string' || text.trim() === '') throw new Error('消息不能为空');
+    // 入参契约在 shared-ipc（T30）：上限与文案都在那一处，主进程只把失败理由照原样抛出。
+    // 以前是这里手写 `typeof`，三个字段都没有长度上限 —— 检查散在调用点就会漏。
+    const parsed = chatSendSchema.safeParse(payload ?? {});
+    if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? '对话参数不合法');
+    const { connectionId, text, sessionId } = parsed.data;
+    // 全空白仍是"空"（zod 的 min(1) 只看长度，挡不住 `'   '`）
+    if (text.trim() === '') throw new Error('消息不能为空');
 
     // 工作区决定了工具是否可用；未选择时仍可对话，但工具会被路径校验拒绝
     const ws = await getWorkspaceInfo();

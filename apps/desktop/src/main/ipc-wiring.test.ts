@@ -231,3 +231,16 @@ describe('文件规模（R-12 的验收线：每文件 ≤300 行）', () => {
     expect(over).toEqual([]);
   });
 });
+
+describe('T30：CHAT_SEND 的入参必须有契约（上限与文案都收在 shared-ipc 一处）', () => {
+  const chatIpc = strippedOf('./ipc/chat.ts');
+
+  it('用 chatSendSchema 校验，手写 typeof 那套已经搬走', () => {
+    expect(chatIpc).toContain('chatSendSchema.safeParse(payload ?? {})');
+    expect(chatIpc).not.toContain("typeof connectionId !== 'string'");
+  });
+
+  it('全空白仍然算空（zod 的 min(1) 只看长度，挡不住三个空格）', () => {
+    expect(chatIpc).toContain("text.trim() === ''");
+  });
+});
