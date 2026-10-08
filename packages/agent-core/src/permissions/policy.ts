@@ -1,4 +1,5 @@
 import type { ToolKind } from '../tools/types';
+import { eightDot3Segment } from './short-name';
 import { matchRules, type PermissionRule } from './rules';
 
 /**
@@ -113,6 +114,18 @@ export function sensitiveReason(target: string): string | null {
   for (const { re, why } of SENSITIVE_PATH_PATTERNS) {
     // 按**宿主名**匹配，而不是按整串匹配（外部审查 T2）
     if (re.test(host)) return why;
+  }
+  /**
+   * 清单没命中，但路径里有 8.3 短名形态：**按敏感对待**。
+   *
+   * 为什么这条必须存在（外部审查 T16，机理实测）：`.git` 在这类卷上就是 `GIT~1`、
+   * `.env` 就是 `ENV~1`，写的还是同一个文件；而上面那张清单是纯词法正则，
+   * `realpath` 又不展开短名 —— 于是换一个写法就能让清单失配、变成"不问就读"。
+   * 与下面"带流名"是同一条推理：**认不出来就归到要问的一侧**（fail closed，但不是拒绝）。
+   */
+  const short = eightDot3Segment(host);
+  if (short !== null) {
+    return `路径含 8.3 短名形态（${short}），敏感名清单按字面匹配会被绕开`;
   }
   // 清单没命中，但路径带流名：流内容可以远大于"文件名看起来是什么"，
   // 而且这里到底是不是 ADS 取决于文件系统 —— 不确定就归到要问的一侧（fail closed）

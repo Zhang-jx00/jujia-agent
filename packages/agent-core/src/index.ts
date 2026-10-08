@@ -22,6 +22,7 @@ export * from './hooks/points';
 export * from './commands/process';
 export * from './permissions/policy';
 export * from './permissions/rules';
+export * from './permissions/short-name';
 export * from './memory/memory';
 export * from './git/git';
 export * from './terminal/terminal';

@@ -8,18 +8,20 @@ import { ToolError } from './types';
  * 为什么必须这么严：一旦模型把路径写成 `..\..\Windows\System32\x.dll` 或
  * `C:\Users\...\.ssh\id_rsa`，Agent 就有了越界写盘/读私钥的能力。
  * 这不是「输入校验」而是「权限边界」，因此：
- * 1. 逐条拒绝 Windows 特有的绕过手法（设备路径、UNC、ADS、保留名、尾随点/空格、8.3 短名）；
+ * 1. 逐条拒绝 Windows 特有的绕过手法（设备路径、UNC、ADS、保留名、尾随点/空格）；
  * 2. 解析结果必须落在工作区内（大小写不敏感比较，符合 Windows 语义）；
  * 3. **检查真实路径**（realpath）：防止用符号链接/junction 把工作区内的软链指向外部；
  * 4. 任何不确定的情况一律拒绝（fail closed），错误信息说明拒绝原因，便于用户理解。
+ *
+ * **8.3 短名不在这里管，而且原因要写清**（外部审查 T16 核实；此前这句承诺写在上面第 1 条里，
+ * 属于"注释比代码强"）：短名不改变落点边界 —— `GIT~1\config` 仍然解析在工作区内，
+ * 上面三条一条都拦不到它，也不需要拦。真正会被它绕开的是**敏感名清单**（纯词法正则，
+ * 且实测 `realpath` 不展开短名），所以那条判定收在 `permissions/short-name.ts`，
+ * 由 `sensitiveReason` 兜底成"认不出来就按敏感对待"。**在这里一律拒绝会误伤 `a~1.md`
+ * 这类合法文件名**，所以刻意不做。
  */
 
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
-
-export interface GuardOptions {
-  /** 允许写入（默认 true）；只读场景设为 false 可额外拒绝写工具 */
-  forWrite?: boolean;
-}
 
 /** 判断 target 是否位于 root 内部（含 root 自身）；Windows 下大小写不敏感 */
 export function isInside(root: string, target: string): boolean {
@@ -132,12 +134,14 @@ async function safeRealpath(p: string): Promise<string | null> {
   }
 }
 
-/** 组合守卫：解析 + 真实路径校验（工具的入口一律走这个） */
-export async function guardPath(
-  workspaceRoot: string,
-  input: string,
-  _opts: GuardOptions = {},
-): Promise<string> {
+/**
+ * 组合守卫：解析 + 真实路径校验（工具的入口一律走这个）。
+ *
+ * 参数表里**没有**"是不是写操作"这一项（外部审查 T16 核实出的死字段）：
+ * 读与写的差别待遇实际发生在权限层（`ToolDefinition.kind` → `decideGate`），
+ * 这里过去只吃参数不看参数 —— 留着一个填了也不生效的开关，比没有更容易误导后来人。
+ */
+export async function guardPath(workspaceRoot: string, input: string): Promise<string> {
   const resolved = resolveInsideWorkspace(workspaceRoot, input);
   return assertRealPathInside(workspaceRoot, resolved);
 }

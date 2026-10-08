@@ -239,6 +239,29 @@ describe('具名断言：敏感路径优先于只读放行（T1）', () => {
     expect(d.action).toBe('ask');
     expectHardAsk(d, 'read_file 读 .env 的 ADS 形态');
   });
+
+  it('8.3 短名不得躲过敏感识别（T16 核实出来的第三条同族洞）', () => {
+    /**
+     * 机理是实测的（不是从报告抄的）：本机 NTFS 上 `.git`→`GIT~1`、`.env`→`ENV~1`、
+     * `.npmrc`→`NPMRC~1`、`credentials`→`CREDEN~1` 都确实能打开同一个文件，
+     * 而 `realpathSync` **原样返回短名不展开**，敏感清单又是**纯词法正则** ——
+     * 于是写 `GIT~1/config` 就能"不问就读"。与 T1（顺序洞）/ T2（后缀洞）同族。
+     */
+    expect(sensitiveReason('D:\\ws\\GIT~1\\config')).toContain('短名');
+    expect(sensitiveReason('ENV~1')).toContain('短名');
+    expect(sensitiveReason('sub/NPMRC~1')).toContain('短名');
+    expect(sensitiveReason('CREDEN~1/x')).toContain('短名');
+    // 清单本身命中的仍给清单的理由 —— 短名规则只兜底，不抢话
+    expect(sensitiveReason('GIT~1/.env')).toContain('环境变量');
+    // 不误伤：长名照常判定，非 8.3 形状的波浪号名放行
+    expect(sensitiveReason('.git/config')).toContain('版本库');
+    expect(sensitiveReason('src/normal.ts')).toBeNull();
+    expect(sensitiveReason('my~file.txt')).toBeNull();
+    expect(sensitiveReason('abcdefghi~1.txt')).toBeNull(); // 9 字符根名，不可能是短名
+    const d = decideGate(ctx({ kind: 'read', toolName: 'read_file', args: { path: 'GIT~1/config' } }));
+    expect(d.action).toBe('ask');
+    expectHardAsk(d, 'read_file 读 .git 的短名形态');
+  });
 });
 
 describe('具名断言：记忆 / 文档正文不参与权限判定', () => {

@@ -75,7 +75,7 @@ export const writeFileTool: ToolDefinition<{ path: string; content: string }> = 
   },
   parse: (raw) => z.object({ path: z.string().min(1), content: z.string() }).strict().parse(raw),
   async run(args, ctx): Promise<ToolOutcome> {
-    const abs = await guardPath(ctx.workspaceRoot, args.path, { forWrite: true });
+    const abs = await guardPath(ctx.workspaceRoot, args.path);
     const bytes = Buffer.byteLength(args.content, 'utf8');
     if (bytes > MAX_WRITE_BYTES) {
       throw new ToolError(
