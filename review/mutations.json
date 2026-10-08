@@ -984,6 +984,30 @@
       "find": "    if (EIGHT_DOT_3.test(segment)) return segment;",
       "replace": "    if (EIGHT_DOT_3.test(segment) && segment.length < 5) return segment;",
       "test": "packages/agent-core/src/permissions/short-name.test.ts"
+    },
+    {
+      "id": "M124",
+      "desc": "符号链接判据失守（T29 的原样）：先 lstat 变成写死的 false，于是跟着软链把外部文件内容读进 diff 界面",
+      "file": "packages/agent-core/src/git/git.ts",
+      "find": "    isLink = (await fs.lstat(absPath)).isSymbolicLink();",
+      "replace": "    isLink = false;",
+      "test": "packages/agent-core/src/git/git.test.ts"
+    },
+    {
+      "id": "M125",
+      "desc": "读过的记录被抹成 null：链接条目不再计数，界面上那句「没有读取」的说明永远不出现（静默）",
+      "file": "packages/agent-core/src/git/git.ts",
+      "find": "      note: 'symbolic-link',\n    };",
+      "replace": "      note: null,\n    };",
+      "test": "packages/agent-core/src/git/git.test.ts"
+    },
+    {
+      "id": "M126",
+      "desc": "摘要里「符号链接未读取」那句说明被删：行为还在但用户看不见，只看到一堆 0 行的新文件",
+      "file": "packages/agent-core/src/git/git.ts",
+      "find": "    notes.push(`${linkFiles} 个未跟踪条目是符号链接：内容没有读取，它可能指向工作区之外`);",
+      "replace": "    // 变异：不说明",
+      "test": "apps/desktop/src/main/git-wiring.test.ts"
     }
   ]
 }

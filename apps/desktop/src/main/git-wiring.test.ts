@@ -147,3 +147,26 @@ describe('push（M8 收口）：外发只有一条路，那条路必过硬 ask�
     expect(shouldRememberAlwaysAllow('push', decideGitAction({ action: 'push', mode: 'default' }), 'allow_always')).toBe(false);
   });
 });
+
+describe('T29：未跟踪条目的内容读取只有一个入口，且不跟符号链接', () => {
+  const coreGitSource = stripComments(
+    readFileSync(join(here, '../../../../packages/agent-core/src/git/git.ts'), 'utf8'),
+  );
+
+  it('摘要里读盘只有 readUntrackedFile 一处（原来计数与摘录各读一遍，两处判断迟早分叉）', () => {
+    expect(coreGitSource.split('readUntrackedFile(').length - 1).toBe(2); // 定义一次 + 调用一次
+    expect(coreGitSource).not.toMatch(/readFile\(join\(cwd,/);
+  });
+
+  it('判据在：先 lstat 再决定读不读（不是"读完了再说"）', () => {
+    const idxStat = coreGitSource.indexOf('await fs.lstat(absPath)');
+    const idxRead = coreGitSource.indexOf('await fs.readFile(absPath');
+    expect(idxStat).toBeGreaterThan(-1);
+    expect(idxRead).toBeGreaterThan(idxStat);
+  });
+
+  it('"没读"这件事必须在界面上说出来（只写 0 行 = 让人以为新文件是空的）', () => {
+    expect(coreGitSource).toContain('个未跟踪条目是符号链接');
+    expect(coreGitSource).toContain('个未跟踪条目读不到内容');
+  });
+});

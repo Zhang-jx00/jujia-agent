@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { lstat, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 /**
@@ -179,6 +181,69 @@ export async function getDiffStat(cwd: string, staged = false): Promise<GitResul
 }
 
 /**
+ * 读一个未跟踪条目的内容 —— **只跟普通文件，符号链接一律不读**（外部审查 T29）。
+ *
+ * 报告的原话是"软链会把工作区外的内容带进 git 历史"，这一半实测不成立
+ * （`git add` 之后索引里是 mode 120000，`cat-file` 拿到的是链接目标那串文本）。
+ * 成立的是另一半：`getDiffSummary` 原来直接 `readFile(join(cwd, e.path))`，
+ * 跟着软链就把**外部文件的内容**读进 diff 界面 —— 拦这一处就够了，
+ * 而 `git add` 不动（提交一个软链是正常需求，拦它会把真仓库打死）。
+ *
+ * 顺带修掉"同一个条目读两遍磁盘"（原来计数一遍、摘录一遍）：
+ * 两处各读各的判断迟早分叉，这里收敛成一次读、一份结果。
+ *
+ * `fs` 参数是为测试留的注入点：Windows 建真软链要开发者模式，
+ * 用真链路测出来的绿不可靠（换台机器就红），而这条判据本身是纯逻辑。
+ */
+export interface UntrackedRead {
+  added: number;
+  highlights: string[];
+  truncated: boolean;
+  /** 为什么不读 / 读成什么样：`symbolic-link` 与 `unreadable` 都要在界面上说出来，不许静默当空文件 */
+  note: 'symbolic-link' | 'unreadable' | null;
+}
+
+/** 注入点用的最小结构类型（真实 `node:fs/promises` 的 `lstat` / `readFile` 都满足它） */
+export interface UntrackedFs {
+  lstat: (p: string) => Promise<{ isSymbolicLink(): boolean }>;
+  readFile: (p: string, encoding: 'utf8') => Promise<string>;
+}
+
+export async function readUntrackedFile(
+  absPath: string,
+  fs: UntrackedFs = { lstat, readFile },
+  limit: number = DIFF_HIGHLIGHTS_PER_FILE,
+): Promise<UntrackedRead> {
+  let isLink: boolean;
+  try {
+    isLink = (await fs.lstat(absPath)).isSymbolicLink();
+  } catch {
+    isLink = false; // lstat 都失败：下面按"读不到"处理，不静默当空文件
+  }
+  if (isLink) {
+    return {
+      added: 0,
+      highlights: ['→ 符号链接：内容未读取（它可能指向工作区之外）'],
+      truncated: false,
+      note: 'symbolic-link',
+    };
+  }
+  try {
+    const content = await fs.readFile(absPath, 'utf8');
+    const lines = content.split('\n');
+    const informative = lines.filter((l) => l.trim() !== '' && !/^[{}()\];,]+$/.test(l.trim()));
+    return {
+      added: lines.filter((l) => l.trim() !== '').length,
+      highlights: informative.slice(0, limit).map((l) => `+ ${l.trim().slice(0, 160)}`),
+      truncated: informative.length > limit,
+      note: null,
+    };
+  } catch {
+    return { added: 0, highlights: [], truncated: false, note: 'unreadable' };
+  }
+}
+
+/**
  * diff 摘录：**只保留关键行**，并把噪音文件单独标出。
  *
  * 取舍（对齐卡片 015）：不返回完整 diff。每个文件最多取 `DIFF_HIGHLIGHTS_PER_FILE` 行
@@ -209,22 +274,29 @@ export async function getDiffSummary(cwd: string, staged = false): Promise<GitRe
   }
 
   // **未跟踪文件**：`git diff` 不会显示它们，但用户最关心的恰恰是"新增了什么文件"。
-  // 这里从 status 补齐：行数按实际文件内容计，摘录取前若干非空行。（单测实测缺口）
-  const untracked: Array<{ path: string; added: number; removed: number }> = [];
+  // 这里从 status 补齐：行数与摘录**一次读完**（T29 —— 原来各读一遍，且跟着软链读进外部内容）。
+  interface UntrackedEntry {
+    path: string;
+    added: number;
+    removed: number;
+    highlights: string[];
+    truncated: boolean;
+    note: 'symbolic-link' | 'unreadable' | null;
+  }
+  const untracked: UntrackedEntry[] = [];
   const statusRes = await getStatus(cwd);
   if (statusRes.ok && statusRes.data) {
-    const { readFile } = await import('node:fs/promises');
-    const { join } = await import('node:path');
     for (const e of statusRes.data.entries) {
       if (e.code !== '??') continue;
-      let added: number;
-      try {
-        const content = await readFile(join(cwd, e.path), 'utf8');
-        added = content.split('\n').filter((l) => l.trim() !== '').length;
-      } catch {
-        added = 0; // 目录或不可读文件：计 0 但仍列出
-      }
-      untracked.push({ path: e.path, added, removed: 0 });
+      const read = await readUntrackedFile(join(cwd, e.path));
+      untracked.push({
+        path: e.path,
+        added: read.added,
+        removed: 0,
+        highlights: read.highlights,
+        truncated: read.truncated,
+        note: read.note,
+      });
     }
   }
 
@@ -234,30 +306,22 @@ export async function getDiffSummary(cwd: string, staged = false): Promise<GitRe
   let noiseFiles = 0;
 
   // 未跟踪文件排在前面（"新文件"优先级更高）
-  for (const item of untracked.slice(0, DIFF_MAX_FILES)) {
+  let skippedUntracked = 0;
+  for (const item of untracked) {
+    if (files.length >= DIFF_MAX_FILES) {
+      skippedUntracked += 1;
+      continue;
+    }
     const noise = isNoisePath(item.path);
     if (noise) noiseFiles += 1;
     totalAdded += item.added;
-    const { readFile } = await import('node:fs/promises');
-    const { join } = await import('node:path');
-    let highlights: string[];
-    try {
-      const content = await readFile(join(cwd, item.path), 'utf8');
-      highlights = content
-        .split('\n')
-        .filter((l) => l.trim() !== '' && !/^[{}()\];,]+$/.test(l.trim()))
-        .slice(0, DIFF_HIGHLIGHTS_PER_FILE)
-        .map((l) => `+ ${l.trim().slice(0, 160)}`);
-    } catch {
-      highlights = [];
-    }
     files.push({
       path: item.path,
       added: item.added,
       removed: 0,
       noise,
-      highlights,
-      truncated: highlights.length >= DIFF_HIGHLIGHTS_PER_FILE,
+      highlights: item.highlights,
+      truncated: item.truncated,
     });
   }
 
@@ -288,8 +352,17 @@ export async function getDiffSummary(cwd: string, staged = false): Promise<GitRe
   }
 
   const notes: string[] = [];
-  if (truncatedFiles || untracked.length > DIFF_MAX_FILES) {
+  if (truncatedFiles || skippedUntracked > 0) {
     notes.push(`改动文件超过 ${DIFF_MAX_FILES} 个，只汇总了前 ${DIFF_MAX_FILES} 个`);
+  }
+  // 不读的内容必须说出来：只把行数写成 0 会让人以为"新文件是空的"（T29）
+  const linkFiles = untracked.filter((u) => u.note === 'symbolic-link').length;
+  if (linkFiles > 0) {
+    notes.push(`${linkFiles} 个未跟踪条目是符号链接：内容没有读取，它可能指向工作区之外`);
+  }
+  const unreadableFiles = untracked.filter((u) => u.note === 'unreadable').length;
+  if (unreadableFiles > 0) {
+    notes.push(`${unreadableFiles} 个未跟踪条目读不到内容（目录或权限受限），行数按 0 计`);
   }
   if (noiseFiles > 0) notes.push(`其中 ${noiseFiles} 个是 lockfile/构建产物等噪音文件（已标出，通常无需逐个审阅）`);
 

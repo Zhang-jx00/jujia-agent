@@ -14,7 +14,9 @@ import {
   isGitRepo,
   isNoisePath,
   push,
+  readUntrackedFile,
   stagePaths,
+  type UntrackedFs,
   unstagePaths,
 } from './git';
 
@@ -370,5 +372,73 @@ describe('push（M8 收口：外发远端，调用方必须先过硬 ask）', ()
     const r = await push(plainDir, 'origin', null);
     expect(r.ok).toBe(false);
     expect(typeof r.error).toBe('string');
+  });
+});
+
+/**
+ * T29：diff 摘要里"未跟踪文件"的内容读取。
+ *
+ * 外部审查的原话是"软链把工作区外的内容带进 git 历史"—— 实测**不成立**
+ * （`git add` 之后索引里是 mode 120000，`cat-file` 拿到的是链接目标那串文本，
+ * 内容根本没进仓库，复核 055 记的是这次实测）。
+ * 但**读**那一侧是真的：`getDiffSummary` 对未跟踪条目直接 `readFile(join(cwd, path))`，
+ * 跟着软链就把外部文件的内容读进了界面。所以这里拦的是读，不动 `git add`
+ * （提交一个软链是正常需求，拦它会把真仓库打死）。
+ *
+ * 这几条用例用**注入的 fs**，不建真软链：Windows 上建符号链接要开发者模式，
+ * 用真链路测出来的绿不可靠（换台机器就红），而判据本身是纯逻辑。
+ */
+describe('readUntrackedFile：未跟踪条目的内容读取只跟普通文件', () => {
+  const text = 'const a = 1\n\n  // 注释 \n{}\nfunction f() {\n}\n';
+
+  const fakeFs = (opts: {
+    link?: boolean;
+    content?: string;
+    fail?: boolean;
+  }): UntrackedFs & { readCalls: { value: number } } => {
+    const readCalls = { value: 0 };
+    return {
+      lstat: async () => ({ isSymbolicLink: () => opts.link === true }),
+      readFile: async () => {
+        readCalls.value += 1;
+        if (opts.fail) throw new Error('EISDIR');
+        return opts.content ?? text;
+      },
+      readCalls,
+    };
+  };
+
+  it('普通文件：非空行数 + 带 + 前缀的摘录，且没有说明（现状行为原样保住）', async () => {
+    const r = await readUntrackedFile('/ws/a.ts', fakeFs({}));
+    expect(r.note).toBeNull();
+    expect(r.added).toBe(text.split('\n').filter((l) => l.trim() !== '').length);
+    expect(r.highlights.every((l) => l.startsWith('+ '))).toBe(true);
+  });
+
+  it('符号链接：一次都不读内容，并给出看得见的理由', async () => {
+    const fs = fakeFs({ link: true, content: '外部机密\n第二行\n' });
+    const r = await readUntrackedFile('/ws/link.txt', fs);
+    expect(fs.readCalls.value).toBe(0);
+    expect(r.added).toBe(0);
+    expect(r.note).toBe('symbolic-link');
+    expect(r.highlights.join(' ')).toContain('符号链接');
+    // 说明必须讲清"为什么不读"，只写"跳过"等于让人以为文件是空的
+    expect(r.highlights.join(' ')).toContain('工作区之外');
+  });
+
+  it('读不到（目录 / 权限 / 二进制）：计 0 但仍列出，不抛', async () => {
+    const r = await readUntrackedFile('/ws/somedir', fakeFs({ fail: true }));
+    expect(r.added).toBe(0);
+    expect(r.highlights).toEqual([]);
+    expect(r.note).toBe('unreadable');
+  });
+
+  it('摘录有界（limit），且"同一条目读两遍磁盘"的老毛病不许回来', async () => {
+    const fs = fakeFs({ content: '一\n二\n三\n四\n五\n' });
+    const r = await readUntrackedFile('/ws/many.txt', fs, 3);
+    expect(r.highlights.length).toBe(3);
+    expect(r.truncated).toBe(true);
+    // 一个条目只读一次：以前计数与摘录各读一遍，两处判断会分叉
+    expect(fs.readCalls.value).toBe(1);
   });
 });
