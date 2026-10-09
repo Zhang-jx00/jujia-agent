@@ -8,6 +8,7 @@ import type {
   StreamEvent,
 } from '@jujia/shared-ipc';
 import { createDeltaBatcher, windowedSlice } from '@jujia/shared/stream-batcher';
+import { olderPageNotice, toHistoryBubbles } from './history-bubbles';
 import { belongsToSession } from './stream-routing';
 import { ToolCard } from './ToolCard';
 
@@ -61,6 +62,14 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
   const sessionIdRef = useRef<string | undefined>(undefined);
   /** 这一轮"能继续，但有件事该知道"（目前唯一来源：磁盘历史没装回来，T6④） */
   const [historyHint, setHistoryHint] = useState<string | null>(null);
+  /**
+   * 往前翻这一页取到了什么（外部审查 T33 的后半）。
+   *
+   * 刻意**不**复用 `historyHint`：那一条说的是"磁盘历史没装回来"，这一条说的是
+   * "这一页没有可显示的对话"，两个事实轮流出现 —— 共用一行就会互相冲掉，
+   * 而"翻不动"这件事一旦没话，界面上看起来就和按钮坏了相同。
+   */
+  const [pageHint, setPageHint] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
   const [toolLines, setToolLines] = useState<ToolLine[]>([]);
@@ -261,16 +270,6 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
     };
   }, [connectionId]);
 
-  function toBubbles(messages: Array<{ role: string; content: string }>): Bubble[] {
-    return messages
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m, i) => ({
-        id: `h-${String(i)}-${m.role}`,
-        role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
-        content: m.content,
-      }));
-  }
-
   /**
    * 换一个会话看时**必须一起清掉**的"这一会话专属"状态。
    *
@@ -283,6 +282,7 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
     setUsage(null);
     setToolLines([]);
     setHistoryHint(null);
+    setPageHint(null);
     setNoteHint(null);
     setLastError(null);
   }
@@ -291,7 +291,7 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
   async function resume(id: string): Promise<void> {
     const page = await window.jujia.chatHistory({ sessionId: id, limit: 120 });
     resetView();
-    setBubbles(toBubbles(page.messages));
+    setBubbles(toHistoryBubbles(page.messages, page.hasMore));
     selectSession(id);
     setPickId(id);
     setHistoryTotal(page.total);
@@ -313,9 +313,12 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
     }
     const before = loadedFrom;
     const page = await window.jujia.chatHistory({ sessionId, before, limit: 120 });
-    setBubbles((prev) => [...toBubbles(page.messages), ...prev]);
+    const older = toHistoryBubbles(page.messages, page.hasMore);
+    setBubbles((prev) => [...older, ...prev]);
     setHistoryTotal(page.total);
     setLoadedFrom(page.hasMore);
+    // 取到了消息却一条气泡都没多 = 界面看起来"点了没反应"，这句话必须由我们说出来（T33）
+    setPageHint(olderPageNotice({ fetched: page.messages.length, bubbles: older.length, hasMore: page.hasMore }));
   }
 
   /** 四态判定：空 / 加载 / 错误 / 成功 */
@@ -631,6 +634,13 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
       {historyHint !== null && (
         <p className="p0-err" role="alert">
           {historyHint}
+        </p>
+      )}
+
+      {/* 往前翻这一页取到了什么（T33）：没有这一行，翻到全是工具输出的那一页就等于"按钮没反应" */}
+      {pageHint !== null && (
+        <p className="p0-subtitle" role="status">
+          {pageHint}
         </p>
       )}
 

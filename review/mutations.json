@@ -1080,6 +1080,46 @@
       "find": "        `${INJECTION_GUARD_NOTICE}\\n\\n`;",
       "replace": "        `\\n\\n`;",
       "test": "packages/agent-core/src/skills/tool.test.ts"
+    },
+    {
+      "id": "M136",
+      "desc": "分页窗口不剥开头那条 system（口径重新分叉）：驻留数组与磁盘数组又给出两个不同的 total / hasMore，T33 的两条后果一起回来（按钮没反应 + 有一条历史永远看不到）",
+      "file": "apps/desktop/src/main/history-window.ts",
+      "find": "  const all = historyWindow(raw);",
+      "replace": "  const all = raw.slice();",
+      "test": "apps/desktop/src/main/history-window.test.ts"
+    },
+    {
+      "id": "M137",
+      "desc": "剥 system 剥过头（把所有 system 都当开头那条剥掉）：历史中间的 system 也是内容，计数于是又差一次 —— 修差 1 修出新的差 1",
+      "file": "apps/desktop/src/main/history-window.ts",
+      "find": "  return first !== undefined && first.role === 'system' ? messages.slice(1) : messages.slice();",
+      "replace": "  return messages.filter((m) => m.role !== 'system');",
+      "test": "apps/desktop/src/main/history-window.test.ts"
+    },
+    {
+      "id": "M138",
+      "desc": "历史气泡的 key 丢掉页偏移（回到页内下标）：前插的第二页与第一页撞同一批 key，React 复用错节点（T34）",
+      "file": "apps/desktop/src/renderer/src/features/chat/history-bubbles.ts",
+      "find": "    out.push({ id: `h-${String(offset + i)}-${m.role}`, role: m.role, content: m.content });",
+      "replace": "    out.push({ id: `h-${String(i)}-${m.role}`, role: m.role, content: m.content });",
+      "test": "apps/desktop/src/renderer/src/features/chat/history-bubbles.test.ts"
+    },
+    {
+      "id": "M139",
+      "desc": "翻页取到 0 条可显示内容时不说话（静默）：用户只看到按钮点了没反应，分不清卡了 / 到底了 / 这页本来没内容",
+      "file": "apps/desktop/src/renderer/src/features/chat/history-bubbles.ts",
+      "find": "  if (args.fetched === 0) return '更早的历史已经读到底了（这一页一条都没有）';",
+      "replace": "  if (args.fetched === 0) return null;",
+      "test": "apps/desktop/src/renderer/src/features/chat/history-bubbles.test.ts"
+    },
+    {
+      "id": "M140",
+      "desc": "chat-service 绕过纯函数、自己再切一遍窗口：判断回到调用点，口径分叉这条路重新开张（与 T15、R4 的「决策被绕过」同族）",
+      "file": "apps/desktop/src/main/chat-service.ts",
+      "find": "  return pickHistoryPage(all, opts);",
+      "replace": "  const limit = Math.min(Math.max(opts.limit ?? 120, 1), 400);\n  const end = Math.min(opts.before ?? all.length, all.length);\n  const start = Math.max(end - limit, 0);\n  return { messages: all.slice(start, end), total: all.length, hasMore: start };",
+      "test": "apps/desktop/src/main/session-wiring.test.ts"
     }
   ]
 }

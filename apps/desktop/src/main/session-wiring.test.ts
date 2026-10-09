@@ -56,6 +56,30 @@ describe('存储层确实被用（不是躺在文件里的死代码）', () => {
   });
 });
 
+describe('历史分页口径只剩一处（外部审查 T33 / T34）', () => {
+  it('chat-service 把窗口与计数交给纯函数，自己不再算 limit、不再切数组', () => {
+    const body = chatService.slice(chatService.indexOf('export async function historyPage'));
+    const fn = body.slice(0, body.indexOf('\nexport '));
+    expect(fn).toContain('pickHistoryPage(all, opts)');
+    // 反向锁：调用点自己算窗口 = 口径重新分叉，正是 T33 的病根本身
+    expect(fn).not.toMatch(/Math\.max\(\s*end\s*-\s*limit/);
+    expect(fn).not.toContain('opts.limit ?? 120');
+    expect(chatService).toContain("from './history-window'");
+  });
+
+  it('界面用可见历史数组的起始下标当 key 偏移，页内下标那套不许回来', () => {
+    expect(panel).toContain('toHistoryBubbles(page.messages, page.hasMore)');
+    expect(panel).not.toMatch(/id: `h-\$\{String\(i\)\}-/);
+    expect(panel).toContain("from './history-bubbles'");
+  });
+
+  it('翻到一页没有可显示内容时必须有一行话，换会话时清掉', () => {
+    expect(panel).toContain('olderPageNotice({');
+    expect(panel).toContain('{pageHint !== null &&');
+    expect(panel).toContain('setPageHint(null)');
+  });
+});
+
 describe('记忆与权限判定之间不给入口（6a 追加验收，防跨会话持久注入）', () => {
   it('权限策略与工具执行器都不读笔记 / 不引记忆模块', () => {
     for (const [name, src] of [

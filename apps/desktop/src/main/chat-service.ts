@@ -25,6 +25,7 @@ import {
 } from '@jujia/agent-core';
 import type { StreamEvent } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
+import { pickHistoryPage } from './history-window';
 import { getDataRoot } from './paths';
 import { buildModelHistory, mergeTurnResult } from './model-history';
 import { createPendingNotes, shouldAskAgain, type PendingNotes } from './pending-notes';
@@ -259,20 +260,21 @@ export async function hydrateSession(sessionId: string, connectionId: string): P
 
 /**
  * 按盘分页读历史（6a 的第二半：分页窗口不再是前端数组切片的专利）。
- * `before` 是"从第几条往前取"的下标，缺省取最新的一页。
+ * `before` 是"从可见历史的第几条往前取"，缺省取最新的一页。
+ *
+ * **口径不在这里，在 `history-window.ts`**（外部审查 T33）：驻留数组的 index 0 是每轮重装配的
+ * system、磁盘数组没有它，两处各自算就会差 1；所以这里只负责"取哪一份数组"，
+ * 夹取、剥 system、开窗、计数全部交给那一个纯函数 —— 一条判断只许有一处。
  */
 export async function historyPage(
   sessionId: string,
   opts: { limit?: number | undefined; before?: number | undefined } = {},
 ): Promise<{ messages: ChatMessage[]; total: number; hasMore: number }> {
-  const limit = Math.min(Math.max(opts.limit ?? 120, 1), 400);
   const resident = sessions.get(sessionId);
   const all = resident
     ? resident.messages
     : (await store().load(sessionId)).messages.map((m) => ({ role: m.role, content: m.content }));
-  const end = Math.min(opts.before ?? all.length, all.length);
-  const start = Math.max(end - limit, 0);
-  return { messages: all.slice(start, end), total: all.length, hasMore: start };
+  return pickHistoryPage(all, opts);
 }
 
 export function isRunning(sessionId: string): boolean {
