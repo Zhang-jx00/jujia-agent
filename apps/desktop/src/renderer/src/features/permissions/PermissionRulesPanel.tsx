@@ -179,7 +179,17 @@ export function PermissionRulesPanel(): ReactElement {
           </label>
           <label>
             动作
-            <select value={action} onChange={(e) => setAction(e.target.value as PermissionRuleView['action'])}>
+            <select
+              value={action}
+              onChange={(e) => {
+                const next = e.target.value as PermissionRuleView['action'];
+                setAction(next);
+                // 切成 allow 时那一格连同**内容**一起消失。只藏不清会留下一种最难懂的报错：
+                // 提交带出一个界面上根本看不见的 argPrefix，主进程按规矩拒收，
+                // 而错误文案指的是一格不存在的位置。
+                if (next === 'allow') setPrefix('');
+              }}
+            >
               <option value="deny">拒绝</option>
               <option value="ask">必须询问</option>
               <option value="allow">自动放行</option>
