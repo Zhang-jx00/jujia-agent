@@ -623,3 +623,55 @@ describe('生命周期钩子接入（W5d）：钩子能拒绝、能改写、能�
     expect(res.outcome.content).not.toContain('钩子');
   });
 });
+
+/**
+ * 命令前缀规则的**接线**（M4 收尾 · 其一）。
+ *
+ * rules.test.ts 已经证明"会不会命中"，这一组只证明另一件事：运行时真的走到它。
+ * 工具必须自己声明哪条参数是命令行，执行器必须把这条声明送到策略层 ——
+ * 少接一环，用户看到的就是一条"写了却不生效"的 deny 规则，那比没有这条规则更坏。
+ */
+describe('命令前缀规则接线（不是只活在单测里）', () => {
+  const rmRule = {
+    id: 'p1',
+    pattern: 'run_command',
+    action: 'deny' as const,
+    argPrefix: 'rm -rf',
+    enabled: true,
+    createdAt: '',
+    updatedAt: '',
+  };
+  const neverAsk = (): never => {
+    throw new Error('不该走到询问');
+  };
+
+  it('run_command 声明了自己的命令参数（没声明的话，前缀规则就是假能力）', () => {
+    expect(createDefaultRegistry().get('run_command').commandArg).toBe('command');
+  });
+
+  it('命中前缀的命令在执行器这一层就被拒：不弹窗、不 spawn', async () => {
+    const tool = createDefaultRegistry().get('run_command');
+    const res = await runTool(tool, { command: 'rm -rf build' }, ctx(), neverAsk, { rules: [rmRule] });
+    expect(res.asked).toBe(false);
+    expect(res.decision).toBe('deny');
+    expect(res.outcome.content).toContain('命中你的规则');
+    expect(res.outcome.content).toContain('rm -rf');
+  });
+
+  it('没命中前缀的命令照常弹审批（规则窄了不等于放行松了）', async () => {
+    const tool = createDefaultRegistry().get('run_command');
+    const asked: PermissionRequest[] = [];
+    const res = await runTool(tool, { command: 'ls -la' }, ctx(), async (req) => {
+      asked.push(req);
+      return 'deny';
+    }, { rules: [rmRule] });
+    expect(asked).toHaveLength(1);
+    expect(res.decision).toBe('deny');
+  });
+
+  it('只有执行类工具能声明 commandArg（否则前缀不命中会回落成可被"总是允许"压掉的软 ask）', () => {
+    for (const tool of createDefaultRegistry().all()) {
+      if (tool.commandArg !== undefined) expect(`${tool.name}:${tool.kind}`).toBe(`${tool.name}:exec`);
+    }
+  });
+});

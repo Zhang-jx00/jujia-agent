@@ -14,6 +14,17 @@
 const SHELL_METACHAR = /[|&;<>`$]|\r|\n/;
 
 /**
+ * 这段文本里有没有 shell 元字符。**判据的唯一来源是上面那张表**。
+ *
+ * 为什么导出给权限规则用（M4 收尾）：命令前缀规则也得分清"这条命令就是前缀那一小段"
+ * 和"前缀后面还接了别的东西"。两处若各写一张表，迟早一边多一个字符、另一边少一个 ——
+ * 而这里的分叉不是显示错乱，是**一条 deny 规则以为管住了、其实没管住**。
+ */
+export function containsShellMetachar(text: string): boolean {
+  return SHELL_METACHAR.test(text);
+}
+
+/**
  * **只有经 `cmd.exe` 那一道才会被解释**的三个字符（T15）：
  * - `%` 变量展开（`%USERPROFILE%` 在命令行被替换成实际值 —— 藏得住内容，也带得进路径）；
  * - `^` 是 cmd 的转义符（能把上面那张表里的字符"洗白"再让 cmd 重新解释一次）；
@@ -58,7 +69,7 @@ export function checkArgvSafety(
 ): ArgvCheck {
   const errors: string[] = [];
   const viaCmd = typeof command === 'string' && goesThroughCmd(command, platform);
-  const bad = (s: string): boolean => SHELL_METACHAR.test(s) || (viaCmd && CMD_METACHAR.test(s));
+  const bad = (s: string): boolean => containsShellMetachar(s) || (viaCmd && CMD_METACHAR.test(s));
   // 拒绝理由要说清"为什么这条路才拒"，否则用户遇到的是一个看不懂的禁令
   const why = viaCmd ? '含 shell 元字符（这条命令会经 cmd.exe，%VAR% 与 ^ 会被解释），已拒绝' : '含 shell 元字符，已拒绝（防止命令注入）';
 

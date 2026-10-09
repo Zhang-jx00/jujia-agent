@@ -21,6 +21,15 @@ export interface ToolDefinition<TArgs = Record<string, unknown>> {
   name: string;
   description: string;
   kind: ToolKind;
+  /**
+   * 哪一条入参是**命令行文本**（值就是属性名，如 `'command'`）。
+   *
+   * 这是"工具自己声明参数语义"这件事的落点（M4 收尾）：权限规则里的命令前缀
+   * 只认声明过的工具，不声明 = 这条工具没有命令行参数 = 前缀规则一律不参与判定。
+   * 为什么必须声明而不能由策略层去猜 `args.command`：猜错一次，
+   * 用户写的 `deny` 就作用在一段根本不是命令的文本上 —— 看起来拦住了，其实没有。
+   */
+  commandArg?: string;
   /** 给模型的 JSON Schema（OpenAI tools[].function.parameters） */
   parameters: ToolParameterSchema;
   /** 入参校验与收窄（通常用 zod），失败即拒绝执行 */
@@ -40,6 +49,8 @@ export interface StoredTool {
   name: string;
   description: string;
   kind: ToolKind;
+  /** 与 `ToolDefinition.commandArg` 同义（泛型擦除后仍要保留：权限门靠它） */
+  commandArg?: string;
   parameters: ToolParameterSchema;
   parse: (raw: unknown) => unknown;
   run: (args: never, ctx: ToolContext) => Promise<ToolOutcome>;

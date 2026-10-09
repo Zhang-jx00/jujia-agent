@@ -286,3 +286,122 @@ describe('具名断言：记忆 / 文档正文不参与权限判定', () => {
     expect(withEvil.action).toBe('ask');
   });
 });
+
+/**
+ * 命令前缀规则接进策略层（M4 收尾 · 其一）。
+ *
+ * 这里要锁的是**接入方式**而不是匹配算法（算法在 rules.test.ts 里已经锁死）：
+ * - 只有工具自己声明了"哪个参数是命令行"（`commandArg`），前缀规则才参与判定；
+ * - 前缀不命中时，执行类仍走它原来的硬 ask —— 少命中一次不等于多放行一次；
+ * - 没声明的工具**绝不**被前缀规则牵连。
+ */
+describe('命令前缀规则（M4 收尾 · 其一：按命令收紧）', () => {
+  const denyRm = {
+    id: 'p1',
+    pattern: 'run_command',
+    action: 'deny' as const,
+    argPrefix: 'rm -rf',
+    enabled: true,
+    createdAt: '',
+    updatedAt: '',
+  };
+  const askPush = {
+    id: 'p2',
+    pattern: 'run_command',
+    action: 'ask' as const,
+    argPrefix: 'git push',
+    enabled: true,
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  it('声明了 commandArg 且命令命中 → 拒', () => {
+    const d = decideGate(
+      ctx({
+        toolName: 'run_command',
+        kind: 'exec',
+        args: { command: 'rm -rf build' },
+        commandArg: 'command',
+        rules: [denyRm],
+      }),
+    );
+    expect(d.action).toBe('deny');
+    expect(d.reason).toContain('rm -rf');
+  });
+
+  it('同一工具的另一条命令不受影响，仍是执行类硬 ask', () => {
+    const d = decideGate(
+      ctx({
+        toolName: 'run_command',
+        kind: 'exec',
+        args: { command: 'ls -la' },
+        commandArg: 'command',
+        rules: [denyRm],
+      }),
+    );
+    expectHardAsk(d, '未命中的命令仍走执行类硬 ask');
+  });
+
+  it('前缀命中的 ask 规则也是硬 ask（「总是允许」压不掉用户自己写的必须询问）', () => {
+    const d = decideGate(
+      ctx({
+        toolName: 'run_command',
+        kind: 'exec',
+        args: { command: 'git push origin main' },
+        commandArg: 'command',
+        rules: [askPush],
+      }),
+    );
+    expectHardAsk(d, '用户的 ask 规则');
+    expect(d.reason).toContain('git push');
+  });
+
+  it('bypassPermissions 也让路：前缀 deny 优先于"全部放行"', () => {
+    const d = decideGate(
+      ctx({
+        mode: 'bypassPermissions',
+        toolName: 'run_command',
+        kind: 'exec',
+        args: { command: 'rm -rf build' },
+        commandArg: 'command',
+        rules: [denyRm],
+      }),
+    );
+    expect(d.action).toBe('deny');
+  });
+
+  it('工具没声明 commandArg → 前缀规则完全不参与（写文件的软 ask 与从前一致）', () => {
+    const d = decideGate(
+      ctx({
+        toolName: 'write_file',
+        kind: 'write',
+        args: { path: 'a.txt', content: 'rm -rf build' },
+        rules: [{ ...denyRm, pattern: 'write_file' }],
+      }),
+    );
+    expect(d.action).toBe('ask');
+    if (d.action === 'ask') expect(d.bypassable).toBe(true);
+  });
+
+  it('git / 钩子 / 打开方式那几个门没有命令行参数，前缀规则不会误伤它们', () => {
+    for (const toolName of ['git_commit', 'hooks_modify', 'open_with_browser']) {
+      const d = decideGate(
+        ctx({ toolName, kind: 'write', args: {}, rules: [{ ...denyRm, pattern: '*' }] }),
+      );
+      expect(d.action).not.toBe('deny');
+    }
+  });
+
+  it('命令含组合符时前缀不命中，但执行类照样每次问人（收紧规则不会被"加一段尾巴"绕成放行）', () => {
+    const d = decideGate(
+      ctx({
+        toolName: 'run_command',
+        kind: 'exec',
+        args: { command: 'rm -rf build && echo hi' },
+        commandArg: 'command',
+        rules: [denyRm],
+      }),
+    );
+    expectHardAsk(d, '带尾巴的 rm 仍要过人手');
+  });
+});

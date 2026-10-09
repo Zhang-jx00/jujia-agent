@@ -234,6 +234,12 @@ export const runCommandTool: ToolDefinition<ExecArgs> = {
   // **这一行是安全语义，不是标签**：引擎对 'exec' 判定为硬 ask（任何"总是允许"都压不掉）。
   // 改成 'write' 就变成可被永久放行 —— 变异 M13 专门咬它。
   kind: 'exec',
+  /**
+   * 声明"哪条参数是命令行"（M4 收尾 · 其一）。权限规则里的命令前缀只认这一条声明，
+   * 执行器把它原样送到策略层 —— 删掉这一行，用户写的 `deny rm -rf` 会静默失效，
+   * 而界面上那条规则看起来还在。变异盯着它。
+   */
+  commandArg: 'command',
   parameters: {
     type: 'object',
     properties: {

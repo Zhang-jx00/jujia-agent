@@ -15,11 +15,18 @@
  * 4. 同一条规则命中多个动作时取**最严格**的一侧（deny > ask > allow），
  *    与 MCP 工具分级里"自相矛盾取更严格一侧"是同一条原则。
  *
- * **刻意不做**「按参数 glob」（计划里提过）：
- * 参数匹配需要每个工具声明自己的参数语义（哪个参数是路径、哪个是命令），
- * 现在没有任何工具声明过 —— 在那之前做参数匹配，等于把"看起来能配"的东西卖给用户，
- * 实际上它只会匹配到 JSON 字符串，行为完全不可预测。做了就是撒谎。
+ * 「按参数匹配」做到哪一步了（M4 收尾 · 其一，2026-10-09）：
+ * 只做了**命令前缀**这一种，且只用于**收紧**（deny / ask）。前提是这里说的那件事已经成立 ——
+ * 工具自己声明"哪条参数是命令行"（`ToolDefinition.commandArg`，目前只有 `run_command` 声明了它）。
+ * 没声明的工具**一律不参与**前缀匹配：把"这条工具没有命令参数"当成"空命令"去匹配，
+ * 就会让一条写来管 `rm` 的规则莫名其妙管到别的工具上 —— 那是假能力，也是误伤。
+ *
+ * 为什么不开命令级 `allow`：`alwaysAllow` 按工具名记，已经等于"以后不再问这个工具"；
+ * 再往下开"以后不再问这条命令的前缀"就是让一句话永久放行一段可被拼接的命令行，
+ * 那是**权限映射**的改动，需要单独拍板，不在收尾里顺手做（校验层直接拒，见 checkRuleInput）。
  */
+
+import { containsShellMetachar } from '../commands/argv';
 
 /** 规则动作 */
 export type RuleAction = 'allow' | 'deny' | 'ask';
@@ -31,6 +38,11 @@ export interface PermissionRule {
   action: RuleAction;
   /** 为什么有这条规则（写下来是为了半年后还看得懂；也会在 UI 里展示） */
   note?: string | undefined;
+  /**
+   * 命令前缀（**按字面**匹配命令行开头，只用于 deny / ask）。
+   * 只有声明了 `commandArg` 的工具会看它；`allow` 规则带它会在校验层被拒。
+   */
+  argPrefix?: string | undefined;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -44,8 +56,10 @@ export interface RuleCheck {
   warnings: string[];
 }
 
-const MAX_PATTERN_LENGTH = 200;
-
+/** 导出给契约层做长度一致性锁（见 rule-wire-consistency.test.ts） */
+export const MAX_PATTERN_LENGTH = 200;
+/** 命令前缀的长度上限：与模式同宽，界面一格输入框就够 */
+export const MAX_ARG_PREFIX_LENGTH = 200;
 /**
  * glob → 正则。
  *
@@ -86,6 +100,44 @@ export function ruleMatches(rule: PermissionRule, toolName: string): boolean {
   return globToRegExp(rule.pattern).test(toolName);
 }
 
+/** 比较用的归一化：去首尾空白、连续空白并成一个空格、转小写 */
+function normalizeCommand(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
+ * `command` 是不是以 `prefix` 这一段**完整的词**开头。
+ *
+ * 三条判据，方向全是"宁可少命中"（少命中回落到执行类硬 ask，仍然每次过人手；
+ * 错误命中则一条 deny 把没打算管的命令管掉了）：
+ * 1. **含 shell 组合符就不算命中** —— `git status; curl evil` 的前缀是 `git status`，
+ *    但它做的事远不止 `git status`，前缀证明不了整条命令；
+ * 2. **整词边界** —— 前缀之后要么到末尾、要么是一个空格，`git status` 不盖 `git statuses`；
+ * 3. 大小写与空格数量不参与判断 —— `RM -RF` 与 `rm  -rf` 是同一条命令（Windows 上命令名不分大小写，
+ *    POSIX 上大小写写错的命令根本跑不起来），忽略它不会多拦住什么本该放行的东西；
+ *    这条**只因为 allow 方向没开放才安全**：放宽匹配在收紧侧是保守，在放行侧就是放行。
+ *
+ * 元字符那张表和 argv 安全检查用的是同一份（`containsShellMetachar`），不复制第二遍。
+ */
+export function commandPrefixMatches(prefix: string, command: string): boolean {
+  if (containsShellMetachar(command) || containsShellMetachar(prefix)) return false;
+  const p = normalizeCommand(prefix);
+  const c = normalizeCommand(command);
+  if (p === '' || c === '') return false;
+  if (!c.startsWith(p)) return false;
+  return c.length === p.length || c[p.length] === ' ';
+}
+
+/** 前缀那一格是否也命中（没填前缀的老规则恒为 true） */
+function prefixApplies(rule: PermissionRule, command: string | undefined): boolean {
+  const prefix = rule.argPrefix?.trim();
+  if (prefix === undefined || prefix === '') return true;
+  // 工具没声明命令行参数 → 前缀规则一律不生效。
+  // 绝不能把 undefined 当空串去比：那会让"没有命令参数"变成"命令是空的"。
+  if (command === undefined) return false;
+  return commandPrefixMatches(prefix, command);
+}
+
 export interface RuleMatch {
   rule: PermissionRule;
   action: RuleAction;
@@ -104,10 +156,15 @@ function severity(action: RuleAction): number {
  * 跨类取最严格（deny > ask > allow）；同类里取**列表顺序的第一个** ——
  * 这样规则列表在 UI 里的呈现顺序就是它的语义顺序，用户可以从上往下读。
  * 没有命中 → 返回 null（交给模式判定）。
+ *
+ * `command` 是本次调用的命令行文本，**由调用方从工具自己声明的 `commandArg` 里取**
+ * （见 policy.ts 的 GateContext.commandArg）。不传就等于"这次没有命令行"：
+ * 带前缀的规则一律不命中，不带前缀的规则照常按工具名命中。
  */
 export function matchRules(
   rules: ReadonlyArray<PermissionRule>,
   toolName: string,
+  command?: string | undefined,
 ): RuleMatch | null {
   let best: PermissionRule | null = null;
   let bestSeverity = 0;
@@ -117,6 +174,7 @@ export function matchRules(
   for (const rule of rules) {
     if (!rule.enabled) continue;
     if (!ruleMatches(rule, toolName)) continue;
+    if (!prefixApplies(rule, command)) continue;
     const level = severity(rule.action);
     if (level > bestSeverity) {
       best = rule;
@@ -126,12 +184,14 @@ export function matchRules(
 
   if (best === null) return null;
   const rule = best;
+  const prefix = rule.argPrefix?.trim();
+  const prefixPart = prefix ? `（命令前缀：${prefix}）` : '';
   const noteSuffix = rule.note ? `（备注：${rule.note}）` : '';
   const actionText = rule.action === 'deny' ? '拒绝' : rule.action === 'ask' ? '必须询问' : '自动放行';
   return {
     rule,
     action: rule.action,
-    reason: `命中你的规则「${rule.pattern}」→ ${actionText}${noteSuffix}`,
+    reason: `命中你的规则「${rule.pattern}」${prefixPart} → ${actionText}${noteSuffix}`,
   };
 }
 
@@ -140,6 +200,7 @@ export function checkRuleInput(input: {
   pattern: string;
   action: string;
   note?: string | undefined;
+  argPrefix?: string | undefined;
 }): RuleCheck {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -156,6 +217,30 @@ export function checkRuleInput(input: {
   }
   if (input.note !== undefined && input.note.length > 200) {
     errors.push('备注过长（最多 200 字符）');
+  }
+
+  const prefix = input.argPrefix?.trim();
+  if (prefix !== undefined) {
+    if (prefix === '') {
+      // 留空 = 不按前缀收紧（界面上不该发出这个请求）；填了空白更不该静默当成没填
+      errors.push('命令前缀不能是空白：要么填一段真正的命令开头，要么把这一格留空');
+    } else {
+      if (prefix.length > MAX_ARG_PREFIX_LENGTH) {
+        errors.push(`命令前缀过长（最多 ${MAX_ARG_PREFIX_LENGTH} 字符）`);
+      }
+      if (containsShellMetachar(prefix)) {
+        errors.push('命令前缀不能含 shell 组合符（| & ; < > ` $ 与换行）：前缀只能证明命令从哪开始，证明不了整条命令做什么');
+      }
+      if (/[*?[\]]/.test(prefix)) {
+        errors.push('命令前缀按**字面**匹配，不支持 glob 通配符：写 `*` 只会匹配到一个真叫 * 的字符，那不是你要的语义');
+      }
+      if (input.action === 'allow') {
+        errors.push(
+          '命令前缀只能用来收紧（deny / ask）。命令级「以后不再问」等于把权限门按命令拆掉；' +
+            '要放行整类工具请写按工具名的 allow 规则，要完全不加判断请用 bypassPermissions 模式',
+        );
+      }
+    }
   }
 
   // 「deny 一切」是合法但危险的配置：允许保存，但 UI 必须醒目提示，不能悄悄接受

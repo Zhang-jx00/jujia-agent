@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { checkArgvSafety } from '../commands/argv';
 import {
   checkRuleInput,
+  commandPrefixMatches,
   globToRegExp,
   isDenyAllPattern,
   matchRules,
@@ -132,5 +134,120 @@ describe('isDenyAllPattern', () => {
     expect(isDenyAllPattern('mcp__*')).toBe(false);
     expect(isDenyAllPattern('*_file')).toBe(false);
     expect(isDenyAllPattern('a*')).toBe(false);
+  });
+});
+
+/**
+ * 命令前缀匹配（M4 收尾 · 其一）。
+ *
+ * 验收要点全在"宁可少命中，也不能多放行"这一侧：
+ * 命中不了 → 回落到执行类**硬 ask**（每次仍要人看）；
+ * 错误命中 → 一条 deny 规则把没打算管的命令管掉了。
+ * 而 `allow` 方向压根不开放（见下面 checkRuleInput 那组），所以这里不存在"放宽"的可能。
+ */
+describe('commandPrefixMatches（把"绝不碰这条命令"写成整词前缀）', () => {
+  it('前缀命中要求整词：`git status` 不盖住 `git statuses`', () => {
+    expect(commandPrefixMatches('git status', 'git status')).toBe(true);
+    expect(commandPrefixMatches('git status', 'git status --short')).toBe(true);
+    expect(commandPrefixMatches('git status', 'git statuses')).toBe(false);
+    expect(commandPrefixMatches('git', 'gitignore list')).toBe(false);
+  });
+
+  it('大小写与连续空格不参与判断（同一台机器上 rm 与 RM 是同一个命令）', () => {
+    expect(commandPrefixMatches('RM -RF', 'rm -rf build')).toBe(true);
+    expect(commandPrefixMatches('git   status', 'GIT  STATUS --short')).toBe(true);
+    expect(commandPrefixMatches('  rm  ', 'rm -rf build')).toBe(true);
+  });
+
+  it('命令里有 shell 组合符时一律不算命中（前缀管不住"后面还接了什么"）', () => {
+    expect(commandPrefixMatches('git status', 'git status; rm -rf /')).toBe(false);
+    expect(commandPrefixMatches('git status', 'git status | sh')).toBe(false);
+    expect(commandPrefixMatches('rm', 'echo hi && rm -rf x')).toBe(false);
+  });
+
+  it('与 argv 安全检查共用同一张元字符表（两处口径不许各说各话）', () => {
+    for (const meta of ['|', '&', ';', '<', '>', '`', '$', '\r', '\n']) {
+      const cmd = `git status ${meta}tail`;
+      expect(checkArgvSafety(cmd, []).ok).toBe(false);
+      expect(commandPrefixMatches('git status', cmd)).toBe(false);
+    }
+  });
+
+  it('空前缀 / 空命令都不命中（缺字段不等于匹配一切）', () => {
+    expect(commandPrefixMatches('', 'rm -rf build')).toBe(false);
+    expect(commandPrefixMatches('   ', 'rm -rf build')).toBe(false);
+    expect(commandPrefixMatches('rm', '')).toBe(false);
+    expect(commandPrefixMatches('rm', '   ')).toBe(false);
+  });
+});
+
+describe('matchRules 带上命令之后', () => {
+  const prefixDeny = rule({ pattern: 'run_command', action: 'deny', argPrefix: 'rm -rf' });
+
+  it('规则带前缀时，工具名与命令前缀**都要**命中才算命中', () => {
+    expect(matchRules([prefixDeny], 'run_command', 'rm -rf build')?.action).toBe('deny');
+    expect(matchRules([prefixDeny], 'run_command', 'ls -la')).toBeNull();
+    expect(matchRules([prefixDeny], 'write_file', 'rm -rf build')).toBeNull();
+  });
+
+  it('没给命令时前缀规则永不命中（不能把"这条工具没有命令参数"当成空命令误伤）', () => {
+    expect(matchRules([prefixDeny], 'run_command')).toBeNull();
+  });
+
+  it('不带前缀的老规则完全不受影响（无论有没有命令）', () => {
+    const plain = rule({ pattern: 'run_command', action: 'deny' });
+    expect(matchRules([plain], 'run_command', 'ls')?.action).toBe('deny');
+    expect(matchRules([plain], 'run_command')?.action).toBe('deny');
+  });
+
+  it('命中理由里要写清是哪条前缀管的，用户才知道自己被什么拦下', () => {
+    const m = matchRules(
+      [rule({ pattern: 'run_command', action: 'ask', argPrefix: 'git push', note: '推之前问我' })],
+      'run_command',
+      'git push origin main',
+    );
+    expect(m?.reason).toContain('前缀');
+    expect(m?.reason).toContain('git push');
+    expect(m?.reason).toContain('推之前问我');
+  });
+
+  it('多条规则命中同一条命令时仍取最严格一侧（前缀不参与优先级）', () => {
+    const rules = [
+      rule({ id: 'a', pattern: 'run_command', action: 'ask', argPrefix: 'git' }),
+      rule({ id: 'b', pattern: 'run_command', action: 'deny', argPrefix: 'git push' }),
+    ];
+    expect(matchRules(rules, 'run_command', 'git push origin main')?.rule.id).toBe('b');
+    expect(matchRules(rules, 'run_command', 'git status')?.rule.id).toBe('a');
+  });
+
+  it('禁用的前缀规则不参与判定（与老规则同一口径）', () => {
+    expect(matchRules([rule({ ...prefixDeny, enabled: false })], 'run_command', 'rm -rf build')).toBeNull();
+  });
+});
+
+describe('checkRuleInput 对前缀的把关', () => {
+  it('allow + 前缀 = 直接拒绝：命令级「以后不再问」这一档本轮不开', () => {
+    const c = checkRuleInput({ pattern: 'run_command', action: 'allow', argPrefix: 'git status' });
+    expect(c.ok).toBe(false);
+    expect(c.errors.join('；')).toContain('只能用来收紧');
+  });
+
+  it('前缀为空 / 含 shell 元字符 / 含换行 / 过长都被拒绝', () => {
+    expect(checkRuleInput({ pattern: 'run_command', action: 'deny', argPrefix: '   ' }).ok).toBe(false);
+    expect(checkRuleInput({ pattern: 'run_command', action: 'deny', argPrefix: 'rm -rf x; y' }).ok).toBe(false);
+    expect(checkRuleInput({ pattern: 'run_command', action: 'deny', argPrefix: 'git\nstatus' }).ok).toBe(false);
+    expect(checkRuleInput({ pattern: 'run_command', action: 'deny', argPrefix: 'x'.repeat(201) }).ok).toBe(false);
+  });
+
+  it('deny / ask + 合法前缀通过；不填前缀的老输入照常通过', () => {
+    expect(checkRuleInput({ pattern: 'run_command', action: 'deny', argPrefix: 'rm -rf' }).ok).toBe(true);
+    expect(checkRuleInput({ pattern: 'run_command', action: 'ask', argPrefix: 'git push' }).ok).toBe(true);
+    expect(checkRuleInput({ pattern: 'mcp__*', action: 'deny' }).ok).toBe(true);
+  });
+
+  it('前缀里出现 glob 通配符要拒绝：它按字面匹配，写 `*` 不等于匹配任意（避免假能力）', () => {
+    const c = checkRuleInput({ pattern: 'run_command', action: 'deny', argPrefix: 'git *' });
+    expect(c.ok).toBe(false);
+    expect(c.errors.join('；')).toContain('字面');
   });
 });

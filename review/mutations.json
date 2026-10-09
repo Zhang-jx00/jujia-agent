@@ -1184,6 +1184,102 @@
       "find": "              ? { ...b, streaming: false, ...(truncation === null ? {} : { notice: truncation }) }",
       "replace": "              ? { ...b, streaming: false }",
       "test": "apps/desktop/src/main/truncation-wiring.test.ts"
+    },
+    {
+      "id": "M149",
+      "desc": "前缀命中不再要求整词边界（把「git status」当成能盖住「git statuses」）：一条窄规则管到它没说过的命令",
+      "file": "packages/agent-core/src/permissions/rules.ts",
+      "find": "  return c.length === p.length || c[p.length] === ' ';",
+      "replace": "  return true;",
+      "test": "packages/agent-core/src/permissions/rules.test.ts"
+    },
+    {
+      "id": "M150",
+      "desc": "组合符守卫退化成只查前缀、不查命令：「git status; rm -rf /」会被一条 deny git status 当成已经管住",
+      "file": "packages/agent-core/src/permissions/rules.ts",
+      "find": "  if (containsShellMetachar(command) || containsShellMetachar(prefix)) return false;",
+      "replace": "  if (containsShellMetachar(prefix)) return false;",
+      "test": "packages/agent-core/src/permissions/rules.test.ts"
+    },
+    {
+      "id": "M151",
+      "desc": "没取到命令行时把前缀规则当成命中（等于「没有命令参数」= 空命令）：写来管 rm 的规则会误伤别的工具",
+      "file": "packages/agent-core/src/permissions/rules.ts",
+      "find": "  if (command === undefined) return false;",
+      "replace": "  if (command === undefined) return true;",
+      "test": "packages/agent-core/src/permissions/rules.test.ts"
+    },
+    {
+      "id": "M152",
+      "desc": "校验层不再拒「allow + 命令前缀」：命令级「以后不再问」被悄悄开成默认能力（那是权限映射的改动，本轮刻意不开）",
+      "file": "packages/agent-core/src/permissions/rules.ts",
+      "find": "      if (input.action === 'allow') {",
+      "replace": "      if (input.action === 'never') {",
+      "test": "packages/agent-core/src/permissions/rules.test.ts"
+    },
+    {
+      "id": "M153",
+      "desc": "共用元字符表被换成只剩「|」：argv 安全检查与前缀匹配各看一张表，正是本项目反复踩的两处口径分叉",
+      "file": "packages/agent-core/src/commands/argv.ts",
+      "find": "  return SHELL_METACHAR.test(text);",
+      "replace": "  return /[|]/.test(text);",
+      "test": "packages/agent-core/src/permissions/rules.test.ts"
+    },
+    {
+      "id": "M154",
+      "desc": "run_command 把命令行参数名声明错（command → cmd）：前缀规则取不到文本，界面上那条 deny 静默失效",
+      "file": "packages/agent-core/src/tools/builtin/exec-tool.ts",
+      "find": "  commandArg: 'command',",
+      "replace": "  commandArg: 'cmd',",
+      "test": "packages/agent-core/src/tools/executor.test.ts"
+    },
+    {
+      "id": "M155",
+      "desc": "执行器把工具名当成参数名送进策略层：取 args「run_command」永远取不到，前缀规则全线失效",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "    ...(tool.commandArg !== undefined ? { commandArg: tool.commandArg } : {}),",
+      "replace": "    ...(tool.commandArg !== undefined ? { commandArg: tool.name } : {}),",
+      "test": "packages/agent-core/src/tools/executor.test.ts"
+    },
+    {
+      "id": "M156",
+      "desc": "策略层不读本次命令行（回到只按工具名匹配）：一条 rm 的 deny 会把该工具的所有命令一起拒掉",
+      "file": "packages/agent-core/src/permissions/policy.ts",
+      "find": "  const matched = ctx.rules ? matchRules(ctx.rules, ctx.toolName, commandOf(ctx)) : null;",
+      "replace": "  const matched = ctx.rules ? matchRules(ctx.rules, ctx.toolName) : null;",
+      "test": "packages/agent-core/src/permissions/policy.test.ts"
+    },
+    {
+      "id": "M157",
+      "desc": "视图契约去掉 note 的 .default(null)：没写备注的规则让整条列表 IPC 抛错，权限页从此打不开（本轮实测到的真缺陷）",
+      "file": "packages/shared-ipc/src/contracts.ts",
+      "find": "  note: z.string().nullable().default(null),",
+      "replace": "  note: z.string().nullable(),",
+      "test": "packages/agent-core/src/permissions/rule-wire-consistency.test.ts"
+    },
+    {
+      "id": "M158",
+      "desc": "契约里的前缀长度上限放宽到 2000（与引擎的 200 漂移）：界面能填进去的一段文本主进程根本存不下",
+      "file": "packages/shared-ipc/src/contracts.ts",
+      "find": "  argPrefix: z.string().max(200).optional(),",
+      "replace": "  argPrefix: z.string().max(2000).optional(),",
+      "test": "packages/agent-core/src/permissions/rule-wire-consistency.test.ts"
+    },
+    {
+      "id": "M159",
+      "desc": "去重键不算命令前缀：同一个工具的第二条前缀规则被误判成重复，用户以为一个工具只能有一条 deny",
+      "file": "apps/desktop/src/main/permission-rules-store.ts",
+      "find": "        (r) => r.enabled && r.pattern === pattern && r.action === input.action && samePrefix(r),",
+      "replace": "        (r) => r.enabled && r.pattern === pattern && r.action === input.action,",
+      "test": "apps/desktop/src/main/permission-rules-store.test.ts"
+    },
+    {
+      "id": "M160",
+      "desc": "落盘前不把前缀交给校验（只校验模式与动作）：allow+前缀这条禁令只剩界面一层，直接调用 IPC 就能绕过",
+      "file": "apps/desktop/src/main/permission-rules-store.ts",
+      "find": "        argPrefix: input.argPrefix,",
+      "replace": "        argPrefix: undefined,",
+      "test": "apps/desktop/src/main/permission-rules-store.test.ts"
     }
   ]
 }

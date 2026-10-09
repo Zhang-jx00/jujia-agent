@@ -70,3 +70,46 @@ describe('权限规则存储（校验走同一段代码）', () => {
     expect(record.pattern).toBe('*');
   });
 });
+
+/**
+ * 命令前缀（M4 收尾 · 其一）。
+ *
+ * 存储这一层要锁两件事：前缀**存得下来**（否则规则列表里看不见=以为没生效），
+ * 以及"去重"要按三元组算 —— 同一个工具、同一个动作、不同的命令前缀，
+ * 是两条都成立的规则（`rm -rf` 拒、`git push` 问），把它们判成重复就等于只允许一条。
+ */
+describe('命令前缀存取', () => {
+  it('前缀会去掉首尾空白后存下来，并原样读回', async () => {
+    const store = createMemoryPermissionRulesStore();
+    const record = await store.add({ pattern: 'run_command', action: 'deny', argPrefix: '  rm -rf  ' });
+    expect(record.argPrefix).toBe('rm -rf');
+    expect((await store.list())[0]?.argPrefix).toBe('rm -rf');
+  });
+
+  it('不填前缀的规则保持没有这个字段（老规则不受影响）', async () => {
+    const store = createMemoryPermissionRulesStore();
+    const record = await store.add({ pattern: 'mcp__*', action: 'deny' });
+    expect(record.argPrefix).toBeUndefined();
+  });
+
+  it('allow + 前缀在落盘之前就被拒（校验只有一处：agent-core 的 checkRuleInput）', async () => {
+    const store = createMemoryPermissionRulesStore();
+    await expect(
+      store.add({ pattern: 'run_command', action: 'allow', argPrefix: 'git status' }),
+    ).rejects.toThrow(/只能用来收紧/);
+    expect(await store.list()).toEqual([]);
+  });
+
+  it('同工具同动作、不同前缀是两条规则；三者全同才算重复', async () => {
+    const store = createMemoryPermissionRulesStore();
+    await store.add({ pattern: 'run_command', action: 'deny', argPrefix: 'rm -rf' });
+    await store.add({ pattern: 'run_command', action: 'deny', argPrefix: 'git push' });
+    expect(await store.list()).toHaveLength(2);
+    await expect(store.add({ pattern: 'run_command', action: 'deny', argPrefix: 'rm -rf' })).rejects.toThrow(
+      /已存在相同的启用规则/,
+    );
+    // 无前缀与前缀版也不是一条规则：前者管全部命令，后者只管一段
+    await store.add({ pattern: 'run_command', action: 'deny' });
+    expect(await store.list()).toHaveLength(3);
+  });
+});

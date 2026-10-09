@@ -727,6 +727,13 @@ export const permissionRuleInputSchema = z.object({
   pattern: z.string().min(1).max(200),
   action: permissionRuleActionSchema,
   note: z.string().max(200).optional(),
+  /**
+   * 命令前缀（按字面匹配命令行的开头）。
+   * 长度上限必须与 `agent-core/permissions/rules.ts` 的 MAX_ARG_PREFIX_LENGTH 同数 ——
+   * 两边不一致会分成两种坏结果：界面能填进去但引擎拒收，或引擎放行了一段界面根本存不下的文本。
+   * 见 `rule-wire-consistency.test.ts` 的一致性锁。
+   */
+  argPrefix: z.string().max(200).optional(),
 });
 export type PermissionRuleInput = z.infer<typeof permissionRuleInputSchema>;
 
@@ -734,7 +741,15 @@ export const permissionRuleViewSchema = z.object({
   id: z.string(),
   pattern: z.string(),
   action: permissionRuleActionSchema,
-  note: z.string().nullable(),
+  /**
+   * `.default(null)` 不是风格问题（M4 收尾实测）：存储里"没填备注"是**属性缺失或 undefined**，
+   * 而 `.nullable()` 单独存在时**不接受 undefined** —— 于是一条不带备注的规则会让
+   * 整个列表 IPC 抛错，权限页从此打不开（新增时也会报错，规则却已经落盘）。
+   * 界面拿到的一直是 `string | null`，类型没变，只是不再把"没填"判成非法。
+   */
+  note: z.string().nullable().default(null),
+  /** 命令前缀：与 note 同一个道理，没填就是 null，不是"非法" */
+  argPrefix: z.string().nullable().default(null),
   enabled: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),

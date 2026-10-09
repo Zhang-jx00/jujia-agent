@@ -131,6 +131,8 @@ export async function runTool(
     toolName: tool.name,
     kind: tool.kind,
     args: args as Record<string, unknown>,
+    // 工具声明过"哪条参数是命令行"才送过去：命令前缀规则靠它取值，没声明就不参与
+    ...(tool.commandArg !== undefined ? { commandArg: tool.commandArg } : {}),
     ...(opts.rules ? { rules: opts.rules } : {}),
     ...(opts.alwaysAsk ? { alwaysAsk: opts.alwaysAsk } : {}),
   });

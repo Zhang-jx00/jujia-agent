@@ -73,6 +73,15 @@ export interface GateContext {
    * - `allow` 只在本会话没有更严格意图（plan / dontAsk）时生效。
    */
   rules?: ReadonlyArray<PermissionRule>;
+  /**
+   * 本次这个工具**自己声明**的命令行参数名（来自 `ToolDefinition.commandArg`，由执行器传入）。
+   *
+   * 只有一点用处：带命令前缀的规则要知道去哪儿取那条命令行文本。没声明（不传）就意味着
+   * 这条工具没有命令行参数 —— 前缀规则一律不参与判定，而不是拿 `undefined` 当空命令去比。
+   * 为什么由调用方声明、不在这里读 `args['command']`：那样等于策略层替工具猜参数语义，
+   * 猜错的那条 deny 规则会作用在一段根本不是命令的文本上（看着拦住了，其实没有）。
+   */
+  commandArg?: string;
 }
 
 /** 即使处于 acceptEdits，也不自动放行的敏感路径特征（按参数分级的关键） */
@@ -88,6 +97,16 @@ const SENSITIVE_PATH_PATTERNS: ReadonlyArray<{ re: RegExp; why: string }> = [
 function pathOf(args: Record<string, unknown>): string | null {
   const p = args['path'];
   return typeof p === 'string' ? p : null;
+}
+
+/**
+ * 本次调用的命令行文本 —— **只有工具自己声明了 `commandArg` 才取得到**（M4 收尾）。
+ * 取不到就返回 undefined，让带前缀的规则一律不命中。
+ */
+function commandOf(ctx: GateContext): string | undefined {
+  if (ctx.commandArg === undefined) return undefined;
+  const raw = ctx.args[ctx.commandArg];
+  return typeof raw === 'string' ? raw : undefined;
 }
 
 /** 盘符前缀（`C:`）里的冒号不是数据流分隔符，判断 ADS 之前要先剥掉 */
@@ -138,6 +157,7 @@ export function sensitiveReason(target: string): string | null {
  *
  * 决策顺序（越靠前的规则越优先，便于用户理解与测试）：
  * 0. **用户规则**（W5c）：deny / ask 绝对生效；allow 在 plan / dontAsk 下让位于会话意图
+ *    （规则可以再窄到**命令前缀**，但前缀只用于收紧，且工具必须声明 `commandArg`）
  * 1. 高危清单命中 → 询问（任何模式、任何副作用等级都问，**含只读**）
  * 2. bypassPermissions → 放行（附风险提示）
  * 3. plan / dontAsk → 拒绝写与执行（只读仍继续往下走：plan 模式的全部用途就是读）
@@ -164,7 +184,8 @@ export function decideGate(ctx: GateContext): GateDecision {
   const target = pathOf(ctx.args);
 
   // 0) 用户规则：优先于模式（见 GateContext.rules 的说明）
-  const matched = ctx.rules ? matchRules(ctx.rules, ctx.toolName) : null;
+  //    带命令前缀的规则要多看一眼本次命令行（见 GateContext.commandArg）
+  const matched = ctx.rules ? matchRules(ctx.rules, ctx.toolName, commandOf(ctx)) : null;
   if (matched?.action === 'deny') {
     return { action: 'deny', reason: matched.reason, risk: 'high' };
   }
