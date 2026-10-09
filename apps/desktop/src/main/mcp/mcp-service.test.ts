@@ -20,6 +20,10 @@ interface FakeScript {
   failHandshake?: boolean;
   /** tools/call 回 isError: true */
   callFails?: boolean;
+  /** **只**对 tools/call 不回话：进程还在、就是不应声（外部审查 T31 的"僵而不退"） */
+  ignoreCall?: boolean;
+  /** tools/call 回一个 JSON-RPC error：服务端答了，只是答的是错误 */
+  callProtocolError?: boolean;
   onCall?: (name: string, args: Record<string, unknown>) => void;
 }
 
@@ -53,9 +57,15 @@ class FakeTransport implements McpTransport {
       return;
     }
     if (msg.method === 'tools/call') {
+      // 请求照发照记（sent 里看得见它确实被送到过远端），但**不回话**
+      if (this.script.ignoreCall === true) return;
       const params = (JSON.parse(line) as { params: { name: string; arguments: Record<string, unknown> } })
         .params;
       this.script.onCall?.(params.name, params.arguments);
+      if (this.script.callProtocolError === true) {
+        this.replyError(msg.id, '服务端内部故障');
+        return;
+      }
       if (this.script.callFails === true) {
         this.reply(msg.id, { isError: true, content: [{ type: 'text', text: '远端报错' }] });
         return;
@@ -495,6 +505,109 @@ describe('工具调用（callTool）', () => {
     await service.disconnect(id);
     const out = await service.callTool('srv-1__do_thing', {});
     expect(out.ok).toBe(false);
+  });
+
+  /* ---------------- T31：状态诚实化（僵而不退要说出来） ---------------- */
+
+  it('服务端收了请求却不应声 → 这次失败要**写回状态**，界面不能再是"已连接"', async () => {
+    const { service, id, registry } = await connectFresh(
+      { tools: TOOLS, ignoreCall: true },
+      { requestTimeoutMs: 120 },
+    );
+    await service.approve(id, { action: 'approve_all' });
+    expect((await service.views())[0]?.state).toBe('connected');
+
+    const out = await service.callTool('srv-1__do_thing', {});
+    expect(out.ok).toBe(false);
+    expect(out.text).toContain('超时');
+
+    const view = (await service.views())[0];
+    expect(view?.state).toBe('error');
+    expect(view?.lastError).toContain('超时');
+    // **进程还在**，所以工具不摘：它们要以"不可用 + 为什么"的样子出现，
+    // 而不是像进程退出那样莫名消失（那会让模型以为"这个能力没了"，实际是服务端卡住了）
+    expect(registry.has('srv-1__do_thing')).toBe(true);
+    expect(view?.enabledTools.slice().sort()).toEqual(['srv-1__do_thing', 'srv-1__read_thing']);
+  });
+
+  it('第二次调用**立刻**失败：不再让模型重付一次超时，而且一条请求都没再发出去', async () => {
+    const { service, id, transports } = await connectFresh(
+      { tools: TOOLS, ignoreCall: true },
+      { requestTimeoutMs: 120 },
+    );
+    await service.approve(id, { action: 'approve_all' });
+    await service.callTool('srv-1__do_thing', {});
+    const sent = transports[0]?.sent.length ?? 0;
+
+    const again = await service.callTool('srv-1__read_thing', {});
+    expect(again.ok).toBe(false);
+    // 拒绝的理由要带上"为什么不可用"，只说"不可用"等于让人自己去猜
+    expect(again.text).toContain('不可用');
+    expect(again.text).toContain('超时');
+    expect(transports[0]?.sent.length).toBe(sent);
+  });
+
+  it('状态写回要广播出去（不广播 = 界面停在假话上）', async () => {
+    const { service, id } = await connectFresh({ tools: TOOLS, ignoreCall: true }, { requestTimeoutMs: 120 });
+    await service.approve(id, { action: 'approve_all' });
+    const seen: string[] = [];
+    service.onChanged((views) => seen.push(views[0]?.state ?? '无'));
+
+    await service.callTool('srv-1__do_thing', {});
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen).toContain('error');
+  });
+
+  it('工具自述失败 ≠ 服务端坏了：状态仍是 connected，但原因要记下来', async () => {
+    const { service, id } = await connectFresh({ tools: TOOLS, callFails: true });
+    await service.approve(id, { action: 'approve_all' });
+    const out = await service.callTool('srv-1__do_thing', {});
+
+    expect(out.ok).toBe(false);
+    expect(out.text).toContain('远端报错');
+    expect((await service.views())[0]?.state).toBe('connected');
+    expect((await service.views())[0]?.lastError).toContain('远端报错');
+  });
+
+  it('服务端回了 JSON-RPC 错误（它还在说话）→ 只记原因，不谎报"连不上"', async () => {
+    const { service, id } = await connectFresh(
+      { tools: TOOLS, callProtocolError: true },
+      { requestTimeoutMs: 3_000 },
+    );
+    await service.approve(id, { action: 'approve_all' });
+    const out = await service.callTool('srv-1__do_thing', {});
+
+    expect(out.ok).toBe(false);
+    expect(out.text).toContain('服务端内部故障');
+    expect((await service.views())[0]?.state).toBe('connected');
+    expect((await service.views())[0]?.lastError).toContain('服务端内部故障');
+  });
+
+  it('进程已退出之后，在途请求那条超时不许把状态从 exited 改成 error', async () => {
+    const { service, id, last } = await connectFresh(
+      { tools: TOOLS, ignoreCall: true },
+      { requestTimeoutMs: 200 },
+    );
+    await service.approve(id, { action: 'approve_all' });
+
+    const inFlight = service.callTool('srv-1__do_thing', {});
+    last().exit({ code: 7, signal: null }); // 进程先没了：这才是事实
+    const out = await inFlight; // 那条请求此刻才超时返回
+    expect(out.ok).toBe(false);
+
+    const view = (await service.views())[0];
+    expect(view?.state).toBe('exited');
+    // 退出原因不能被"请求超时"盖掉：用户要看的是 code=7，不是它的后果
+    expect(view?.lastError).toContain('code=7');
+  });
+
+  it('界面那一行确实会带 lastError（状态写回不等于用户看得见，接线要钉住）', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const panel = readFileSync(
+      join(here, '..', '..', 'renderer', 'src', 'features', 'mcp', 'McpPanel.tsx'),
+      'utf8',
+    );
+    expect(panel).toContain("{s.lastError ? ` · ${s.lastError}` : ''}");
   });
 });
 

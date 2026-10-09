@@ -50,7 +50,24 @@ export interface ToolCallOutcome {
   result?: unknown;
   /** 失败原因（协议错误 / 超时 / 服务端错误 / 工具自述失败） */
   error?: string;
+  /**
+   * 失败**归类**（外部审查 T31 要求"状态要诚实"）——上层据此决定能不能说"这个服务端还活着"：
+   * - `transport`：**没有任何响应**（请求超时）。进程可能在，但它不应声。
+   * - `protocol`：拿到了 JSON-RPC 错误，或连接是我们自己关掉的（`dispose`）—— 都不是"僵住"。
+   * - `tool`：服务端正常响应，只是工具自己报告失败。
+   */
+  failure?: McpFailure;
 }
+
+export type McpFailure = 'transport' | 'protocol' | 'tool';
+
+/**
+ * 请求超时专用错误。
+ *
+ * 为什么要单独一个类型：上层需要区分"没有拿到任何响应"和"拿到了但内容是错误"，
+ * 而靠比对错误文案（"请求超时"四个字）等于把判据架在措辞上 —— 改一次文案就静默失效。
+ */
+export class McpTimeoutError extends Error {}
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 export const DEFAULT_INITIALIZE_TIMEOUT_MS = 60_000;
@@ -147,7 +164,7 @@ export class McpClient {
           : '';
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`请求超时（${ms}ms）：${method}${hint}`));
+        reject(new McpTimeoutError(`请求超时（${ms}ms）：${method}${hint}`));
       }, ms);
       this.pending.set(id, { resolve, reject, timer });
       this.transport.send(JSON.stringify(req));
@@ -206,13 +223,17 @@ export class McpClient {
     try {
       result = await this.request('tools/call', buildToolsCall(1, name, args).params);
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        failure: err instanceof McpTimeoutError ? 'transport' : 'protocol',
+      };
     }
     const r = (result ?? {}) as Record<string, unknown>;
     const isError = r['isError'] === true;
     const text = extractText(r['content']);
     if (isError) {
-      return { ok: false, result, error: text === '' ? '工具自述执行失败' : text };
+      return { ok: false, result, error: text === '' ? '工具自述执行失败' : text, failure: 'tool' };
     }
     return { ok: true, result };
   }

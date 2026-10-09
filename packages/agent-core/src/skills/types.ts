@@ -16,6 +16,8 @@
  * 4. **来源优先级明确**：工作区技能覆盖用户级同名技能（越具体越优先），被覆盖的记入 `skipped`。
  */
 
+import { INJECTION_GUARD_NOTICE } from '../context/injection-notice';
+
 export type SkillOrigin = 'workspace' | 'user';
 
 export interface SkillSource {
@@ -158,6 +160,10 @@ export function renderSkillCatalog(
     '',
     '下列技能是"按需查阅的说明书"。**要用某个技能时，先用 `load_skill` 读取它的完整说明，再照着做** ——',
     '不要凭技能名猜测内容。',
+    '',
+    // 技能名与描述来自**零批准的目录扫描**（loader 扫到就进清单），所以它和长期记忆是同一类东西：
+    // 数据。声明紧挨着清单放，指的才是下面这些行。
+    INJECTION_GUARD_NOTICE,
     '',
     ...lines,
   ].join('\n') + tail;

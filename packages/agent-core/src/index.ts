@@ -31,3 +31,4 @@ export * from './mcp/client';
 export * from './mcp/consent';
 export * from './mcp/tool-bridge';
 export * from './context/compaction';
+export * from './context/injection-notice';

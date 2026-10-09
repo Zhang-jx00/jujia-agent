@@ -1046,6 +1046,59 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 15. 同一个测试文件里不得出现重名用例（R6c · 2026-10-09）
+ *
+ * 为什么立它：`packages/agent-core/src/mcp/client.test.ts` 里曾有**一整个重复的 describe 块** ——
+ * 三条用例标题一字不差地各写了两遍，是 `dcc3f0a` 那一轮追加时把同一段贴了两次留下的。
+ * 危害不是"跑得慢一点"，而是**测试总数会骗人**：本仓有两处门禁在对用例数字
+ * （PROGRESS 的当前规模、check:docs 的文件数），而"覆盖了 3 个场景"与
+ * "同一个场景测了两遍"在总数上长得一模一样 —— 少一份覆盖，还多一份自信。
+ *
+ * 判据：扫 `apps/` 与 `packages/` 下的 `.test.ts(x)`，以「最近的顶层 describe 标题 + 用例标题」为键，
+ * 同文件内出现两次即红。
+ * 口径边界（如实写明）：只认**引号标题**。`` it(`拒绝 ${scheme}…`) `` 这种模板标题是循环生成的
+ * （`browser/policy.test.ts` 就是这么写的），源码文本相同而运行时各不相同，纳入判据会误伤。
+ * ------------------------------------------------------------------ */
+
+{
+  const testFiles = walkLiveFiles(['.ts', '.tsx']).filter(
+    (rel) => /^(apps|packages)\//.test(rel) && /\.test\.tsx?$/.test(rel),
+  );
+  const dupes = [];
+  let cases = 0;
+
+  for (const rel of testFiles) {
+    const counts = new Map();
+    let top = '';
+    for (const line of read(rel).split(/\r?\n/)) {
+      const d = line.match(/^describe\(\s*(['"])(.*?)\1/);
+      if (d) top = d[2];
+      const t = line.match(/^\s*(?:it|test)(?:\.\w+)?\(\s*(['"])(.*?)\1/);
+      if (!t) continue;
+      cases += 1;
+      const key = `${top}::${t[2]}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    for (const [k, n] of counts) {
+      if (n > 1) dupes.push(`${rel} → ${k}（×${String(n)}）`);
+    }
+  }
+
+  report(
+    `测试用例标题在单文件内唯一（现扫 ${String(testFiles.length)} 个文件、${String(cases)} 条引号标题用例）`,
+    testFiles.length > 0 && dupes.length === 0,
+    [
+      testFiles.length === 0 ? '一个测试文件都没扫到 —— 这条护栏在跑空' : '',
+      dupes.length > 0
+        ? `同一条用例出现两次，多半是整块贴了两遍（总数会因此虚高）：\n     ${dupes.join('\n     ')}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

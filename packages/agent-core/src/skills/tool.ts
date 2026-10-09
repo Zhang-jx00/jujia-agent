@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { INJECTION_GUARD_NOTICE } from '../context/injection-notice';
 import { ToolError, type ToolDefinition, type ToolOutcome } from '../tools/types';
 import type { SkillCatalog } from './types';
 
@@ -45,7 +46,11 @@ export function createSkillTool(getCatalog: () => SkillCatalog): ToolDefinition<
         );
       }
 
-      const header = `# 技能：${skill.name}\n（来源：${skill.origin === 'workspace' ? '工作区' : '用户级'}技能目录）\n\n`;
+      // 正文同样是"放个目录就能写进来"的外部文本：模型按需读它不等于有人批准过它，
+      // 所以声明跟着正文一起进上下文，而不是只在系统提示的清单里说过一次。
+      const header =
+        `# 技能：${skill.name}\n（来源：${skill.origin === 'workspace' ? '工作区' : '用户级'}技能目录）\n\n` +
+        `${INJECTION_GUARD_NOTICE}\n\n`;
       return {
         ok: true,
         content: header + skill.body,

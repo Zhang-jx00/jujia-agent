@@ -181,8 +181,12 @@ const cases = [
     // 版本号用一个明显不会真实出现的值，避免与将来的真条目混淆。
     name: 'CHANGELOG 标题只有任务号、没有轨道词',
     file: 'CHANGELOG.md',
-    from: '## [v0.50.0-M9a] — 2026-10-05 21:20',
-    to: '## [v0.99.0-M9b] — 2099-01-01 00:00\n\n（自检注入的假条目）\n\n---\n\n## [v0.50.0-M9a] — 2026-10-05 21:20',
+    // 锚点用**文件头的说明行**（不随轮换变动）：原先锚的是某一条标题，而 CHANGELOG 每轮都会
+    // 新增条目并把最旧一条搬进归档 —— 锚跟着被搬走，用例便"未命中"（R6c 撞到过一次）。
+    from: '> 轨道分类见 `docs/TRACK-PLANS.md`；排期与修复队列见 `docs/TRACK-ROADMAP.md`。',
+    to:
+      '> 轨道分类见 `docs/TRACK-PLANS.md`；排期与修复队列见 `docs/TRACK-ROADMAP.md`。\n\n' +
+      '## [v0.99.0-M9b] — 2099-01-01 00:00\n\n（自检注入的假条目）\n\n---\n',
     expect: '轨道段',
   },
   {
@@ -252,6 +256,18 @@ const cases = [
     from: '      - name: 构建（main / preload / renderer）',
     to: '      - name: 自检注入的不存在步骤\n        run: npm run selftest-bogus-ci-step\n\n      - name: 构建（main / preload / renderer）',
     expect: 'CI 门禁清单',
+  },
+  {
+    // 护栏 15（R6c）：本仓曾在 client.test.ts 里整块贴了两遍同一个 describe，
+    // 三条用例各跑两遍、总数却看起来"覆盖够了"。重名标题必须咬得住。
+    // 靶子选在**出事那个文件**：它同时也是"这条护栏为什么存在"的活证据。
+    name: '同一文件里出现重名用例',
+    file: 'packages/agent-core/src/mcp/client.test.ts',
+    from: "  it('发送 initialize 并记录服务端信息与协议版本', async () => {",
+    to:
+      "  it('发送 initialize 并记录服务端信息与协议版本', async () => {\n" +
+      "  it('发送 initialize 并记录服务端信息与协议版本', async () => {",
+    expect: '测试用例标题在单文件内唯一',
   },
 ];
 

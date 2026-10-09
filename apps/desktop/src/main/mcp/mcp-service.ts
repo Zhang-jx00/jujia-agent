@@ -28,6 +28,7 @@ import {
   unregisterMcpTools,
   validateServerConfig,
   type ConnectionApprovalPlan,
+  type McpFailure,
   type McpServerConfig,
   type McpToolCallResult,
   type McpToolProfile,
@@ -460,7 +461,7 @@ export class McpService {
    * 两道校验：① 精确匹配归属服务端（**不猜**）；② 必须在已批准集合里。
    */
   async callTool(qualifiedName: string, args: Record<string, unknown>): Promise<McpToolCallResult> {
-    for (const session of this.sessions.values()) {
+    for (const [serverId, session] of this.sessions) {
       const profile = session.tools.find((t) => t.qualifiedName === qualifiedName);
       if (!profile) continue;
 
@@ -469,11 +470,17 @@ export class McpService {
         return { ok: false, text: `工具 ${qualifiedName} 未被批准启用，已拒绝调用` };
       }
       if (session.state !== 'connected') {
-        return { ok: false, text: `服务端「${profile.serverId}」当前不可用（状态：${session.state}）` };
+        // 拒绝的理由要连"上次为什么失败"一起给出：只说"不可用"，模型和人都只能猜
+        const why = session.lastError === null ? '' : `；上次失败：${session.lastError}`;
+        return { ok: false, text: `服务端「${profile.serverId}」当前不可用（状态：${session.state}${why}）` };
       }
 
       const outcome = await session.client.callTool(profile.rawName, args);
-      if (!outcome.ok) return { ok: false, text: outcome.error ?? '调用失败（服务端未给出原因）' };
+      if (!outcome.ok) {
+        const reason = outcome.error ?? '调用失败（服务端未给出原因）';
+        this.recordCallFailure(serverId, session, reason, outcome.failure);
+        return { ok: false, text: reason };
+      }
       const result = outcome.result as { content?: unknown } | null | undefined;
       return { ok: true, text: extractText(result?.content) };
     }
@@ -483,6 +490,35 @@ export class McpService {
   }
 
   /* ------------------------------ 内部 ------------------------------ */
+
+  /**
+   * 把一次调用的结果**如实写回会话状态**（外部审查 T31）。
+   *
+   * 只有"什么响应都没收到"（`transport` = 请求超时）才算僵而不退：进程还在、却不应声，
+   * 这时继续报 `connected` 是说假话，而且每一次调用都要再等满一个超时才失败。
+   * 反过来，服务端回了错误（`protocol`）或工具自述失败（`tool`）都证明**它还在说话** ——
+   * 那种情况只记原因、不改状态，否则一个远端工具的普通报错就会把整个服务端标成不可用，
+   * 那是另一种不诚实。
+   *
+   * 不摘工具：进程还活着，工具"以不可用 + 为什么"的样子出现，比莫名消失更符合事实
+   * （对比 `handleExit` —— 那里进程真没了，留着工具才是骗模型）。
+   */
+  private recordCallFailure(
+    serverId: string,
+    session: Session,
+    reason: string,
+    failure: McpFailure | undefined,
+  ): void {
+    // 进程已经退出（`exited`）是**更精确的事实**：那条在途请求的超时只是它的后果。
+    // 不加这一句就会把"退出码 7"盖成"请求超时"——状态反而变得更有解释力（实测由本轮测试抓到）。
+    if (session.state === 'exited') return;
+    session.lastError = reason;
+    // 迟到的失败回调不能污染已经重连/已断开的会话（与 generation 守卫同一类时序问题）
+    if (failure === 'transport' && !session.closing && this.sessions.get(serverId) === session) {
+      session.state = 'error';
+    }
+    this.notify();
+  }
 
   /** 收尾：摘工具 + 释放客户端。幂等（重复调用无副作用） */
   private teardown(id: string, session: Session): void {
