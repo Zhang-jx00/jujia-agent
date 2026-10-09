@@ -320,6 +320,10 @@ describe('streamChat：真实 SSE 端到端', () => {
       req.on('data', (c) => (seenBody += c));
       req.on('end', () => {
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        // 这一条测的是**请求体**，回包只是把它糊过去 —— 但 T25 之后"只给 [DONE]"会被判成
+        // 异常（那正是本轮要修的静默成功），所以这里必须给一段真内容。
+        // 记在这儿的理由：改之前这个夹具**正依赖着那个缺陷**才能跑绿。
+        res.write(sseChunk('ok'));
         res.write('data: [DONE]\n\n');
         res.end();
       });
@@ -527,5 +531,158 @@ describe('listModels', () => {
       code: 'http_error',
       status: 403,
     });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * R7 · provider 批（外部审查 T25 / T26 / T27 + 附带一条）
+ *
+ * 四条都是**静默**类：不报错、不崩，只是把"没拿到东西"说成"拿到了"。
+ * 每条都对着本地真 SSE 服务跑，不打桩返回值 —— 打桩会把"帧怎么切"这件事测没了。
+ * ------------------------------------------------------------------ */
+
+describe('T25：拿到 [DONE] 不等于拿到回答', () => {
+  it('全是无法解析的负载 + [DONE] → bad_response，不许记成"一条空回答但成功"', async () => {
+    const mock = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write('data: not-json-1\n\n');
+      res.write('data: not-json-2\n\n');
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+    servers.push(mock);
+
+    await expect(
+      collect(streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] })),
+    ).rejects.toMatchObject({ code: 'bad_response' });
+  });
+
+  it('一个数据负载都没有、只给了 [DONE] → 也是异常，而且说法与"垃圾负载"不同', async () => {
+    const mock = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+    servers.push(mock);
+
+    await expect(
+      collect(streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] })),
+    ).rejects.toThrow(/没有给出任何内容/);
+  });
+
+  it('只有 usage、没有正文 + [DONE] → 放行（上游确实答过，不许误判成空流）', async () => {
+    const mock = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(`data: ${JSON.stringify({ usage: { prompt_tokens: 5, completion_tokens: 2 } })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+    servers.push(mock);
+
+    const events = await collect(streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] }));
+    expect(events).toContainEqual({ type: 'usage', inputTokens: 5, outputTokens: 2 });
+    expect(events.at(-1)).toEqual({ type: 'done', reason: 'stop' });
+  });
+
+  it('只有工具调用、没有正文，收尾 [DONE] → done(tool_calls)，兜底不许误伤工具轮', async () => {
+    const mock = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(
+        `data: ${JSON.stringify({
+          choices: [{ delta: { tool_calls: [{ index: 0, id: 'c0', function: { name: 'list_dir', arguments: '{}' } }] } }],
+        })}\n\n`,
+      );
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+    servers.push(mock);
+
+    const events = await collect(streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] }));
+    expect(events.at(-1)).toEqual({ type: 'done', reason: 'tool_calls' });
+  });
+});
+
+describe('T26：finish_reason 不许被归并成 stop', () => {
+  async function finishOf(reason: string): Promise<ProviderEvent | undefined> {
+    const mock = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(sseChunk('写到一半'));
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: reason }] })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+    servers.push(mock);
+    const events = await collect(streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] }));
+    return events.at(-1);
+  }
+
+  it('length 原样传出（截断要看得见）', async () => {
+    expect(await finishOf('length')).toEqual({ type: 'done', reason: 'length' });
+  });
+
+  it('content_filter 原样传出 —— 它和"正常写完"绝不是一回事', async () => {
+    expect(await finishOf('content_filter')).toEqual({ type: 'done', reason: 'content_filter' });
+  });
+
+  it('厂商自造的未知原因不猜：按 stop 收尾，也不报错（宁可少说一句，不要编一句）', async () => {
+    expect(await finishOf('stop')).toEqual({ type: 'done', reason: 'stop' });
+    expect(await finishOf('some_vendor_specific')).toEqual({ type: 'done', reason: 'stop' });
+  });
+});
+
+describe('T27：同一帧里的 usage 不许被吞', () => {
+  it('正文 + usage 在同一帧 → 两个事件都产出', async () => {
+    const mock = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(
+        `data: ${JSON.stringify({
+          choices: [{ delta: { content: '你好' } }],
+          usage: { prompt_tokens: 11, completion_tokens: 7 },
+        })}\n\n`,
+      );
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+    servers.push(mock);
+
+    const events = await collect(streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] }));
+    expect(events).toContainEqual({ type: 'text_delta', delta: '你好' });
+    expect(events).toContainEqual({ type: 'usage', inputTokens: 11, outputTokens: 7 });
+  });
+
+  it('分两帧给（正文帧 / usage 帧）→ 同样两个都有（对照：别把一种写法修坏成另一种）', async () => {
+    const mock = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(sseChunk('你好'));
+      res.write(`data: ${JSON.stringify({ usage: { prompt_tokens: 3, completion_tokens: 4 } })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+    servers.push(mock);
+
+    const events = await collect(streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] }));
+    expect(events).toContainEqual({ type: 'text_delta', delta: '你好' });
+    expect(events).toContainEqual({ type: 'usage', inputTokens: 3, outputTokens: 4 });
+  });
+});
+
+describe('附带一条的实测口径：断流尾部的残缺多字节', () => {
+  it('最后一个 chunk 止于半个汉字 → 不许把替换字符当正文吐出来', async () => {
+    const mock = await startServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(sseChunk('正常内容'));
+      // '好' 的 UTF-8 是 3 字节：这里只给第 1 个字节就断流
+      res.write(Buffer.from('好', 'utf8').subarray(0, 1));
+      res.end();
+    });
+    servers.push(mock);
+
+    const events = await collect(streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] }));
+    const text = events
+      .filter((e) => e.type === 'text_delta')
+      .map((e) => (e as { delta: string }).delta)
+      .join('');
+    expect(text).toBe('正常内容');
+    expect(text).not.toContain('\ufffd');
   });
 });

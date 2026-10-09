@@ -42,6 +42,12 @@ function scriptedChat(
     calls?: Array<{ name: string; args: unknown; id?: string }>;
     /** 这一段的用量（provider 在流尾给的 usage） */
     usage?: { in: number; out: number };
+    /**
+     * 这一轮被上游掐断的原因（外部审查 T26）。
+     * 只影响最后那个 `done` 的 reason —— 循环的 `reason`（为什么结束）不该被它污染，
+     * 两件事分别落在 `result.reason` 与 `result.truncated` 上。
+     */
+    truncate?: 'length' | 'content_filter';
   }>,
 ) {
   const seenMessages: ChatMessage[][] = [];
@@ -83,7 +89,7 @@ function scriptedChat(
         yield { type: 'done', reason: 'tool_calls' };
         return;
       }
-      yield { type: 'done', reason: 'stop' };
+      yield { type: 'done', reason: step?.truncate ?? 'stop' };
     })();
   };
 
@@ -596,5 +602,38 @@ describe('回合级钩子接入（W5d-b）：拦提示词、注入上下文、�
       makeDeps(chat, allow().resolver),
     );
     expect(res.reason).toBe('final');
+  });
+});
+
+describe('T26：被上游截断要作为独立事实传出去', () => {
+  async function runWith(truncate?: 'length' | 'content_filter') {
+    const { chat } = scriptedChat([{ text: '写到一半', ...(truncate ? { truncate } : {}) }]);
+    return runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: 'hi' }],
+        emit: () => undefined,
+      },
+      makeDeps(chat, allow().resolver),
+    );
+  }
+
+  it('length：reason 仍是 final，但 truncated=length（两个事实不挤进同一个枚举）', async () => {
+    const res = await runWith('length');
+    expect(res.reason).toBe('final');
+    expect(res.truncated).toBe('length');
+    // 文本本身原样保留：截断不等于这半截不该显示给用户
+    expect(res.text).toBe('写到一半');
+  });
+
+  it('content_filter 同理（上游拦的，不是模型写完的）', async () => {
+    const res = await runWith('content_filter');
+    expect(res.reason).toBe('final');
+    expect(res.truncated).toBe('content_filter');
+  });
+
+  it('正常收尾 → truncated 是 null，不是 undefined（"确实没截"与"没查"必须是两件事）', async () => {
+    const res = await runWith();
+    expect(res.truncated).toBeNull();
   });
 });

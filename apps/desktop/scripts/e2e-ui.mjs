@@ -184,13 +184,25 @@ const echoServer = createServer((req, res) => {
   req.on('data', (c) => (raw += String(c)));
   req.on('end', () => {
     let content = 'ECHO n=?';
+    // 收尾原因默认 stop；R7 的两条截断场景按 prompt 换掉（T26 的界面级证据）。
+    let finishReason = 'stop';
+    /** 'garbage' = 只回无法解析的负载再正常收尾（T25 的界面级证据：不许画成一条空回答） */
+    let mode = 'echo';
     try {
       const parsed = JSON.parse(raw);
       const msgs = Array.isArray(parsed.messages) ? parsed.messages : [];
       const last = String([...msgs].reverse().find((m) => m && m.role === 'user')?.content ?? '');
       if (last.includes('上下文压缩')) content = SUMMARY_6B;
       else if (last.includes('压成**一条**记忆')) content = NOTE_6B;
-      else {
+      else if (last.includes('E2E_TRUNC_LEN')) {
+        content = '这一段被长度上限掐住了';
+        finishReason = 'length';
+      } else if (last.includes('E2E_TRUNC_FILTER')) {
+        content = '这一段被内容过滤拦下了';
+        finishReason = 'content_filter';
+      } else if (last.includes('E2E_GARBAGE')) {
+        mode = 'garbage';
+      } else {
         const systemText = msgs
           .filter((m) => m && m.role === 'system')
           .map((m) => String(m.content ?? ''))
@@ -203,8 +215,16 @@ const echoServer = createServer((req, res) => {
       // 解析不出来仍回一行：让调用方看见"服务活着但没读懂"，而不是挂在那儿
     }
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    if (mode === 'garbage') {
+      // 两个垃圾帧 + 正常收尾：修之前这会被记成"一次成功的空回答"
+      res.write('data: e2e-not-json-1\n\n');
+      res.write('data: e2e-not-json-2\n\n');
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
     res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
-    res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`);
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
   });
@@ -2607,6 +2627,32 @@ try {
   }
   ok(`文档：路径 + 分块进度（480）+ 滚动位置（${String(restoredTop)}）都跟着回来了，而内容是重新读的那一份`);
 
+  /* ---------------- R7：上游截断与垃圾流必须在界面上说出来 ----------------
+   *
+   * 为什么这四条值得为它加一步 e2e（前面几轮都刻意不加）：它们的共同形状是**静默** ——
+   * 单测锁得住判定，但"用户到底看不看得见那句话"只有界面级证据算数。
+   * 三条都在同一个新会话里连着问：截断的两条要各自出现，垃圾流那条必须报错而不是画一条空回答。
+   */
+  step('R7 上游截断 / 垃圾流：半截回答要写"不完整"、全是垃圾要报错（不许记成一次成功的空回答）');
+  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await win3.locator('select').first().selectOption(seededEchoConnId);
+  const boxR7 = win3.locator('textarea[placeholder^="输入消息"]');
+  const askR7 = async (text, needle, miss) => {
+    await boxR7.fill(text);
+    await win3.locator('button', { hasText: '发送' }).first().click();
+    if ((await waitText3(needle, 15_000)) !== true) {
+      fail(miss, (await body3()).slice(-700));
+    }
+  };
+  const newChatR7 = win3.locator('button', { hasText: '新会话' });
+  for (let i = 0; i < 20 && (await newChatR7.count()) === 0; i += 1) await win3.waitForTimeout(150);
+  if ((await newChatR7.count()) > 0) await newChatR7.first().click();
+
+  await askR7('E2E_TRUNC_LEN 请说一段长话', '达到长度上限被截断', 'length 截断没在界面上说出来：半截回答看起来就是"写完了"');
+  await askR7('E2E_TRUNC_FILTER 请说一段长话', '被上游的内容过滤拦下', 'content_filter 被当成正常写完（T26 的归并没修好）');
+  await askR7('E2E_GARBAGE 随便说点什么', '无法解析', '全是垃圾负载却被记成一次成功的空回答（T25 的静默成功回来了）');
+  ok('两条截断各有自己的说法，垃圾流报错而不是画一条空回答 —— 三种结束情形在界面上分得开');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -2626,5 +2672,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 干净退出');
 process.exit(0);

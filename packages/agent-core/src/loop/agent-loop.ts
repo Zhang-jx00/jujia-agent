@@ -7,7 +7,7 @@ import type { StoredTool } from '../tools/types';
 import type { ToolRegistry } from '../tools/registry';
 import { streamChat, type ProviderDeps } from '../providers/openai-compat';
 import type { AssembledToolCall } from '../providers/tool-call-accumulator';
-import type { ChatMessage, ProviderEvent } from '../providers/types';
+import type { ChatMessage, ProviderEvent, TruncationReason } from '../providers/types';
 
 /**
  * 三分支 Agent Loop（W4）。
@@ -78,6 +78,17 @@ export interface LoopResult {
   turns: number;
   reason: 'final' | 'handoff' | 'max_turns' | 'aborted' | 'error' | 'hook_blocked';
   error?: string;
+  /**
+   * **最后一次模型调用**被上游掐断的原因；没被掐就是 null。
+   *
+   * 为什么单独一格而不塞进 `reason`（外部审查 T26）：`reason` 说的是"循环为什么结束"，
+   * 这一格说的是"这段文本本身不完整" —— 一次回答可以同时是"正常收尾但被 length 截断"，
+   * 两个事实混在一个枚举里，界面就只能二选一地撒谎。
+   * 用 `TruncationReason`（由 `FinishReason` 排除 stop 推出来）而不是再抄一遍字面量：
+   * 将来加第三种截断原因，provider / 循环 / 界面会自动跟上，不会出现"provider 认得了、
+   * 界面还在说 stop"的分叉。
+   */
+  truncated: TruncationReason | null;
   messages: ChatMessage[];
 }
 
@@ -172,6 +183,8 @@ export async function runAgentTurn(
       turns: 0,
       reason: 'hook_blocked',
       error: submit.reason ?? '这次提示词被钩子拦下了（钩子未给出理由）',
+      // 一次模型调用都没发生，所以"没有截断"是**事实**而不是默认值
+      truncated: null,
       messages,
     };
   }
@@ -181,6 +194,11 @@ export async function runAgentTurn(
   let fullText = '';
   let usageIn = 0;
   let usageOut = 0;
+  /**
+   * 最后一次模型调用的截断原因（T26）。每轮调用**之前**归零，所以它总是指向
+   * "最近那一次调用"，而不是"这一整轮里曾经有过一次截断" —— 界面要说的是当前这段文本。
+   */
+  let truncated: TruncationReason | null = null;
   /** Stop 钩子要求"再走一步"的次数：必须有上限，否则钩子写错就是死循环 */
   let stopContinues = 0;
 
@@ -188,7 +206,7 @@ export async function runAgentTurn(
     turn += 1;
 
     if (params.signal?.aborted) {
-      return { branch: 'final', text: fullText, turns: turn, reason: 'aborted', messages };
+      return { branch: 'final', text: fullText, turns: turn, reason: 'aborted', truncated, messages };
     }
 
     // ---- 一轮模型调用（流式） ----
@@ -196,6 +214,7 @@ export async function runAgentTurn(
     let turnText = '';
     let streamError: string | null = null;
     let aborted = false;
+    truncated = null;
 
     try {
       for await (const ev of chat({
@@ -220,6 +239,9 @@ export async function runAgentTurn(
           calls = mergeById(calls, ev.calls);
         } else if (ev.type === 'done') {
           if (ev.reason === 'aborted') aborted = true;
+          // 截断不是"正常写完"（T26）：provider 已经分出 length / content_filter，
+          // 这里再归并一次就等于把上面那条修复在这里抹掉
+          else if (ev.reason === 'length' || ev.reason === 'content_filter') truncated = ev.reason;
         }
       }
     } catch (err) {
@@ -227,7 +249,7 @@ export async function runAgentTurn(
     }
 
     if (aborted) {
-      return { branch: 'final', text: fullText, turns: turn, reason: 'aborted', messages };
+      return { branch: 'final', text: fullText, turns: turn, reason: 'aborted', truncated, messages };
     }
     if (streamError !== null) {
       return {
@@ -236,6 +258,7 @@ export async function runAgentTurn(
         turns: turn,
         reason: 'error',
         error: streamError,
+        truncated,
         messages,
       };
     }
@@ -259,7 +282,7 @@ export async function runAgentTurn(
 
       messages.push({ role: 'assistant', content: turnText });
       params.emit({ type: 'turn_end', turn, branch: 'final' });
-      return { branch: 'final', text: fullText, turns: turn, reason: 'final', messages };
+      return { branch: 'final', text: fullText, turns: turn, reason: 'final', truncated, messages };
     }
 
     // ---- 分支三：handoff（模型请求移交） ----
@@ -307,7 +330,7 @@ export async function runAgentTurn(
         });
       }
       params.emit({ type: 'turn_end', turn, branch: 'handoff' });
-      return { branch: 'handoff', text: fullText, turns: turn, reason: 'handoff', messages };
+      return { branch: 'handoff', text: fullText, turns: turn, reason: 'handoff', truncated, messages };
     }
 
     // ---- 分支二：tool（串行执行后回传结果） ----
@@ -347,6 +370,7 @@ export async function runAgentTurn(
     turns: turn,
     reason: 'max_turns',
     error: `已达到最大迭代次数（${maxTurns}），已停止。可继续输入以接着处理。`,
+    truncated,
     messages,
   };
 }

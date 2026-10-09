@@ -10,7 +10,13 @@
  */
 
 export interface ToolCallDelta {
-  index: number;
+  /**
+   * OpenAI 协议里必填，但**兼容网关常省略**（外部审查 T28）。
+   * 省略时按"这一片在帧内的位置"归位 —— 不是恒归 slot 0：
+   * 同一帧给多个调用时，恒 0 会把 name 与 arguments 串成一个调用（参数错乱，
+   * 而表面上"调用成功了"，比报错更难查）。
+   */
+  index?: number | undefined;
   id?: string | undefined;
   function?: { name?: string | undefined; arguments?: string | undefined } | undefined;
 }
@@ -33,8 +39,10 @@ export class ToolCallAccumulator {
   /** 喂入一帧里的 tool_calls 片段（可以是空数组/undefined） */
   push(deltas: ReadonlyArray<ToolCallDelta> | undefined): void {
     if (!deltas) return;
-    for (const d of deltas) {
-      const index = Number.isFinite(d.index) ? d.index : 0;
+    for (const [position, d] of deltas.entries()) {
+      // 省略 index 的网关：按**帧内位置**归位（T28）。恒归 slot 0 会让同帧的多个调用串成一个。
+      const raw = d.index;
+      const index = typeof raw === 'number' && Number.isFinite(raw) ? raw : position;
       const slot = this.slots.get(index) ?? { id: '', name: '', args: '' };
       if (d.id) slot.id = d.id;
       const fn = d.function;

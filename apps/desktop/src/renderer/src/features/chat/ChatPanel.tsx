@@ -9,6 +9,7 @@ import type {
 } from '@jujia/shared-ipc';
 import { createDeltaBatcher, windowedSlice } from '@jujia/shared/stream-batcher';
 import { olderPageNotice, toHistoryBubbles } from './history-bubbles';
+import { truncationNotice } from './done-notice';
 import { belongsToSession } from './stream-routing';
 import { ToolCard } from './ToolCard';
 
@@ -20,6 +21,11 @@ interface Bubble {
   streaming?: boolean;
   /** 出错信息（若有） */
   error?: string;
+  /**
+   * 不是错误、但用户必须看见的一句话（目前只有"回答被上游截断"，T26）。
+   * 刻意不与 `error` 共用一格：那一条前面挂着 ✗，把"不完整"显示成"失败"是另一种误导。
+   */
+  notice?: string;
 }
 
 /** 工具卡数据（L0–L2 三级信息密度，见 ToolCard.tsx） */
@@ -178,6 +184,8 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
         return;
       }
       // done
+      // 被上游截断要说得出来（T26）：不说，半截回答看起来就是"模型答完了"
+      const truncation = truncationNotice(event.reason);
       if (event.reason === 'tool_calls') {
         /**
          * 说明（轨道回归计划 1 修 M7）：这里**曾经**写着"对话页尚未启用工具执行（W5 起支持）"，
@@ -197,7 +205,13 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
           ),
         );
       } else {
-        setBubbles((prev) => prev.map((b) => (b.streaming ? { ...b, streaming: false } : b)));
+        setBubbles((prev) =>
+          prev.map((b) =>
+            b.streaming
+              ? { ...b, streaming: false, ...(truncation === null ? {} : { notice: truncation }) }
+              : b,
+          ),
+        );
       }
       setSending(false);
     });
@@ -823,6 +837,8 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
               {b.content || (b.streaming ? '…' : '')}
               {b.streaming && <span className="w2-caret" />}
               {b.error && <div className="p0-err">✗ {b.error}</div>}
+              {/* 被截断的回答挂在这里，不挂成 ✗（T26）：那是"不完整"，不是"失败" */}
+              {b.notice && <div className="p0-warn">{b.notice}</div>}
               {/*
                 长期记忆的**唯一写入口**：只有人按下这个按钮才会写。
                 刻意不做"每轮自动记一条" —— 那会把聊天流水灌进长期记忆（卡片 015 叫它 context sludge）。

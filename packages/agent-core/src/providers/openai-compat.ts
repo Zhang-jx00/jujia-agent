@@ -1,6 +1,6 @@
 import { createSseParser } from './sse';
 import { ToolCallAccumulator, type AssembledToolCall } from './tool-call-accumulator';
-import type { ChatMessage, ChatParams, ProviderError, ProviderEvent } from './types';
+import type { ChatMessage, ChatParams, FinishReason, ProviderError, ProviderEvent } from './types';
 
 /** 可注入的依赖，便于单测打桩（默认用全局 fetch） */
 export interface ProviderDeps {
@@ -156,10 +156,9 @@ export async function* streamChat(
   const decoder = new TextDecoder('utf-8');
   const parser = createSseParser();
   const toolCalls = new ToolCallAccumulator();
-  let finishReason: 'stop' | 'length' = 'stop';
+  const ledger: StreamLedger = { deltas: 0, garbage: 0, answered: 0, usage: 0 };
+  let finishReason: FinishReason = 'stop';
   let wantsTools = false;
-  let received = 0;
-  let skipped = 0;
 
   try {
     for (;;) {
@@ -171,6 +170,7 @@ export async function* streamChat(
       for (const payload of parser.push(text)) {
         const mapped = mapPayload(
           payload,
+          ledger,
           (r) => {
             finishReason = r;
           },
@@ -179,7 +179,11 @@ export async function* streamChat(
             wantsTools = true;
           },
         );
-        if (mapped === 'done') {
+        // 一帧里可以同时有正文与 usage（T27）：逐个产出，不能只取第一个
+        for (const ev of mapped.events) yield ev;
+        if (mapped.done) {
+          // 先判"这一轮到底有没有产出"（T25），再收尾
+          assertProduced(ledger, toolCalls);
           // 先吐出拼装好的工具调用，再结束：顺序对调用方很重要
           for (const ev of emitToolCallsIfAny(toolCalls, wantsTools)) yield ev;
           yield {
@@ -188,12 +192,6 @@ export async function* streamChat(
           };
           return;
         }
-        if (mapped === 'skip') {
-          skipped += 1;
-          continue;
-        }
-        if (mapped.type === 'text_delta' && mapped.delta.length > 0) received += 1;
-        yield mapped;
       }
     }
 
@@ -201,6 +199,7 @@ export async function* streamChat(
     for (const payload of parser.flush()) {
       const mapped = mapPayload(
         payload,
+        ledger,
         (r) => {
           finishReason = r;
         },
@@ -209,14 +208,12 @@ export async function* streamChat(
           wantsTools = true;
         },
       );
-      if (mapped === 'done') break;
-      if (mapped !== 'skip') yield mapped;
+      for (const ev of mapped.events) yield ev;
+      if (mapped.done) break;
     }
 
-    // 只有垃圾负载且没有工具调用 → 视为上游异常（不能静默成功）
-    if (received === 0 && skipped > 0 && !toolCalls.hasCalls()) {
-      throw makeError('bad_response', `收到 ${skipped} 个无法解析的负载，且没有任何文本增量`);
-    }
+    // 与 [DONE] 那条路**同一个判据**（T25）：两条收尾路径不能各写一份"算不算成功"
+    assertProduced(ledger, toolCalls);
     for (const ev of emitToolCallsIfAny(toolCalls, wantsTools)) yield ev;
     yield { type: 'done', reason: toolCalls.hasCalls() ? 'tool_calls' : finishReason };
   } catch (err) {
@@ -272,23 +269,66 @@ function* emitToolCallsIfAny(
   }
 }
 
-/** 解析单条 data 负载；返回 ProviderEvent、'done'、或 'skip' */
+/**
+ * 一轮流式的**产出账本**（外部审查 T25）。
+ *
+ * 为什么要分开记这几格：判"这一轮到底有没有拿到东西"不能只看"有没有收到帧" ——
+ * 上游可以在 HTTP 200 之后只吐无法解析的垃圾，或干脆只给一个 `[DONE]`。
+ * 两种情况的**说法不一样**（一种是"上游在胡说"，一种是"上游什么都没写"），
+ * 而"收到过几个垃圾"与"收到过几个空负载"混成一格就分不出这两句话。
+ */
+interface StreamLedger {
+  /** 正文增量条数 */
+  deltas: number;
+  /** 解析失败的负载数 */
+  garbage: number;
+  /** 带 choices 且解析成功的负载数（证明上游真的在答） */
+  answered: number;
+  /** usage 事件数（有的网关只给 usage 不给正文） */
+  usage: number;
+}
+
+/**
+ * "拿到 [DONE]"不等于"拿到回答"（T25）。
+ *
+ * 修之前的形状：`bad_response` 兜底只写在**没有 [DONE]**的那条收尾路径上，
+ * 于是"全是垃圾负载 + 正常收尾"的流被当成一次**成功的空回答** —— 界面画出一条什么都没有的消息，
+ * 账记成成功，用户丢了一段对话还不知道为什么。判断只写在这一处，两条收尾路径都调它。
+ */
+function assertProduced(ledger: StreamLedger, toolCalls: ToolCallAccumulator): void {
+  if (ledger.deltas > 0 || ledger.answered > 0 || ledger.usage > 0 || toolCalls.hasCalls()) return;
+  if (ledger.garbage > 0) {
+    throw makeError('bad_response', `收到 ${String(ledger.garbage)} 个无法解析的负载，且没有任何内容`);
+  }
+  throw makeError('bad_response', '上游结束了这次流式响应，但没有给出任何内容（一个数据负载都没有）');
+}
+
+/** 解析单条 data 负载的产物：一次可以给出**多个**事件（T27），以及是否收到 [DONE] */
+interface MappedPayload {
+  events: ProviderEvent[];
+  done: boolean;
+}
+
+/** 解析单条 data 负载 */
 function mapPayload(
   payload: string,
-  onFinish: (r: 'stop' | 'length') => void,
+  ledger: StreamLedger,
+  onFinish: (r: FinishReason) => void,
   toolCalls: ToolCallAccumulator,
   onToolCalls: () => void,
-): ProviderEvent | 'done' | 'skip' {
+): MappedPayload {
+  const events: ProviderEvent[] = [];
   const trimmed = payload.trim();
-  if (trimmed === '') return 'skip';
-  if (trimmed === '[DONE]') return 'done';
+  if (trimmed === '') return { events, done: false };
+  if (trimmed === '[DONE]') return { events, done: true };
 
   let json: Record<string, unknown>;
   try {
     json = JSON.parse(trimmed) as Record<string, unknown>;
   } catch {
+    ledger.garbage += 1;
     console.warn('[provider] 跳过无法解析的 SSE 负载:', trimmed.slice(0, 120));
-    return 'skip';
+    return { events, done: false };
   }
 
   // 部分厂商用 data 里带 error 的形式报错
@@ -301,10 +341,14 @@ function mapPayload(
 
   const choices = json['choices'];
   if (Array.isArray(choices) && choices.length > 0) {
+    ledger.answered += 1;
     const first = choices[0] as Record<string, unknown>;
     const reason = first['finish_reason'];
+    // 结束原因**照原样传**（T26）：length / content_filter 是"话被掐了"，
+    // 与 stop 不是一回事；厂商自造的未知值不猜意思，按 stop 收尾。
     if (reason === 'tool_calls') onToolCalls();
     else if (reason === 'length') onFinish('length');
+    else if (reason === 'content_filter') onFinish('content_filter');
     else if (typeof reason === 'string') onFinish('stop');
 
     const delta = first['delta'] as Record<string, unknown> | undefined;
@@ -316,20 +360,25 @@ function mapPayload(
 
     const content = delta?.['content'];
     if (typeof content === 'string' && content.length > 0) {
-      return { type: 'text_delta', delta: content };
+      ledger.deltas += 1;
+      events.push({ type: 'text_delta', delta: content });
     }
   }
 
+  // usage 常在**最后一帧**与正文一起给。原先这里在 text_delta 分支就 return 了，
+  // 于是这种厂商的 token 数全部丢在这里、整轮累计跟着偏小（T27）——
+  // 现在两个事件一起返回，谁先到都不挡谁。
   const usage = json['usage'] as Record<string, unknown> | undefined;
   if (usage) {
     const input = Number(usage['prompt_tokens'] ?? usage['input_tokens'] ?? 0);
     const output = Number(usage['completion_tokens'] ?? usage['output_tokens'] ?? 0);
     if (Number.isFinite(input) && Number.isFinite(output)) {
-      return { type: 'usage', inputTokens: input, outputTokens: output };
+      ledger.usage += 1;
+      events.push({ type: 'usage', inputTokens: input, outputTokens: output });
     }
   }
 
-  return 'skip';
+  return { events, done: false };
 }
 
 function isAbort(err: unknown): boolean {

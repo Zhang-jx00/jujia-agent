@@ -1120,6 +1120,70 @@
       "find": "  return pickHistoryPage(all, opts);",
       "replace": "  const limit = Math.min(Math.max(opts.limit ?? 120, 1), 400);\n  const end = Math.min(opts.before ?? all.length, all.length);\n  const start = Math.max(end - limit, 0);\n  return { messages: all.slice(start, end), total: all.length, hasMore: start };",
       "test": "apps/desktop/src/main/session-wiring.test.ts"
+    },
+    {
+      "id": "M141",
+      "desc": "空流兜底只剩一半：垃圾负载那条不报错了（T25 的一半）—— 上游胡说八道 + 正常收尾 = 一次成功的空回答",
+      "file": "packages/agent-core/src/providers/openai-compat.ts",
+      "find": "    throw makeError('bad_response', `收到 ${String(ledger.garbage)} 个无法解析的负载，且没有任何内容`);",
+      "replace": "    return;",
+      "test": "packages/agent-core/src/providers/openai-compat.test.ts"
+    },
+    {
+      "id": "M142",
+      "desc": "空流兜底的另一半：只给 [DONE]、一个负载都没有，也不再算异常（界面画出一条空白回答还显示成功）",
+      "file": "packages/agent-core/src/providers/openai-compat.ts",
+      "find": "  throw makeError('bad_response', '上游结束了这次流式响应，但没有给出任何内容（一个数据负载都没有）');",
+      "replace": "  return;",
+      "test": "packages/agent-core/src/providers/openai-compat.test.ts"
+    },
+    {
+      "id": "M143",
+      "desc": "content_filter 又被归并成 stop（T26 的原状）：被上游拦下来的半截回答，在界面上与「正常写完」长得一样",
+      "file": "packages/agent-core/src/providers/openai-compat.ts",
+      "find": "    else if (reason === 'content_filter') onFinish('content_filter');",
+      "replace": "    else if (reason === 'content_filter') onFinish('stop');",
+      "test": "packages/agent-core/src/providers/openai-compat.test.ts"
+    },
+    {
+      "id": "M144",
+      "desc": "循环不记截断这一格（T26 传播断在中间）：provider 分出了 length / content_filter，到这里被丢掉，界面拿不到事实",
+      "file": "packages/agent-core/src/loop/agent-loop.ts",
+      "find": "          else if (ev.reason === 'length' || ev.reason === 'content_filter') truncated = ev.reason;",
+      "replace": "          else truncated = null;",
+      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
+    },
+    {
+      "id": "M145",
+      "desc": "chat-service 不读那一格（T26 传播断在最后一环之前）：循环说「截了」，主进程仍然按 stop 收尾",
+      "file": "apps/desktop/src/main/chat-service.ts",
+      "find": "        resolved = result.truncated;",
+      "replace": "        resolved = 'stop';",
+      "test": "apps/desktop/src/main/truncation-wiring.test.ts"
+    },
+    {
+      "id": "M146",
+      "desc": "一帧只取第一个事件（T27 的原状）：末帧「正文 + usage」一起给的厂商，token 数丢在这里、整轮累计跟着偏小",
+      "file": "packages/agent-core/src/providers/openai-compat.ts",
+      "find": "        // 一帧里可以同时有正文与 usage（T27）：逐个产出，不能只取第一个\n        for (const ev of mapped.events) yield ev;",
+      "replace": "        const only = mapped.events[0];\n        if (only) yield only;",
+      "test": "packages/agent-core/src/providers/openai-compat.test.ts"
+    },
+    {
+      "id": "M147",
+      "desc": "省略 index 又全并进 slot 0（T28 的原状）：同一帧两个调用的 name 与 arguments 串成一个，参数错乱而表面成功",
+      "file": "packages/agent-core/src/providers/tool-call-accumulator.ts",
+      "find": "      const index = typeof raw === 'number' && Number.isFinite(raw) ? raw : position;",
+      "replace": "      const index = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0;",
+      "test": "packages/agent-core/src/providers/tool-call-accumulator.test.ts"
+    },
+    {
+      "id": "M148",
+      "desc": "算出了截断那句话却不挂到气泡上（T26 的最后一环）：接线锁只锁「调用了 + 画了」时看不见这一环掉链子，所以第三环也得钉",
+      "file": "apps/desktop/src/renderer/src/features/chat/ChatPanel.tsx",
+      "find": "              ? { ...b, streaming: false, ...(truncation === null ? {} : { notice: truncation }) }",
+      "replace": "              ? { ...b, streaming: false }",
+      "test": "apps/desktop/src/main/truncation-wiring.test.ts"
     }
   ]
 }

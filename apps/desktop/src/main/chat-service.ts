@@ -333,7 +333,7 @@ export function sendMessage(
   // 后台跑，不阻塞 IPC 返回
   void (async () => {
     let seq = 0;
-    let resolved: 'stop' | 'length' | 'aborted' | 'error' | 'tool_calls' = 'stop';
+    let resolved: 'stop' | 'length' | 'content_filter' | 'aborted' | 'error' | 'tool_calls' = 'stop';
 
     try {
       const { record, apiKey } = await resolveConnection(connectionId);
@@ -516,8 +516,12 @@ export function sendMessage(
         });
       } else if (result.reason === 'aborted') {
         resolved = 'aborted';
+      } else if (result.truncated !== null) {
+        // 被上游掐了半截（T26）：既不是"正常写完"，也不是错误 —— 单独一个原因，界面才说得出话。
+        // 修之前这一格根本不存在，length 与 content_filter 一路被归并成 stop。
+        resolved = result.truncated;
       } else {
-        resolved = result.branch === 'handoff' ? 'stop' : 'stop';
+        resolved = 'stop';
       }
     } catch (err) {
       resolved = 'error';

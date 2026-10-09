@@ -85,4 +85,35 @@ describe('ToolCallAccumulator：按 index 归位', () => {
     acc.push([{ index: 0, function: { arguments: json.slice(mid) } }]);
     expect(acc.finish()[0]?.arguments).toEqual({ path: '文档/说明.md', content: '你好，俱佳' });
   });
+
+  // 外部审查 T28：省略 index 的兼容网关若同一帧给多个调用，全并进 slot 0 就会把
+  // name / arguments 串成一个 —— 参数错乱比报错更难查（表面上"调用成功了"）。
+  it('同一帧两个调用都不带 index → 按帧内位置归位，不并成一个（T28）', () => {
+    const acc = new ToolCallAccumulator();
+    acc.push([
+      { id: 'a', function: { name: 'read_file', arguments: '{"path":"a.md"}' } },
+      { id: 'b', function: { name: 'list_dir', arguments: '{"path":"."}' } },
+    ] as never);
+
+    const calls = acc.finish();
+    expect(calls.map((c) => c.id)).toEqual(['a', 'b']);
+    expect(calls.map((c) => c.name)).toEqual(['read_file', 'list_dir']);
+    expect(calls[0]?.arguments).toEqual({ path: 'a.md' });
+    expect(calls[1]?.arguments).toEqual({ path: '.' });
+  });
+
+  it('不带 index 的单调用（最常见形态）→ 与带 index=0 的结果一致', () => {
+    const acc = new ToolCallAccumulator();
+    acc.push([{ id: 'only', function: { name: 'list_dir', arguments: '{"path":"docs"}' } }] as never);
+    const calls = acc.finish();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe('list_dir');
+    expect(calls[0]?.arguments).toEqual({ path: 'docs' });
+  });
+
+  it('index 给了非数字（网关把数字串化后又丢了）→ 同样按帧内位置归位，不猜', () => {
+    const acc = new ToolCallAccumulator();
+    acc.push([{ index: undefined, id: 'u', function: { name: 'x', arguments: '{}' } }] as never);
+    expect(acc.finish()[0]?.index).toBe(0);
+  });
 });
