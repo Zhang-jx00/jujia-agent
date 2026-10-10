@@ -49,6 +49,10 @@ export function registerToolIpc(ctx: IpcContext): void {
       alwaysAsk: policy.alwaysAsk,
       hooks: hookRunner,
       sessionId: 'manual',
+      // 手动执行与对话链路走同一个出口：两处各写一份"怎么记"，账迟早对不上
+      onDecision: (info) => {
+        void ctx.audit.recordTool(info);
+      },
     });
 
     return toolRunResultSchema.parse({

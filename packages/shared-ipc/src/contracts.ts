@@ -757,6 +757,69 @@ export const permissionRuleViewSchema = z.object({
 export type PermissionRuleView = z.infer<typeof permissionRuleViewSchema>;
 
 /* ------------------------------------------------------------------ *
+ * 执行审计（M4 收尾 · 其二）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 参数摘要的线上形状。
+ *
+ * **这里没有"值"这一格** —— 审计的落盘形态本来就是"键名 + 长度 + 指纹 + 路径 + 命令（已剔密）"，
+ * 契约照着它定义，渲染层就结构上拿不到工具入参原文（拿不到的东西不需要靠纪律去保护）。
+ */
+export const auditArgSummarySchema = z.object({
+  keys: z.array(z.string()),
+  lengths: z.record(z.string(), z.number()),
+  digests: z.record(z.string(), z.string()),
+  paths: z.array(z.string()),
+  command: z.string().optional(),
+  redacted: z.array(z.string()),
+});
+export type AuditArgSummary = z.infer<typeof auditArgSummarySchema>;
+
+export const auditEntrySchema = z.object({
+  ts: z.string(),
+  sessionId: z.string(),
+  subject: z.string(),
+  kind: z.enum(['read', 'write', 'exec', 'gate']),
+  outcome: z.enum(['allow', 'ask', 'deny']),
+  asked: z.boolean(),
+  /** 这件事做没做成（false = 没做：被拒、被规则挡、超时都算） */
+  executed: z.boolean(),
+  reason: z.string(),
+  answer: z.enum(['allow_once', 'allow_always', 'deny', 'timeout', 'expired', 'edit']).optional(),
+  bypassable: z.boolean().optional(),
+  durationMs: z.number().optional(),
+  rules: z
+    .object({
+      source: z.enum(['primary', 'backup', 'default']),
+      count: z.number(),
+      /** 规则文件是否走了回退档（true = 当时的 deny/ask 规则可能压根没生效，见 T37） */
+      degraded: z.boolean(),
+    })
+    .optional(),
+  args: auditArgSummarySchema,
+});
+export type AuditEntryView = z.infer<typeof auditEntrySchema>;
+
+export const auditPageSchema = z.object({
+  records: z.array(auditEntrySchema),
+  total: z.number(),
+  unparsed: z.number(),
+  dropped: z.number(),
+  /** 一句话的实话（上限、残缺末行、写失败）；没有异常时是空串 */
+  notice: z.string(),
+  file: z.string(),
+  workspaceRoot: z.string(),
+});
+export type AuditPageView = z.infer<typeof auditPageSchema>;
+
+export const auditExportResultSchema = z.union([
+  z.object({ ok: z.literal(true), lines: z.number(), file: z.string() }),
+  z.object({ ok: z.literal(false), cancelled: z.boolean(), error: z.string() }),
+]);
+export type AuditExportResult = z.infer<typeof auditExportResultSchema>;
+
+/* ------------------------------------------------------------------ *
  * 生命周期钩子（W5d）
  * ------------------------------------------------------------------ */
 

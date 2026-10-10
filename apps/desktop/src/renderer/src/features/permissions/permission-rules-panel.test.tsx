@@ -28,6 +28,8 @@ function view(over: Partial<PermissionRuleView> = {}): PermissionRuleView {
 
 const add = vi.fn();
 const list = vi.fn();
+const auditTail = vi.fn();
+const auditExport = vi.fn();
 
 function mount(rules: PermissionRuleView[]): void {
   list.mockResolvedValue(rules);
@@ -37,6 +39,10 @@ function mount(rules: PermissionRuleView[]): void {
 beforeEach(() => {
   add.mockReset();
   list.mockReset();
+  auditTail.mockReset();
+  auditExport.mockReset();
+  // 默认给一份空账：审计用例自己覆盖它（写在 mount 里会把用例设的值冲掉，第一次就踩了）
+  auditTail.mockResolvedValue(AUDIT_EMPTY);
   add.mockResolvedValue(view());
   vi.stubGlobal('jujia', {
     permissionRulesList: list,
@@ -45,6 +51,8 @@ beforeEach(() => {
     permissionRulesToggle: vi.fn().mockResolvedValue(view()),
     configGet: vi.fn().mockResolvedValue({ config: { permissionMode: 'default' } }),
     configSet: vi.fn().mockResolvedValue({ ok: true }),
+    auditTail: auditTail,
+    auditExport: auditExport,
   });
 });
 
@@ -111,5 +119,91 @@ describe('权限页 · 命令前缀', () => {
     fireEvent.click(screen.getByRole('button', { name: '新增规则' }));
     await waitFor(() => expect(add).toHaveBeenCalledTimes(1));
     expect(Object.keys(add.mock.calls[0]?.[0] ?? {})).not.toContain('argPrefix');
+  });
+});
+
+
+/**
+ * 执行审计卡片（M4 收尾 · 其二）。
+ *
+ * 这一页是审计**唯一**的出口，所以断言都指着"看得见"：
+ * 一条记不上的账和记错了的账一样危险，而一句没人看见的警告等于没有警告。
+ */
+const AUDIT_EMPTY = {
+  records: [],
+  total: 0,
+  unparsed: 0,
+  dropped: 0,
+  notice: '',
+  file: 'audit/permissions-2026-10-09.jsonl',
+  workspaceRoot: 'D:/work/demo',
+};
+
+function auditEntry(over: Record<string, unknown> = {}) {
+  return {
+    ts: '2026-10-09T10:00:00.000Z',
+    sessionId: 's-1',
+    subject: 'run_command',
+    kind: 'exec',
+    outcome: 'deny',
+    asked: false,
+    executed: false,
+    reason: '命中你的规则「run_command」（命令前缀：rm -rf）→ 拒绝',
+    args: { keys: ['command'], lengths: { command: 12 }, digests: { command: 'abc123def456' }, paths: [], redacted: [], command: 'rm -rf build' },
+    ...over,
+  };
+}
+
+function page(over: Record<string, unknown> = {}) {
+  return { ...AUDIT_EMPTY, records: [auditEntry()], ...over };
+}
+
+describe('权限页 · 执行审计', () => {
+  it('列出今天的判定：做什么、结论、理由都要在界面上', async () => {
+    auditTail.mockResolvedValue(page());
+    mount([]);
+    await screen.findByText('rm -rf build');
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('run_command');
+    expect(text).toContain('命中你的规则');
+  });
+
+  it('服务给出的 notice 必须显示（写满了、写坏了不许静默）', async () => {
+    auditTail.mockResolvedValue(page({ notice: '今天已到上限，另有 3 条未记（本次运行计数）' }));
+    mount([]);
+    await screen.findByText(/已到上限/);
+  });
+
+  it('规则表当时是降级读出来的，行上要说这句话（T37 的可见面）', async () => {
+    auditTail.mockResolvedValue(
+      page({ records: [auditEntry({ rules: { source: 'default', count: 0, degraded: true } })] }),
+    );
+    mount([]);
+    await screen.findByText(/规则表当时没读出来/);
+  });
+
+  it('导出：成功 / 取消 / 失败三种结果说三种话（取消不是失败）', async () => {
+    auditTail.mockResolvedValue(page());
+    mount([]);
+    await screen.findByText('run_command');
+
+    auditExport.mockResolvedValue({ ok: true, lines: 7, file: 'D:/desk/audit.jsonl' });
+    fireEvent.click(screen.getByRole('button', { name: /导出审计/ }));
+    await screen.findByText(/已写出 7 行/);
+
+    auditExport.mockResolvedValue({ ok: false, cancelled: true, error: '已取消，没有写出任何文件' });
+    fireEvent.click(screen.getByRole('button', { name: /导出审计/ }));
+    await screen.findByText(/已取消/);
+
+    auditExport.mockResolvedValue({ ok: false, cancelled: false, error: '导出目标已存在，没有覆盖它' });
+    fireEvent.click(screen.getByRole('button', { name: /导出审计/ }));
+    await screen.findByText(/没有覆盖它/);
+  });
+
+  it('覆盖范围要写清楚：git 与打开外部程序尚未接入（半本账不能看起来像全账）', async () => {
+    auditTail.mockResolvedValue(page());
+    mount([]);
+    await screen.findByText(/git/);
+    expect(document.body.textContent).toContain('尚未接入');
   });
 });

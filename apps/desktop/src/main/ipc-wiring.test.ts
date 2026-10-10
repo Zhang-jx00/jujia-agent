@@ -107,6 +107,30 @@ describe('拆分本身：装配范围不许失焦', () => {
   });
 });
 
+
+/**
+ * 取一次调用的**整个实参体**（按括号配对扫，不按"固定长度 + 遇到 `);` 就切"）。
+ *
+ * 为什么要换掉原来的写法：老写法是 `slice(from, from+1200).split(');')[0]` ——
+ * 一旦调用体里出现任何嵌套的 `);`（比如新加一个回调参数），它就在中间断掉，
+ * 后面的断言全部看不到真实内容，锁会**因为功能增长而红**（本轮加执行审计出口时正是这样）。
+ * 本项目已经记过这条："枚举现状的锁一律现扫、不写死清单"；窗口长度也是同一种写死的现状。
+ */
+function callBody(src: string, marker: string): string {
+  const from = src.indexOf(marker);
+  if (from < 0) return '';
+  let depth = 0;
+  for (let i = from + marker.length - 1; i < src.length; i += 1) {
+    const ch = src[i];
+    if (ch === '(') depth += 1;
+    else if (ch === ')') {
+      depth -= 1;
+      if (depth === 0) return src.slice(from, i + 1);
+    }
+  }
+  return src.slice(from);
+}
+
 describe('工具注册表接线（防止各处各建一个）', () => {
   it('全进程只有一个注册表创建点', () => {
     expect(context.split('createDefaultRegistry()').length - 1).toBe(1);
@@ -135,20 +159,20 @@ describe('工具注册表接线（防止各处各建一个）', () => {
     // 参数会随功能增加（例如 W5c 加了 mode/rules），但"传的是共享实例"这个不变量不能变
     const from = chat.indexOf('sendMessage(');
     expect(from).toBeGreaterThan(-1);
-    const body = chat.slice(from, from + 1200).split(');')[0] ?? '';
+    const body = callBody(chat, 'sendMessage(');
     expect(body).toContain('registry,');
     expect(body).not.toContain('createDefaultRegistry()');
   });
 
   it('对话链路带上权限模式与规则（否则规则表只对 TOOL_RUN 生效）', () => {
-    const body = chat.slice(chat.indexOf('sendMessage('), chat.indexOf('sendMessage(') + 1200).split(');')[0] ?? '';
+    const body = callBody(chat, 'sendMessage(');
     expect(body).toContain('mode: policy.mode');
     expect(body).toContain('rules: policy.rules');
     expect(body).toContain('alwaysAsk: policy.alwaysAsk');
   });
 
   it('工具执行链路也带上权限模式与规则（否则规则表只对对话生效）', () => {
-    const body = tools.slice(tools.indexOf('runTool('), tools.indexOf('runTool(') + 900).split(');')[0] ?? '';
+    const body = callBody(tools, 'runTool(');
     expect(body).toContain('mode: policy.mode');
     expect(body).toContain('rules: policy.rules');
     expect(body).toContain('alwaysAsk: policy.alwaysAsk');
@@ -162,7 +186,7 @@ describe('工具注册表接线（防止各处各建一个）', () => {
 
   it('技能服务被接进对话链路，且清单走同一条系统提示', () => {
     expect(context).toContain('createSkillsService(registry');
-    const body = chat.slice(chat.indexOf('sendMessage('), chat.indexOf('sendMessage(') + 1400).split(');')[0] ?? '';
+    const body = callBody(chat, 'sendMessage(');
     expect(body).toContain('skillCatalogText: skills.catalogText()');
   });
 
@@ -222,6 +246,21 @@ describe('R-12 之前的修复仍然有锁', () => {
     const callIdx = indexSource.indexOf('permissionBridge.cancelAll(');
     expect(closedIdx).toBeGreaterThanOrEqual(0);
     expect(callIdx).toBeGreaterThan(closedIdx);
+  });
+
+  /**
+   * T38：渲染进程**崩溃**也要收尾（`permission-bridge.ts` 头部契约写了两条，代码只接了一条）。
+   *
+   * 为什么单独一条锁而不是并进上面那条：这两件事的失败模式一样（挂起的请求空等满 120 秒），
+   * 但接线点是两个事件；只盯 `closed` 的话，`render-process-gone` 可以被删掉而门禁全绿。
+   * 而且从执行审计的角度看，少了这一接，崩溃会被记成"用户没答" —— **后果盖掉事实**。
+   */
+  it('渲染进程崩溃时同样收尾挂起的审批（不是只 console.error）', () => {
+    const goneIdx = indexSource.indexOf("'render-process-gone'");
+    expect(goneIdx).toBeGreaterThan(-1);
+    const block = indexSource.slice(goneIdx, goneIdx + 420);
+    expect(block).toContain('permissionBridge.cancelAll(');
+    expect(block).toContain('渲染进程');
   });
 });
 

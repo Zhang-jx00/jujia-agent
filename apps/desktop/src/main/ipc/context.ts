@@ -10,7 +10,13 @@ import {
 import { McpService } from '../mcp/mcp-service';
 import { createRealTransport } from '../mcp/real-transport';
 import { createFileHooksService, type HooksService } from '../hooks-store';
-import { createFilePermissionRulesStore, type PermissionRulesStore } from '../permission-rules-store';
+import {
+  createFilePermissionRulesStore,
+  type PermissionRulesHealth,
+  type PermissionRulesStore,
+} from '../permission-rules-store';
+import { createAuditService, type AuditService, type PolicyHealth } from '../audit-service';
+import { getWorkspaceInfo } from '../workspace';
 import { createPluginsService, type PluginsService } from '../plugins';
 import { createSkillsService, userSkillsDir, workspaceSkillsDir, type SkillsService } from '../skills';
 import { readConfigSnapshot } from '../config-store';
@@ -37,6 +43,12 @@ export interface IpcPolicy {
   mode: PermissionMode;
   rules: PermissionRule[];
   alwaysAsk: string[];
+  /**
+   * 规则表这次是从哪一档读出来的（审计每条都带上）。
+   * `list()` 与 `health()` 是两次读，理论上会被"正好卡在中间改文件"错开 ——
+   * 这是**记账 stamps**，不是判定输入，判定用的仍是上面那份 rules；可接受，写在这里备查。
+   */
+  rulesHealth: PermissionRulesHealth;
 }
 
 /**
@@ -58,6 +70,7 @@ export interface IpcContext {
   hooks: HooksService;
   hookRunner: HookRunner;
   permissionRules: PermissionRulesStore;
+  audit: AuditService;
   loadPolicy: () => Promise<IpcPolicy>;
   fetchImpl: typeof fetch;
 }
@@ -117,6 +130,22 @@ export function createIpcContext(deps: IpcDeps): IpcContext {
 
   const permissionRules = createFilePermissionRulesStore();
 
+  /**
+   * 执行审计（M4 收尾 · 其二）。
+   *
+   * 放在上下文里而不是各模块自建：判定出口必须**只有一个**（见 `audit-service.ts`），
+   * 多处建实例会各写各的账，还会把"落盘前剔密"这件关键事复制成两份实现。
+   *
+   * `lastHealth` / `lastWorkspaceRoot` 由 `loadPolicy()` 刷新 —— 它是每个带权限的动作
+   * 都会走的那条路，所以"记录时的健康度/工作区"与"判定时的"来自同一次读取，不会漂到别的时间点。
+   */
+  let lastHealth: PolicyHealth = { source: 'primary', count: 0, recovered: false };
+  let lastWorkspaceRoot = '';
+  const audit: AuditService = createAuditService({
+    policyHealth: () => lastHealth,
+    workspaceRoot: () => lastWorkspaceRoot,
+  });
+
   return {
     deps,
     handle: createTrustedHandle(),
@@ -128,12 +157,26 @@ export function createIpcContext(deps: IpcDeps): IpcContext {
     hooks,
     hookRunner,
     permissionRules,
+    audit,
     fetchImpl,
     loadPolicy: async (): Promise<IpcPolicy> => {
       const snapshot = await readConfigSnapshot();
+      const [rules, rulesHealth] = await Promise.all([
+        permissionRules.list(),
+        permissionRules.health(),
+      ]);
+      // 审计记账要的两样"当时的事实"就在这里落定：规则表健康度 + 工作区根
+      lastHealth = {
+        source: rulesHealth.source,
+        count: rules.filter((r) => r.enabled).length,
+        recovered: rulesHealth.recovered,
+      };
+      const info = await getWorkspaceInfo();
+      lastWorkspaceRoot = info.root ?? '';
       return {
         mode: snapshot.config.permissionMode,
-        rules: await permissionRules.list(),
+        rules,
+        rulesHealth,
         // 高危清单：引擎级兜底（命中即硬 ask）。来自配置，不经渲染层写入
         alwaysAsk: snapshot.config.alwaysAskTools,
       };

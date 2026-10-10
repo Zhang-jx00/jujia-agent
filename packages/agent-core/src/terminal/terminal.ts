@@ -71,6 +71,17 @@ export function pickShell(
  */
 const SENSITIVE_ENV_RE = /(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)/i;
 
+/**
+ * 这个名字是否属于"值不能离开本机、也不能抄到别处磁盘"的那一类。
+ *
+ * 判据的**唯一来源**是上面那张表。导出给审计摘要用（M4 收尾 · 其二）：
+ * 终端环境剔除的键名，与审计文件里不许落盘的参数名，本来就是同一件事 ——
+ * 两处各写一张表，迟早一边多一个词、另一边漏一个词（本项目反复踩的那族病）。
+ */
+export function isSensitiveEnvName(name: string): boolean {
+  return SENSITIVE_ENV_RE.test(name);
+}
+
 /** 代理类变量：**保留**（否则终端里的网络会坏），但要脱掉 URL 里内嵌的用户名口令 */
 const PROXY_ENV_RE = /PROXY/i;
 
@@ -82,7 +93,7 @@ export function stripUrlCredentials(value: string): string {
 /** 当前会被剔除的敏感变量名（按名排序，便于测试与界面展示） */
 export function sensitiveEnvKeys(base: Record<string, string | undefined>): string[] {
   return Object.keys(base)
-    .filter((k) => SENSITIVE_ENV_RE.test(k))
+    .filter(isSensitiveEnvName)
     .sort();
 }
 
@@ -104,7 +115,7 @@ export function buildTerminalEnv(
   for (const [k, v] of Object.entries(base)) {
     if (v === undefined) continue;
     if (k === 'ELECTRON_RUN_AS_NODE') continue;
-    if (SENSITIVE_ENV_RE.test(k)) continue;
+    if (isSensitiveEnvName(k)) continue;
     env[k] = PROXY_ENV_RE.test(k) ? stripUrlCredentials(v) : v;
   }
   env['TERM'] = 'xterm-256color';

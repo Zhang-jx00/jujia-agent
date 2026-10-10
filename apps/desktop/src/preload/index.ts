@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   IPC,
   appInfoSchema,
+  auditExportResultSchema,
+  auditPageSchema,
   chatSendResultSchema,
   compactApplySchema,
   compactApplyResultSchema,
@@ -38,6 +40,8 @@ import {
   workspaceInfoSchema,
   type AppConfig,
   type AppInfo,
+  type AuditExportResult,
+  type AuditPageView,
   type ChatHistoryPage,
   type ChatHistoryQuery,
   type ChatSessionMeta,
@@ -403,6 +407,14 @@ const api = {
   /** 插件加载结果（只读；含贡献物与诊断） */
   async pluginsGet(): Promise<PluginsState> {
     return pluginsStateSchema.parse(await ipcRenderer.invoke(IPC.PLUGINS_GET));
+  },
+
+  async auditTail(limit: number): Promise<AuditPageView> {
+    return auditPageSchema.parse(await ipcRenderer.invoke(IPC.AUDIT_TAIL, limit));
+  },
+
+  async auditExport(): Promise<AuditExportResult> {
+    return auditExportResultSchema.parse(await ipcRenderer.invoke(IPC.AUDIT_EXPORT));
   },
 
   async permissionRulesList(): Promise<PermissionRuleView[]> {

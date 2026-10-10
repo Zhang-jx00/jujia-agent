@@ -14,8 +14,19 @@ import { getDataRoot } from './paths';
 
 export const PERMISSION_RULES_VERSION = 1;
 
+/** 规则文件这次是从哪一档读出来的（T37：读坏了不许静默当成"没有规则"） */
+export interface PermissionRulesHealth {
+  source: 'primary' | 'backup' | 'default';
+  recovered: boolean;
+}
+
 export interface PermissionRulesStore {
   list(): Promise<PermissionRule[]>;
+  /**
+   * 规则表的健康度。**先只给执行审计用**（每条账带上"当时是从哪一档读的"）；
+   * 把它显示到权限页上属 T37 的剩余部分（那一半要改契约与界面，排在 R10）。
+   */
+  health(): Promise<PermissionRulesHealth>;
   /** 新增；非法输入抛错。返回落盘后的完整记录 */
   add(input: {
     pattern: string;
@@ -36,6 +47,7 @@ export function createMemoryPermissionRulesStore(
     async (next) => {
       initial = next;
     },
+    async () => ({ source: 'primary' as const, recovered: false }),
   );
 }
 
@@ -58,16 +70,25 @@ export function createFilePermissionRulesStore(): PermissionRulesStore {
   return createStore(
     async () => (await store.read()).data.rules,
     async (rules) => store.write({ rules }),
+    async () => {
+      const snapshot = await store.read();
+      return { source: snapshot.source, recovered: snapshot.recovered };
+    },
   );
 }
 
 function createStore(
   readAll: () => Promise<PermissionRule[]>,
   writeAll: (rules: PermissionRule[]) => Promise<void>,
+  readHealth: () => Promise<PermissionRulesHealth>,
 ): PermissionRulesStore {
   return {
     async list() {
       return readAll();
+    },
+
+    async health() {
+      return readHealth();
     },
 
     async add(input) {

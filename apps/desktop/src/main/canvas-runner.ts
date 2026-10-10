@@ -16,6 +16,7 @@ import {
   type PermissionResolver,
   type ToolRegistry,
 } from '@jujia/agent-core';
+import type { GateAuditInfo } from '@jujia/agent-core';
 import type { IpcPolicy } from './ipc/context';
 
 /**
@@ -48,6 +49,8 @@ export interface CanvasRunnerDeps {
   emit: (event: CanvasEventPayload) => void;
   /** 测试用：覆盖 fetch */
   fetcher?: typeof fetch;
+  /** 判定事实的出口（执行审计）——画布节点跑工具时与对话同一口径 */
+  onDecision?: (info: GateAuditInfo) => void;
 }
 
 export interface CanvasRunner {
@@ -121,6 +124,7 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
             hooks: deps.hooks,
             // 与手动执行同一口径：**不带**会话级"总是允许"白名单（图执行不是某个会话）
             sessionId: 'canvas',
+            ...(deps.onDecision ? { onDecision: deps.onDecision } : {}),
           });
           if (res.decision === 'deny') {
             return { ok: false, output: '', error: `用户拒绝了这一步（${toolName}）`, denied: true };

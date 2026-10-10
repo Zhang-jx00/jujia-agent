@@ -60,7 +60,12 @@ function makeGraph(): CanvasGraph {
 function makeDeps(baseUrl: string, events: CanvasEventPayload[]): CanvasRunnerDeps {
   return {
     getWorkspaceRoot: async () => null,
-    loadPolicy: async () => ({ mode: 'default', rules: [], alwaysAsk: [] }),
+    loadPolicy: async () => ({
+      mode: 'default',
+      rules: [],
+      alwaysAsk: [],
+      rulesHealth: { source: 'primary', count: 0, recovered: false },
+    }),
     // 提示词节点不碰权限 / 注册表 / 钩子（那三样只挂在工具节点上）——
     // 不假返回：真被碰到就抛错，把"不该被调用"变成可执行的断言
     // （原先是 `async () => 'allow'`：字面量根本不在 PermissionDecision 里，typecheck 红了两轮才被复核抓出）

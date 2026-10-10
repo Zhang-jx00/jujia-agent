@@ -139,6 +139,7 @@
 | 铺设1 | `packages/agent-core/src/tools/types.ts` | 工具类型契约 |
 | 铺设1（次：加固1） | `packages/agent-core/src/tools/builtin/file-tools.ts` | 读 / 写文件工具（走 `path-guard`） |
 | 铺设8 | `packages/agent-core/src/tools/builtin/exec-tool.ts` | 内置 exec `run_command`（每次硬 ask + 工作目录守卫 + 环境脱敏） |
+| 铺设8 | `packages/agent-core/src/audit/` · `apps/desktop/src/main/{audit-log,audit-service}.ts` · `apps/desktop/src/main/ipc/audit.ts` | 执行审计（M4 收尾其二）：判定事实出口、**落盘前剔密**、按天 JSONL 与导出 |
 | 铺设10 | `packages/agent-core/src/tools/builtin/note-tool.ts` | 记忆写入 `append_note` 工具本体（与 `main/pending-notes.ts` 同批） |
 
 ## 三、记录规则（今后一律遵守）

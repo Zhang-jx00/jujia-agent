@@ -1235,10 +1235,10 @@
     },
     {
       "id": "M155",
-      "desc": "执行器把工具名当成参数名送进策略层：取 args「run_command」永远取不到，前缀规则全线失效",
+      "desc": "执行器把工具名当成参数名送进策略层：取 args「run_command」永远取不到，前缀规则全线失效（锚点带上上面那行注释才唯一 —— 审计出口里有一模一样的表达式，R8.5 加完后这条曾命中 2 次）",
       "file": "packages/agent-core/src/tools/executor.ts",
-      "find": "    ...(tool.commandArg !== undefined ? { commandArg: tool.commandArg } : {}),",
-      "replace": "    ...(tool.commandArg !== undefined ? { commandArg: tool.name } : {}),",
+      "find": "    // 工具声明过\"哪条参数是命令行\"才送过去：命令前缀规则靠它取值，没声明就不参与\n    ...(tool.commandArg !== undefined ? { commandArg: tool.commandArg } : {}),",
+      "replace": "    // 工具声明过\"哪条参数是命令行\"才送过去：命令前缀规则靠它取值，没声明就不参与\n    ...(tool.commandArg !== undefined ? { commandArg: tool.name } : {}),",
       "test": "packages/agent-core/src/tools/executor.test.ts"
     },
     {
@@ -1280,6 +1280,102 @@
       "find": "        argPrefix: input.argPrefix,",
       "replace": "        argPrefix: undefined,",
       "test": "apps/desktop/src/main/permission-rules-store.test.ts"
+    },
+    {
+      "id": "M161",
+      "desc": "剔密不再看键名（键名像密钥的参数照样写长度与指纹）：位数本身就是要保护的信息",
+      "file": "packages/agent-core/src/audit/redact.ts",
+      "find": "    if (isSensitiveEnvName(key)) {",
+      "replace": "    if (isSensitiveEnvName('never-matches')) {",
+      "test": "packages/agent-core/src/audit/redact.test.ts"
+    },
+    {
+      "id": "M162",
+      "desc": "路径不再按工作区化简，绝对路径原样进账：本机用户名与目录结构被抄到第二处磁盘",
+      "file": "packages/agent-core/src/audit/redact.ts",
+      "find": "      summary.paths.push(form.shown);",
+      "replace": "      summary.paths.push(toForwardSlashes(value));",
+      "test": "packages/agent-core/src/audit/redact.test.ts"
+    },
+    {
+      "id": "M163",
+      "desc": "命令行里 KEY=值 形态的令牌不再遮（审计文件变成密钥的副本）",
+      "file": "packages/agent-core/src/audit/redact.ts",
+      "find": "  out = out.replace(KV_SECRET_RE, (_m, key: string, gap: string, _value: string) => {\n    hits.push(key);",
+      "replace": "  out = out.replace(KV_SECRET_RE, (_m, key: string, gap: string, _value: string) => {\n    return _m;\n    hits.push(key);",
+      "test": "packages/agent-core/src/audit/redact.test.ts"
+    },
+    {
+      "id": "M164",
+      "desc": "摘掉「拒了却不许记成问过」的抛错：把没做的事记成有人做过决定",
+      "file": "packages/agent-core/src/audit/record.ts",
+      "find": "  if (input.asked === true && input.outcome !== 'ask') {",
+      "replace": "  if (input.asked === true && input.outcome === 'never-ask') {",
+      "test": "packages/agent-core/src/audit/record.test.ts"
+    },
+    {
+      "id": "M165",
+      "desc": "executed 缺失时不再抛错（等于默认「没写就是做了」）：审计里\"没做\"会消失",
+      "file": "packages/agent-core/src/audit/record.ts",
+      "find": "  if (input.executed === undefined) {",
+      "replace": "  if (input.executed === 'never') {",
+      "test": "packages/agent-core/src/audit/record.test.ts"
+    },
+    {
+      "id": "M166",
+      "desc": "到上限后停止追加但不再计数：账本静默缺页，看起来\"今天没发生\"",
+      "file": "apps/desktop/src/main/audit-log.ts",
+      "find": "        dropped += 1;",
+      "replace": "        dropped += 0;",
+      "test": "apps/desktop/src/main/audit-log.test.ts"
+    },
+    {
+      "id": "M167",
+      "desc": "导出不再拒绝已存在目标：用户选到一半的文件被账本覆盖掉",
+      "file": "apps/desktop/src/main/audit-log.ts",
+      "find": "      if (await exists(destPath)) {",
+      "replace": "      if (destPath === '' && (await exists(destPath))) {",
+      "test": "apps/desktop/src/main/audit-log.test.ts"
+    },
+    {
+      "id": "M168",
+      "desc": "tail 给的是最旧的 N 条而不是最近 N 条：界面显示\"最近发生了什么\"却摆着开头",
+      "file": "apps/desktop/src/main/audit-log.ts",
+      "find": "      const capped = Number.isFinite(limit) && limit > 0 ? records.slice(-Math.floor(limit)) : [];",
+      "replace": "      const capped = Number.isFinite(limit) && limit > 0 ? records.slice(0, Math.floor(limit)) : [];",
+      "test": "apps/desktop/src/main/audit-log.test.ts"
+    },
+    {
+      "id": "M169",
+      "desc": "判定事实的出口整体失效（onDecision 永不触发）：账本从此不再有一条记录",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "    if (opts.onDecision !== undefined && gate !== undefined) {",
+      "replace": "    if (opts.onDecision === undefined && gate !== undefined) {",
+      "test": "packages/agent-core/src/tools/audit-emit.test.ts"
+    },
+    {
+      "id": "M170",
+      "desc": "「做没做成」记成了「问过没问过」：只读放行会被记成未执行，拒绝却可能记成已执行",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "    sink.executed = true;",
+      "replace": "    sink.executed = sink.asked;",
+      "test": "packages/agent-core/src/tools/audit-emit.test.ts"
+    },
+    {
+      "id": "M171",
+      "desc": "服务不再做落盘前摘要（参数原文直接进账）：文件正文与令牌被复制进审计文件",
+      "file": "apps/desktop/src/main/audit-service.ts",
+      "find": "          args: summarize(info.args, commandKey),",
+      "replace": "          args: { keys: [], lengths: {}, digests: {}, paths: [], redacted: [JSON.stringify(info.args) ?? ''], } as ArgSummary,",
+      "test": "apps/desktop/src/main/audit-service.test.ts"
+    },
+    {
+      "id": "M172",
+      "desc": "渲染进程崩溃不再收尾挂起审批（T38 回退）：崩溃会被记成\"用户没答\"",
+      "file": "apps/desktop/src/main/index.ts",
+      "find": "    permissionBridge.cancelAll(`渲染进程已退出（${details.reason}）`);",
+      "replace": "    void details.reason;",
+      "test": "apps/desktop/src/main/audit-wiring.test.ts"
     }
   ]
 }

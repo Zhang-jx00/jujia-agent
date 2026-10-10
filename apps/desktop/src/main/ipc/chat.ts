@@ -52,7 +52,7 @@ import type { IpcContext } from './context';
  * （W10g 之前就是死代码状态）。所以这些参数**逐个显式列出来**，不用展开对象蒙混。
  */
 export function registerChatIpc(ctx: IpcContext): void {
-  const { handle, deps, fetchImpl, mcpDebug, plugins, skills, registry, hookRunner, loadPolicy } = ctx;
+  const { handle, deps, fetchImpl, mcpDebug, plugins, skills, registry, hookRunner, loadPolicy, audit } = ctx;
 
   /* ------------------------------ 连接管理 ------------------------------ */
 
@@ -142,6 +142,10 @@ export function registerChatIpc(ctx: IpcContext): void {
       {
         fetcher: fetchImpl,
         permission: deps.permission.resolve,
+        // 执行审计：判定事实交回上下文里那**唯一**的一个服务（不在这里再建一个）
+        onDecision: (info) => {
+          void audit.recordTool(info);
+        },
         workspaceRoot: ws.valid ? ws.root : null,
         // 同一个注册表：内置工具 + 已批准的 MCP 工具都在这里，模型才看得到它们
         registry,

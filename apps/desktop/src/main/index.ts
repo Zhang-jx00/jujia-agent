@@ -88,6 +88,15 @@ function createMainWindow(): BrowserWindow {
 
   win.webContents.on('render-process-gone', (_e, details) => {
     console.error('[main] 渲染进程异常退出:', details.reason);
+    /**
+     * T38：崩溃也要收尾挂起的审批。
+     *
+     * `permission-bridge.ts` 的头部契约一开始就写了两条（窗口销毁 / 渲染进程崩溃），
+     * 代码只接了第一条 —— 于是弹窗随渲染进程一起消失后，工具调用还挂在那里等满 120 秒。
+     * 理由里带上 `details.reason`：审计与日志要分得开"用户没答"和"没人在答"，
+     * 把崩溃记成超时是**让后果盖掉事实**。
+     */
+    permissionBridge.cancelAll(`渲染进程已退出（${details.reason}）`);
   });
 
   if (devServerUrl) {

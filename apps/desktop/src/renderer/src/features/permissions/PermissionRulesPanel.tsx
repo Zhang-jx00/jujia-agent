@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import type { PermissionMode, PermissionRuleView } from '@jujia/shared-ipc';
+import type { AuditPageView, PermissionMode, PermissionRuleView } from '@jujia/shared-ipc';
 
 /**
  * 权限设置页（W5c / M15）。
@@ -42,6 +42,8 @@ export function PermissionRulesPanel(): ReactElement {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [audit, setAudit] = useState<AuditPageView | null>(null);
+  const [auditMsg, setAuditMsg] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null);
 
   const reload = async (): Promise<void> => {
     try {
@@ -51,6 +53,13 @@ export function PermissionRulesPanel(): ReactElement {
       ]);
       setRules(list);
       setMode(config.config.permissionMode);
+      // 审计读失败**不连带拖垮这一页**：规则表还能改，账要单独说一句为什么看不到
+      try {
+        setAudit(await window.jujia.auditTail(20));
+      } catch (err) {
+        setAudit(null);
+        setAuditMsg({ kind: 'bad', text: `审计读不出来：${err instanceof Error ? err.message : String(err)}` });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -106,6 +115,17 @@ export function PermissionRulesPanel(): ReactElement {
       await window.jujia.permissionRulesRemove(rule.id);
       setNotice(`已删除规则：${rule.pattern}`);
       await reload();
+    });
+
+  const exportAudit = (): Promise<void> =>
+    guard(async () => {
+      const res = await window.jujia.auditExport();
+      // 三种结果三种话：取消不是失败（用户什么都没做错），失败必须带上原因
+      if (res.ok) {
+        setAuditMsg({ kind: 'ok', text: `已写出 ${String(res.lines)} 行到 ${res.file}` });
+        return;
+      }
+      setAuditMsg({ kind: res.cancelled ? 'ok' : 'bad', text: res.error });
     });
 
   const isDenyAll = action === 'deny' && (pattern.trim() === '*' || pattern.trim() === '**');
@@ -269,6 +289,67 @@ export function PermissionRulesPanel(): ReactElement {
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      <section className="p0-card">
+        <h2>执行审计（今天）</h2>
+        <p className="p0-subtitle">
+          每次权限判定都在本机留一行：谁被判定、结论、理由（含命中的规则与命令前缀）、有没有人答、
+          这件事最后<strong>做没做成</strong>。参数只记键名、长度与指纹，命令记的是<strong>剔掉密钥之后</strong>的文本 ——
+          文件正文与密钥值不进这本账，导出时也没有第二次加工。
+        </p>
+        <p className="p0-warn">
+          覆盖范围：工具调用（内置 / MCP / 技能 / 画布）。git 提交与推送、打开外部程序、改钩子配置
+          <strong>尚未接入</strong>（R8.6）—— 现在这本账不是全账。
+        </p>
+        {auditMsg && (
+          <p className={auditMsg.kind === 'ok' ? 'p0-ok' : 'p0-err'} role={auditMsg.kind === 'ok' ? 'status' : 'alert'}>
+            {auditMsg.text}
+          </p>
+        )}
+        {audit === null ? (
+          <p className="p0-subtitle">这次没能读到审计（上面的红字是原因）。</p>
+        ) : (
+          <>
+            {audit.notice !== '' && (
+              <p className="p0-warn" role="alert">
+                {audit.notice}
+              </p>
+            )}
+            {audit.records.length === 0 ? (
+              <p className="p0-subtitle">今天还没有判定记录。</p>
+            ) : (
+              <ul className="jj-audit-list">
+                {audit.records.map((r, i) => (
+                  <li key={`${String(r.ts)}-${String(r.subject)}-${String(i)}`} className="jj-audit-row">
+                    <span>
+                      <code>{r.subject}</code>
+                      <span className={`jj-perm-action jj-perm-action-${r.outcome === 'allow' ? 'allow' : r.outcome === 'deny' ? 'deny' : 'ask'}`}>
+                        [{r.outcome === 'allow' ? '放行' : r.outcome === 'deny' ? '拒绝' : '询问'}
+                        {r.executed ? '·已做' : '·未做'}]
+                      </span>
+                      {'answer' in r && r.answer !== undefined && <span className="p0-subtitle"> 答复 {r.answer}</span>}
+                      <span className="p0-subtitle"> {r.reason}</span>
+                      {r.args.command !== undefined && <code> {r.args.command}</code>}
+                      {r.rules !== undefined && r.rules.degraded && (
+                        <span className="p0-warn"> ⚠ 这一条判定时规则表当时没读出来（按空表跑的）</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="p0-subtitle">
+              今天共 {String(audit.total)} 条，这里显示最近 {String(audit.records.length)} 条；账本在{' '}
+              <code>{audit.file}</code>（本机）。
+            </p>
+            <div className="w2-actions">
+              <button type="button" className="w2-btn" disabled={busy} onClick={() => void exportAudit()}>
+                导出审计到本机文件
+              </button>
+            </div>
+          </>
         )}
       </section>
     </div>

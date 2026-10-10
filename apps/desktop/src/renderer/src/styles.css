@@ -1102,6 +1102,28 @@ html[data-jj-bg-kind='glass'] .app-shell {
   gap: 8px;
 }
 
+>> 执行审计（M4 收尾 · 其二）用**自己的类名**：它和规则表都用过 jj-perm-list / jj-perm-rule，
+> 结果 e2e 数"规则行"的断言把审计行也数了进去（同一次命令既在规则里被拒、也在审计里留下一行，
+> 两个列表共用类名 = 一条断言问不出它真正想问的东西）。分开命名是为了让断言不含歧义。
+.jj-audit-list {
+  margin: 8px 0 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.jj-audit-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border, #2a2f36);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .jj-perm-rule {
   display: flex;
   align-items: center;

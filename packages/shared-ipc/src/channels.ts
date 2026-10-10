@@ -117,6 +117,9 @@ export const IPC = {
   PERMISSION_RULES_ADD: 'permission:rules-add',
   PERMISSION_RULES_REMOVE: 'permission:rules-remove',
   PERMISSION_RULES_TOGGLE: 'permission:rules-toggle',
+  /** 执行审计（M4 收尾 · 其二）：读今天的账 / 导出到本机文件 */
+  AUDIT_TAIL: 'audit:tail',
+  AUDIT_EXPORT: 'audit:export',
 
   /* ---------------------------- 生命周期钩子（W5d） ---------------------------- */
 

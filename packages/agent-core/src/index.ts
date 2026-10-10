@@ -32,3 +32,5 @@ export * from './mcp/consent';
 export * from './mcp/tool-bridge';
 export * from './context/compaction';
 export * from './context/injection-notice';
+export * from './audit/redact';
+export * from './audit/record';

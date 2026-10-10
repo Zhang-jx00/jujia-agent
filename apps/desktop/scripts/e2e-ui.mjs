@@ -2676,6 +2676,7 @@ try {
    * "已新增规则：…"那句提示里也带前缀文本，用 innerText 判会让"列表根本没渲染前缀"
    * 这个真缺陷蒙过去 —— 而"看不见"正是用户以为规则没生效的那条路。
    */
+  // 只数规则表那些行：审计行也记录同一条命令（这是它该有的行为），共用类名会让这条断言问不出想问的东西
   const prefixRows = () => win3.locator('.jj-perm-list .jj-perm-rule', { hasText: 'jj-e2e-rm' }).count();
   let rowsAfterAdd = 0;
   for (let i = 0; i < 40 && rowsAfterAdd === 0; i += 1) {
@@ -2718,6 +2719,51 @@ try {
   if (rowsAfterDelete !== 0) fail('删了规则，列表里却还挂着那条命令前缀', await body3());
   ok('命令前缀规则：列表里看得见前缀、命中时不弹窗就拒、没命中的照常问人、删掉之后不留影');
 
+  /* ---------------- M4 收尾 · 其二：执行审计必须在界面上看得见、在磁盘上不含正文 ----------------
+   *
+   * 这一条是**唯一能证明"剔密发生在落盘之前"的证据**：单测锁的是纯函数，
+   * 真应用里"写进去的到底是哪一份字节"只有从磁盘上读回来才算。
+   * 两段断言方向相反：判定要在界面上看得见（记不上等于没防护），
+   * 文件正文必须**不在**账里（进了账就是把用户刚写的内容复制第二遍）。
+   */
+  step('M4 收尾：执行审计看得见判定、看不见正文（剔密真的在落盘之前）');
+  const auditSentinel = `E2E-AUDIT-SECRET-${String(Date.now()).slice(-6)}`;
+  const auditFile = `audit-probe-${String(Date.now()).slice(-6)}.md`;
+  const writeProbe = win3.evaluate(
+    async (args) => await window.jujia.toolRun('write_file', { path: args.file, content: args.body }),
+    { file: auditFile, body: `正文里夹着哨兵 ${auditSentinel}，它不该出现在审计里` },
+  );
+  if ((await waitText3('需要你确认：write_file', 12_000)) !== true) {
+    fail('写入没有弹审批（这一轮连权限门都没过，审计自然也无从记起）', await body3());
+  }
+  await win3.locator('button', { hasText: '允许一次' }).first().click();
+  const writeRes = await writeProbe;
+  if (writeRes.ok !== true) fail(`写入没成功，审计断言随之失真：${JSON.stringify(writeRes).slice(0, 300)}`);
+
+  await win3.locator('nav.app-tabs button', { hasText: '权限' }).first().click();
+  if ((await waitText3('执行审计（今天）', 8_000)) !== true) {
+    fail('权限页没有执行审计这一卡', await body3());
+  }
+  if ((await waitText3('write_file', 8_000)) !== true) {
+    fail('审计卡里没有刚才那次判定（做过的事记不上 = 这本账不可信）', await body3());
+  }
+  const auditBody = await body3();
+  if (!auditBody.includes('已做')) fail('审计行没写"做没做成"（deny 与"做了但失败"就分不开）', auditBody.slice(0, 900));
+  if (auditBody.includes(auditSentinel)) fail('界面上的审计把文件正文带出来了（不该只留长度与指纹）');
+
+  const auditDir = join(dataDir, 'audit');
+  const auditFiles = existsSync(auditDir) ? readdirSync(auditDir).filter((f) => f.endsWith('.jsonl')) : [];
+  if (auditFiles.length === 0) fail(`审计文件没落盘（目录 ${auditDir} 里空的）`);
+  const ledgerText = auditFiles.map((f) => readFileSync(join(auditDir, f), 'utf8')).join('\n');
+  if (!ledgerText.includes('"subject":"write_file"')) {
+    fail('账本里没有 write_file 那一条判定', ledgerText.slice(0, 500));
+  }
+  if (ledgerText.includes(auditSentinel)) {
+    fail('账本里有文件正文 —— 剔密没在落盘之前做完（这是本轮最重的一条）', ledgerText.slice(0, 500));
+  }
+  if (!ledgerText.includes('digests')) fail('账本没留指纹，事后无法核对"是不是同一份内容"', ledgerText.slice(0, 400));
+  ok(`审计：界面上看得见判定与"已做"，磁盘账本里有指纹、有长度，就是没有正文（哨兵未出现）`);
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -2737,5 +2783,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 干净退出');
 process.exit(0);

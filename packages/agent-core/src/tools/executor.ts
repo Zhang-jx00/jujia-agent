@@ -2,6 +2,7 @@ import { ToolError, type StoredTool, type ToolContext, type ToolKind, type ToolO
 import { decideGate, type GateDecision, type PermissionMode } from '../permissions/policy';
 import { noopHookRunner, type HookRunner } from '../hooks/types';
 import type { PermissionRule } from '../permissions/rules';
+import type { AuditAnswer, GateAuditInfo } from '../audit/record';
 
 /**
  * 工具执行器：**所有工具执行的唯一入口**，权限门在这里，不在工具内部。
@@ -83,6 +84,27 @@ export interface RunToolOptions {
   hooks?: HookRunner;
   /** 会话 id：钩子需要在输入里知道自己在哪个会话；手动执行工具时没有会话 */
   sessionId?: string;
+  /**
+   * 判定事实的出口（M4 收尾 · 其二：执行审计）。
+   *
+   * 为什么由执行器交出来、而不是让调用方再问一遍策略层：判定只在 `decideGate` 发生过一次，
+   * 第二次推导必然长出"两处各说各话"的分叉面。这里把**那一次**原样递出去。
+   * 出口只有一个（`runTool` 外层的 finally），所以**没有哪条分支会忘了记** ——
+   * 这正是本项目"要么接满、要么别装作接了"要求的样子。
+   */
+  onDecision?: (info: GateAuditInfo) => void;
+}
+
+/** 内部收集器：`runToolCore` 沿途填，`runTool` 的 finally 一次性交出去 */
+interface AuditSink {
+  gate?: GateDecision;
+  asked: boolean;
+  answer?: AuditAnswer;
+  /** 钩子改写后的参数（审计要记**真正执行**的那一份，不是模型原本想的那一份） */
+  finalArgs?: unknown;
+  executed: boolean;
+  /** 被钩子拦下时的理由（覆盖 gate 的结论 —— 判定确实是 ask，但做事的是钩子说"不"） */
+  hookDeny?: string;
 }
 
 export interface RunToolResult {
@@ -97,12 +119,56 @@ export interface RunToolResult {
 let counter = 0;
 const defaultNewId = (): string => `perm-${Date.now()}-${(counter += 1)}`;
 
+/**
+ * 执行一次工具调用，并把**判定事实**交给 `opts.onDecision`。
+ *
+ * 为什么要包一层：`runToolCore` 有七八条提前返回的分支（钩子拒、参数不合法、
+ * 用户拒、超时、执行失败……）。把记账写在每条 return 之前 = 迟早漏一条；
+ * 写在**这一层的 finally** 里 = 结构上不可能漏，分支新增也自动被覆盖。
+ * `finally` 而不是 `try` 尾部：提前返回与抛异常都要走同一道出口。
+ */
 export async function runTool(
   tool: StoredTool,
   rawArgsInput: unknown,
   ctx: ToolContext,
   resolver: PermissionResolver,
   opts: RunToolOptions = {},
+): Promise<RunToolResult> {
+  const started = Date.now();
+  const sink: AuditSink = { asked: false, executed: false };
+  try {
+    return await runToolCore(tool, rawArgsInput, ctx, resolver, opts, sink);
+  } finally {
+    const gate = sink.gate;
+    // 参数校验就没过的调用**不进审计**：那时还没有任何权限判定，记进去等于凭空造一条判定。
+    // 注意这里**不能在 finally 里 return** —— 那会把 try 的正常结果吞成 undefined（实测过的坑）。
+    if (opts.onDecision !== undefined && gate !== undefined) {
+      const hookDeny = sink.hookDeny;
+      opts.onDecision({
+        toolName: tool.name,
+        kind: tool.kind,
+        outcome: hookDeny !== undefined ? 'deny' : gate.action,
+        asked: sink.asked,
+        ...(sink.answer === undefined ? {} : { answer: sink.answer }),
+        reason: hookDeny ?? gate.reason,
+        ...(gate.action === 'ask' ? { bypassable: gate.bypassable } : {}),
+        durationMs: Date.now() - started,
+        args: sink.finalArgs ?? rawArgsInput,
+        sessionId: opts.sessionId ?? 'manual',
+        executed: sink.executed,
+        ...(tool.commandArg !== undefined ? { commandArg: tool.commandArg } : {}),
+      });
+    }
+  }
+}
+
+async function runToolCore(
+  tool: StoredTool,
+  rawArgsInput: unknown,
+  ctx: ToolContext,
+  resolver: PermissionResolver,
+  opts: RunToolOptions,
+  sink: AuditSink,
 ): Promise<RunToolResult> {
   let rawArgs = rawArgsInput;
   const started = Date.now();
@@ -136,6 +202,7 @@ export async function runTool(
     ...(opts.rules ? { rules: opts.rules } : {}),
     ...(opts.alwaysAsk ? { alwaysAsk: opts.alwaysAsk } : {}),
   });
+  sink.gate = gate;
 
   if (gate.action === 'deny') {
     return {
@@ -176,6 +243,7 @@ export async function runTool(
     matchTarget: tool.name,
   });
   if (pre.blocked) {
+    sink.hookDeny = `钩子（PreToolUse）拒绝：${pre.reason ?? '（钩子未给出理由）'}`;
     return {
       outcome: {
         ok: false,
@@ -190,7 +258,9 @@ export async function runTool(
     try {
       args = tool.parse(pre.updatedInput);
       rawArgs = pre.updatedInput;
+      sink.finalArgs = rawArgs;
     } catch (err) {
+      sink.hookDeny = '钩子改写后的参数不合法，已拒绝执行';
       return {
         outcome: {
           ok: false,
@@ -217,6 +287,9 @@ export async function runTool(
       matchTarget: tool.name,
     });
     if (permHook.blocked || permHook.permissionDecision === 'deny') {
+      sink.hookDeny = `审批钩子拒绝：${
+        permHook.reason ?? permHook.permissionReason ?? '（钩子未给出理由）'
+      }`;
       return {
         outcome: {
           ok: false,
@@ -231,11 +304,13 @@ export async function runTool(
     }
     if (permHook.permissionDecision === 'allow') {
       decision = 'allow_once';
+      sink.answer = 'allow_once';
     }
   }
 
   if (gate.action === 'ask' && !alwaysAllowed && decision === undefined) {
     asked = true;
+    sink.asked = true;
     const paths = collectPaths(rawArgs);
     const answer = normalizeAnswer(
       await resolver({
@@ -249,11 +324,13 @@ export async function runTool(
       }),
     );
     decision = answer.decision;
+    sink.answer = answer.decision;
 
     // edit：用用户改过的参数**重新校验**后继续执行（校验失败则如实报错，不执行）
     if (decision === 'edit') {
       try {
         args = tool.parse(answer.updatedArgs);
+        sink.finalArgs = answer.updatedArgs;
       } catch (err) {
         return {
           outcome: {
@@ -299,6 +376,7 @@ export async function runTool(
 
   // 5) 执行；随后按成功/失败触发 PostToolUse / PostToolUseFailure
   try {
+    sink.executed = true;
     const outcome = await tool.run(args as never, ctx);
     const evidence = { ...outcome.evidence, durationMs: Date.now() - started };
     const appended = await runPostHook(

@@ -47,6 +47,9 @@ export function registerCanvasIpc(ctx: IpcContext): void {
         registry,
         resolveConnection: (id) => resolveConnection(id),
         hooks: hookRunner,
+        onDecision: (info) => {
+          void ctx.audit.recordTool(info);
+        },
         emit: (event) => {
           // 出口只在这一处：**先过契约**（缺 graphId/nodeId 的事件不许溜到界面）
           const parsed = canvasEventSchema.safeParse(event);

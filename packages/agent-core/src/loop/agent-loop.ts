@@ -4,6 +4,7 @@ import type { PermissionRule } from '../permissions/rules';
 import { noopHookRunner, type HookRunner } from '../hooks/types';
 import { stopTurn, userPromptSubmit } from '../hooks/points';
 import type { StoredTool } from '../tools/types';
+import type { GateAuditInfo } from '../audit/record';
 import type { ToolRegistry } from '../tools/registry';
 import { streamChat, type ProviderDeps } from '../providers/openai-compat';
 import type { AssembledToolCall } from '../providers/tool-call-accumulator';
@@ -113,6 +114,8 @@ export interface AgentLoopDeps extends ProviderDeps {
   chat?: typeof streamChat | undefined;
   /** 可注入，便于单测（默认用真实 runTool） */
   execute?: typeof runTool | undefined;
+  /** 判定事实的出口（执行审计）：原样转给每一次 runTool，不在这里做任何加工 */
+  onDecision?: (info: GateAuditInfo) => void;
 }
 
 export interface AgentTurnParams {
@@ -410,6 +413,7 @@ async function executeOne(
       ...(deps.alwaysAsk ? { alwaysAsk: deps.alwaysAsk } : {}),
       ...(deps.hooks ? { hooks: deps.hooks } : {}),
       ...(deps.sessionId ? { sessionId: deps.sessionId } : {}),
+      ...(deps.onDecision ? { onDecision: deps.onDecision } : {}),
     },
   );
   return {

@@ -22,6 +22,7 @@ import {
   type HookRunner,
   type PermissionRule,
   type ToolRegistry,
+  type GateAuditInfo,
 } from '@jujia/agent-core';
 import type { StreamEvent } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
@@ -298,6 +299,8 @@ export interface ChatDeps {
   hooks?: HookRunner;
   /** 技能清单文本（W11a）：非空时并进系统提示；内容稳定 → 不破坏模型前缀缓存 */
   skillCatalogText?: string;
+  /** 判定事实的出口（执行审计）：对话链路里的每一次工具判定都从这里交出去 */
+  onDecision?: (info: GateAuditInfo) => void;
 }
 
 /**
@@ -488,6 +491,7 @@ export function sendMessage(
           ...(deps.rules ? { rules: deps.rules } : {}),
           ...(deps.alwaysAsk ? { alwaysAsk: deps.alwaysAsk } : {}),
           ...(deps.hooks ? { hooks: deps.hooks } : {}),
+          ...(deps.onDecision ? { onDecision: deps.onDecision } : {}),
           sessionId: session.id,
           ...(deps.fetcher ? { fetcher: deps.fetcher } : {}),
         },

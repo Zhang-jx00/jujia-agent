@@ -8,6 +8,7 @@ import { registerBrowserIpc } from './ipc/browser';
 import { registerGitIpc } from './ipc/git';
 import { registerMcpIpc } from './ipc/mcp';
 import { registerExtensionIpc } from './ipc/extensions';
+import { registerAuditIpc } from './ipc/audit';
 import { registerPermissionRulesIpc } from './ipc/permissions';
 import { registerPdfIpc } from './ipc/pdf';
 import { registerCanvasIpc } from './ipc/canvas';
@@ -44,6 +45,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerMcpIpc(ctx);
   registerExtensionIpc(ctx);
   registerPermissionRulesIpc(ctx);
+  registerAuditIpc(ctx);
   registerPdfIpc(ctx);
   registerCanvasIpc(ctx);
 }
