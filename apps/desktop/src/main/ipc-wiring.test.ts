@@ -241,11 +241,20 @@ describe('R-12 之前的修复仍然有锁', () => {
   });
 
   it('窗口 closed 时收尾挂起的审批请求', () => {
-    expect(indexSource).toContain('permissionBridge.cancelAll(');
+    /**
+     * 判据是"**这一个处理器体内**有收尾调用"，不是"这行之后某处出现过一次"。
+     *
+     * 为什么改（本轮实测）：T38 给 render-process-gone 也接了一次 cancelAll，
+     * 老写法 `indexOf(cancelAll) > indexOf('win.on('closed'')` 当场变瞎 ——
+     * 后面那次顶掉了前面那次的位置，M7（删掉 closed 的收尾）在全量变异里**未被拦住**。
+     * 位置型断言只要指向"后面某处"，就会被后加的合法代码养活。
+     */
     const closedIdx = indexSource.indexOf("win.on('closed'");
-    const callIdx = indexSource.indexOf('permissionBridge.cancelAll(');
     expect(closedIdx).toBeGreaterThanOrEqual(0);
+    const callIdx = indexSource.indexOf('permissionBridge.cancelAll(', closedIdx);
+    const nextHandler = indexSource.indexOf('win.', closedIdx + "win.on('closed'".length);
     expect(callIdx).toBeGreaterThan(closedIdx);
+    expect(nextHandler === -1 || callIdx < nextHandler).toBe(true);
   });
 
   /**
@@ -258,9 +267,11 @@ describe('R-12 之前的修复仍然有锁', () => {
   it('渲染进程崩溃时同样收尾挂起的审批（不是只 console.error）', () => {
     const goneIdx = indexSource.indexOf("'render-process-gone'");
     expect(goneIdx).toBeGreaterThan(-1);
-    const block = indexSource.slice(goneIdx, goneIdx + 420);
-    expect(block).toContain('permissionBridge.cancelAll(');
-    expect(block).toContain('渲染进程');
+    const callIdx = indexSource.indexOf('permissionBridge.cancelAll(', goneIdx);
+    const nextCall = indexSource.indexOf('win.', goneIdx + 24);
+    expect(callIdx).toBeGreaterThan(goneIdx);
+    expect(nextCall === -1 || callIdx < nextCall).toBe(true);
+    expect(indexSource.slice(goneIdx, callIdx)).toContain('渲染进程');
   });
 });
 

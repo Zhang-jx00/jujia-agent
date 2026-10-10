@@ -1371,11 +1371,11 @@
     },
     {
       "id": "M172",
-      "desc": "渲染进程崩溃不再收尾挂起审批（T38 回退）：崩溃会被记成\"用户没答\"",
+      "desc": "渲染进程崩溃不再收尾挂起审批（T38 回退）：崩溃会被记成\"用户没答\"。靶锁放在 ipc-wiring（装配根与生命周期的锁归它，且那把锁按处理器区间判，不会被后加的合法调用养活）",
       "file": "apps/desktop/src/main/index.ts",
       "find": "    permissionBridge.cancelAll(`渲染进程已退出（${details.reason}）`);",
       "replace": "    void details.reason;",
-      "test": "apps/desktop/src/main/audit-wiring.test.ts"
+      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
     }
   ]
 }

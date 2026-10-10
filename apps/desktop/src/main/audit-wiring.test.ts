@@ -29,7 +29,6 @@ const IPC = stripComments(read('./ipc.ts'));
 const PRELOAD = stripComments(read('../preload/index.ts'));
 const PANEL = stripComments(read('../renderer/src/features/permissions/PermissionRulesPanel.tsx'));
 const SERVICE = stripComments(read('./audit-service.ts'));
-const INDEX = stripComments(read('./index.ts'));
 
 describe('执行审计接线', () => {
   it('出口只有一个：在 runTool 外层的 finally 里，不在各条 return 前面', () => {
@@ -68,11 +67,5 @@ describe('执行审计接线', () => {
     expect(PANEL).toContain('auditExport');
     // 半本账不许看起来像全账
     expect(PANEL).toContain('尚未接入');
-  });
-
-  it('渲染进程崩溃也收尾挂起的审批（T38）', () => {
-    const goneIdx = INDEX.indexOf("'render-process-gone'");
-    expect(goneIdx).toBeGreaterThan(-1);
-    expect(INDEX.slice(goneIdx, goneIdx + 420)).toContain('permissionBridge.cancelAll(');
   });
 });
