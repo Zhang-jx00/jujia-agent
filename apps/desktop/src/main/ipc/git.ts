@@ -25,12 +25,13 @@ import type { IpcContext } from './context';
  * 档位就没法按动作分。要加动作就加一条通道 + 一行档位 + 一条测试。
  */
 export function registerGitIpc(ctx: IpcContext): void {
-  const { handle, deps, loadPolicy } = ctx;
+  const { handle, deps, loadPolicy, audit } = ctx;
 
   const git = createGitService({
     getWorkspaceRoot: async () => (await getWorkspaceInfo()).root,
     loadPolicy,
     resolvePermission: (req) => deps.permission.resolve(req),
+    audit,
   });
 
   handle(IPC.GIT_STATUS, async () => gitStatusResultSchema.parse(await git.status()));

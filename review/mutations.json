@@ -1376,6 +1376,86 @@
       "find": "    permissionBridge.cancelAll(`渲染进程已退出（${details.reason}）`);",
       "replace": "    void details.reason;",
       "test": "apps/desktop/src/main/ipc-wiring.test.ts"
+    },
+    {
+      "id": "M173",
+      "desc": "「做没做成」记成「问过没问过」：拒绝之后只要弹窗出现过就被记成做过",
+      "file": "apps/desktop/src/main/audit-gate.ts",
+      "find": "        executed: result?.ok === true,",
+      "replace": "        executed: marks.asked === true,",
+      "test": "apps/desktop/src/main/audit-gate.test.ts"
+    },
+    {
+      "id": "M174",
+      "desc": "判定是 ask 就谎称问过：软 ask 被「总是允许」压掉的那几次全被记成经过人手",
+      "file": "apps/desktop/src/main/audit-gate.ts",
+      "find": "        asked: marks.asked === true,",
+      "replace": "        asked: gate.action === 'ask',",
+      "test": "apps/desktop/src/main/audit-gate.test.ts"
+    },
+    {
+      "id": "M175",
+      "desc": "没判定也记账：把\"没标 gate 就不记\"换成合成一条 allow —— 仓库没定位到、URL 不合法这些从没发生过判定的路径会凭空多出判定",
+      "file": "apps/desktop/src/main/audit-gate.ts",
+      "find": "    const gate = marks.gate;",
+      "replace": "    const gate = marks.gate ?? { action: 'allow', reason: '（没判定也记一条）', risk: 'low' };",
+      "test": "apps/desktop/src/main/audit-gate.test.ts"
+    },
+    {
+      "id": "M176",
+      "desc": "git 门不标判定：整扇门的账从此消失（出口在 finally，但没人交事实出来）",
+      "file": "apps/desktop/src/main/git-service.ts",
+      "find": "    mark({ gate, args: gateArgs });",
+      "replace": "    // （本轮刻意不交判定）",
+      "test": "apps/desktop/src/main/git-service.test.ts"
+    },
+    {
+      "id": "M177",
+      "desc": "git 门标了\"问过\"却不标答复：账上写成问过人却没说人答了什么（makeRecord 该直接拒）",
+      "file": "apps/desktop/src/main/git-service.ts",
+      "find": "    mark({ asked: true, answer: decision });",
+      "replace": "    mark({ asked: true });",
+      "test": "apps/desktop/src/main/git-service.test.ts"
+    },
+    {
+      "id": "M178",
+      "desc": "外发地址不再留可读形态（丢 commandKey）：账上只有一串指纹，看不出把哪个地址交了出去",
+      "file": "apps/desktop/src/main/open-with-service.ts",
+      "find": "    mark({ gate, args: gateArgs, commandKey: 'url' });",
+      "replace": "    mark({ gate, args: gateArgs });",
+      "test": "apps/desktop/src/main/open-with-service.test.ts"
+    },
+    {
+      "id": "M179",
+      "desc": "钩子配置门记下答复却不标\"问过\"：账上变成\"没问过人就放行了\"",
+      "file": "apps/desktop/src/main/ipc/extensions.ts",
+      "find": "        mark({ asked: true, answer: decision });",
+      "replace": "        mark({ answer: decision });",
+      "test": "apps/desktop/src/main/hooks-wiring.test.ts"
+    },
+    {
+      "id": "M180",
+      "desc": "非工具门的 kind 写成 write：账本里分不清哪条来自工具、哪条来自人驱动的门",
+      "file": "apps/desktop/src/main/audit-service.ts",
+      "find": "          kind: 'gate',",
+      "replace": "          kind: 'write',",
+      "test": "apps/desktop/src/main/audit-service.test.ts"
+    },
+    {
+      "id": "M181",
+      "desc": "界面把\"内置终端不在账里\"这句删掉：一本缺页的账重新宣称自己是全账",
+      "file": "apps/desktop/src/renderer/src/features/permissions/PermissionRulesPanel.tsx",
+      "find": "          钩子配置改动。<strong>用户手驱动的内置终端</strong>不在本账里 —— 它不经过策略判定，\n          每次启动都当面问，所以没有\"判定\"可记（要纳入得先给它定义判定形状，已登记待排）。",
+      "replace": "          钩子配置改动 —— 每一次判定都能在这一页查到。",
+      "test": "apps/desktop/src/renderer/src/features/permissions/permission-rules-panel.test.tsx"
+    },
+    {
+      "id": "M182",
+      "desc": "抛异常那次不留账（自证失败 = 判定发生过却被中止，账上却干干净净）",
+      "file": "apps/desktop/src/main/audit-gate.ts",
+      "find": "    const gate = marks.gate;",
+      "replace": "    const gate = result === undefined ? undefined : marks.gate;",
+      "test": "apps/desktop/src/main/audit-gate.test.ts"
     }
   ]
 }

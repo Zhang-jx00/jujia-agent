@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { browserExeClearSchema } from '@jujia/shared-ipc';
 import type { PermissionDecision, PermissionMode, PermissionRequest, PermissionRule } from '@jujia/agent-core';
 import { checkExePath, createOpenWithService, type ExePathStore, type OpenWithPolicy } from './open-with-service';
+import type { AuditGateInput, AuditService } from './audit-service';
 
 /**
  * 「打开方式」服务层的验收（M10 收尾）。
@@ -51,13 +52,36 @@ interface Harness {
   service: ReturnType<typeof createOpenWithService>;
   dialogs: PermissionRequest[];
   launched: string[];
+  /** 记账桩（R8.6）：只收 recordGate 的入参，不碰磁盘 */
+  gates: AuditGateInput[];
   setAnswer: (a: PermissionDecision) => void;
   setExe: (p: string | null) => void;
+}
+
+/** 只用来收集判定事实的审计桩 —— 账本文件本身由 `audit-log.test.ts` / `audit-service.test.ts` 钉 */
+function auditStub(gates: AuditGateInput[]): AuditService {
+  return {
+    async recordTool() {},
+    async recordGate(input: AuditGateInput) {
+      gates.push(input);
+    },
+    async tail() {
+      return { records: [], total: 0, unparsed: 0, dropped: 0, notice: '', file: '', workspaceRoot: '' };
+    },
+    async status() {
+      return { file: '', lines: 0, dropped: 0, writeFailures: 0, lastError: '' };
+    },
+    async exportTo() {
+      return { lines: 0, file: '' };
+    },
+    dir: () => 'x',
+  };
 }
 
 function makeHarness(over: Partial<OpenWithPolicy> = {}): Harness {
   const dialogs: PermissionRequest[] = [];
   const launched: string[] = [];
+  const gates: AuditGateInput[] = [];
   let answer: PermissionDecision = 'allow_once';
   let storedExe: string | null = null;
   const store: ExePathStore = {
@@ -85,11 +109,13 @@ function makeHarness(over: Partial<OpenWithPolicy> = {}): Harness {
       launched.push(`exe|${exePath}|${url}`);
     },
     exeStore: store,
+    audit: auditStub(gates),
   });
   return {
     service,
     dialogs,
     launched,
+    gates,
     setAnswer: (a) => {
       answer = a;
     },
@@ -292,6 +318,7 @@ describe('交出去这一步真的失败了（不是"点了没反应"）', () =>
   it('启动器抛错 → 理由原样带回，且不会被算成"已打开"', async () => {
     await setup();
     // 覆盖成真会抛的实现：模拟"选完之后文件被人挪走了 / 系统没有关联程序"
+    const gates: AuditGateInput[] = [];
     const service = createOpenWithService({
       loadPolicy: async () => ({ mode: 'default', rules: [], alwaysAsk: [] }),
       resolvePermission: () => Promise.resolve('allow_once' as PermissionDecision),
@@ -300,10 +327,16 @@ describe('交出去这一步真的失败了（不是"点了没反应"）', () =>
         throw new Error('没有关联的程序');
       },
       launchProgram: async () => undefined,
+      audit: auditStub(gates),
     });
     const r = await service.openWith('system', 'https://example.com');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('没有关联的程序');
+    // 问过人了、人也批了，但事没做成 —— 这一格不许跟着"批过"一起写成 true
+    expect(gates.length).toBe(1);
+    const rec = gates[0];
+    expect(rec?.asked).toBe(true);
+    expect(rec?.executed).toBe(false);
   });
 
   it('模式切到 acceptEdits 也不会多问出一次"免问"（该拦的仍然拦在前面）', async () => {
@@ -314,5 +347,112 @@ describe('交出去这一步真的失败了（不是"点了没反应"）', () =>
     await h.service.openWith('custom', 'https://example.com');
     expect(h.dialogs.length).toBe(0);
     expect(h.launched.length).toBe(0);
+  });
+});
+
+describe('打开方式门接进执行审计（R8.6）', () => {
+  function only(h: Harness): AuditGateInput {
+    expect(h.gates.length).toBe(1);
+    const rec = h.gates[0];
+    if (rec === undefined) throw new Error('打开方式门没有把判定交进审计');
+    return rec;
+  }
+
+  it('交给系统浏览器并被批准：一条 open_with_system，问过、答 allow_once、真交出去了', async () => {
+    await setup();
+    const h = makeHarness();
+    const r = await h.service.openWith('system', 'https://example.com/a');
+    expect(r.ok).toBe(true);
+    const rec = only(h);
+    expect(rec.subject).toBe('open_with_system');
+    expect(rec.outcome).toBe('ask');
+    expect(rec.asked).toBe(true);
+    expect(rec.answer).toBe('allow_once');
+    expect(rec.executed).toBe(true);
+    expect(h.launched.length).toBe(1);
+  });
+
+  it('用户拒了：ask + deny + 没做成，而且一次都没交出去', async () => {
+    await setup();
+    const h = makeHarness();
+    h.setAnswer('deny');
+    const r = await h.service.openWith('system', 'https://example.com/b');
+    expect(r.ok).toBe(false);
+    const rec = only(h);
+    expect(rec.outcome).toBe('ask');
+    expect(rec.asked).toBe(true);
+    expect(rec.answer).toBe('deny');
+    expect(rec.executed).toBe(false);
+    expect(h.launched.length).toBe(0);
+  });
+
+  it('「总是允许」压不掉第二次：两条账都写着问过（外发没有"记住"这条路）', async () => {
+    await setup();
+    const h = makeHarness();
+    h.setAnswer('allow_always');
+    await h.service.openWith('system', 'https://example.com/c');
+    await h.service.openWith('system', 'https://example.com/d');
+    expect(h.gates.length).toBe(2);
+    expect(h.gates.every((g) => g.asked === true)).toBe(true);
+    expect(h.gates.every((g) => g.answer === 'allow_always')).toBe(true);
+  });
+
+  it('allow 规则放行也要留痕：没问过、真交出去了（只读放行不等于没发生）', async () => {
+    await setup();
+    const h = makeHarness({ rules: [rule('open_with_system', 'allow')] });
+    const r = await h.service.openWith('system', 'https://example.com/e');
+    expect(r.ok).toBe(true);
+    const rec = only(h);
+    expect(rec.outcome).toBe('allow');
+    expect(rec.asked).toBe(false);
+    expect(rec.executed).toBe(true);
+    expect(h.dialogs.length).toBe(0);
+  });
+
+  it('deny 规则拦下：deny、没问过、没交出去，理由里带着那条规则', async () => {
+    await setup();
+    const h = makeHarness({ rules: [rule('open_with_system', 'deny')] });
+    const r = await h.service.openWith('system', 'https://example.com/f');
+    expect(r.ok).toBe(false);
+    const rec = only(h);
+    expect(rec.outcome).toBe('deny');
+    expect(rec.asked).toBe(false);
+    expect(rec.executed).toBe(false);
+    expect(rec.reason).toContain('open_with_system');
+    expect(h.launched.length).toBe(0);
+  });
+
+  it('内置那一档不进门，也就不记账（地址没离开本应用，也没有判定发生过）', async () => {
+    await setup();
+    const h = makeHarness();
+    const r = await h.service.openWith('internal', 'https://example.com/g');
+    expect(r.ok).toBe(true);
+    expect(h.gates.length).toBe(0);
+  });
+
+  it('判定之前失败（没选自选程序）：零条账 —— 不许凭空造一次判定', async () => {
+    await setup();
+    const h = makeHarness();
+    const r = await h.service.openWith('custom', 'https://example.com/h');
+    expect(r.ok).toBe(false);
+    expect(h.gates.length).toBe(0);
+  });
+
+  it('畸形网址连判定都没有：零条账（先过导航策略再谈权限，顺序没被记账打乱）', async () => {
+    await setup();
+    const h = makeHarness();
+    const r = await h.service.openWith('system', 'file:///C:/windows/system32/hosts');
+    expect(r.ok).toBe(false);
+    expect(h.gates.length).toBe(0);
+  });
+
+  it('可读形态交出去的是 url 那一格（与工具命令行同一个摘要，不另写一份）', async () => {
+    await setup();
+    const h = makeHarness();
+    await h.service.openWith('system', 'https://example.com/i?token=abcdef1234567890abcdef1234567890');
+    const rec = only(h);
+    expect(rec.commandKey).toBe('url');
+    const args = rec.args as Record<string, unknown>;
+    expect(args.url).toContain('https://example.com/i');
   });
 });

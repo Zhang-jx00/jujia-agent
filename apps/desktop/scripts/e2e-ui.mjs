@@ -2762,7 +2762,36 @@ try {
     fail('账本里有文件正文 —— 剔密没在落盘之前做完（这是本轮最重的一条）', ledgerText.slice(0, 500));
   }
   if (!ledgerText.includes('digests')) fail('账本没留指纹，事后无法核对"是不是同一份内容"', ledgerText.slice(0, 400));
-  ok(`审计：界面上看得见判定与"已做"，磁盘账本里有指纹、有长度，就是没有正文（哨兵未出现）`);
+
+  /* 三扇**非工具门**（R8.6）：它们不走 runTool，最容易出"某一扇忘了接"——
+   * 而缺页的账看起来完全正常，所以这里拿整跑下来已经动过的那些门做真值。 */
+  const GATE_SUBJECTS = ['git_stage', 'git_commit', 'git_push', 'open_with_system', 'open_with_custom', 'hooks:modify'];
+  const gateLines = ledgerText.split('\n').filter((l) => l.includes('"kind":"gate"'));
+  for (const subject of GATE_SUBJECTS) {
+    if (!ledgerText.includes(`"subject":"${subject}"`)) {
+      fail(`账本里没有 ${subject} 那扇门（本跑到这里已经动过它至少一次）`, ledgerText.slice(0, 600));
+    }
+  }
+  if (gateLines.length === 0) fail('账本里一条 gate 都没有（三扇门的判定没进账）', ledgerText.slice(0, 400));
+  // 「做没做成」每一行都得有 —— 少了它，"批过"与"做过"在账上就分不开
+  const missingExec = gateLines.find((l) => !l.includes('"executed":'));
+  if (missingExec !== undefined) fail('有一条 gate 账没写做没做成', missingExec.slice(0, 300));
+  // 被拒的那次必须是"问过 + 没做成"（磁盘上真没有那次提交，本跑前面已经核过）
+  if (!gateLines.some((l) => l.includes('"answer":"deny"') && l.includes('"executed":false'))) {
+    fail('账上没有"问过人被拒 + 没做成"那一行 —— 拒绝与放行长得一样的账没有价值');
+  }
+  // 外发那几笔要留下可读地址；钩子那几笔要留下要执行的命令（装了什么后门得看得见）
+  if (!gateLines.some((l) => l.includes('"command":"http'))) {
+    fail('交给外部程序那几笔没有留下可读地址', gateLines.slice(0, 3).join('\n').slice(0, 400));
+  }
+  if (!gateLines.some((l) => l.includes('JUJIA_E2E_HOOK_MARKER'))) {
+    fail('钩子配置那笔没留下将要执行的命令（看不见内容的审批等于没有审批）');
+  }
+  // 反过来：git 的提交信息属**正文**，这一格刻意不给可读形态，只该留下长度与指纹
+  if (ledgerText.includes('e2e：接上了 git')) {
+    fail('git 提交信息被原文抄进账本（这一格不该有可读形态）', ledgerText.slice(0, 500));
+  }
+  ok(`审计：工具与三扇非工具门都在账上（gate 行 ${String(gateLines.length)} 条），有指纹有长度；正文进不去，该看得见的一条没少`);
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();

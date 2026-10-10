@@ -102,7 +102,7 @@ describe('createAuditService', () => {
     expect(rec?.answer).toBeUndefined();
   });
 
-  it('recordGate 记非工具门（下一轮接 git / 打开方式时用同一条出口）', async () => {
+  it('recordGate 记非工具门：kind=gate、executed 独立成格（R8.6 三扇门都走这一条出口）', async () => {
     const { svc } = service();
     await svc.recordGate({
       subject: 'git_commit',
@@ -118,6 +118,44 @@ describe('createAuditService', () => {
     expect(rec?.kind).toBe('gate');
     expect(rec?.executed).toBe(false);
     expect(JSON.stringify(rec)).not.toContain('ABCDEFGHIJKLMNOPQRST');
+  });
+
+  it('非工具门也能留可读形态，而且用的是同一张剔密表（不复制第二份摘要逻辑）', async () => {
+    const { svc } = service();
+    await svc.recordGate({
+      subject: 'open_with_system',
+      outcome: 'ask',
+      asked: true,
+      answer: 'allow_once',
+      reason: '地址将离开本应用的安全边界',
+      args: { target: 'system', url: 'https://example.com/open?api_token=abcdefghIJKLMN0123#frag' },
+      sessionId: 'manual',
+      executed: true,
+      commandKey: 'url',
+    });
+    const rec = (await svc.tail(10)).records[0];
+    const asText = JSON.stringify(rec);
+    // 事后对账要看得见"交出去的是哪个地址" —— 只留指纹等于没有账
+    expect(asText).toContain('https://example.com/open');
+    // 但令牌那一段必须被同一张表换掉，并留下一句"动过哪里"
+    expect(asText).not.toContain('abcdefghIJKLMN0123');
+    expect(asText).toContain('命令里剔掉一处');
+  });
+
+  it('没有 commandKey 的门不许猜：可读形态那一格压根不存在', async () => {
+    const { svc } = service();
+    await svc.recordGate({
+      subject: 'git_commit',
+      outcome: 'allow',
+      asked: false,
+      reason: '命中你的规则 → 放行',
+      // 提交信息属于正文：git 门刻意不标 commandKey，所以它只会留下长度与指纹
+      args: { action: 'commit', message: '这条正文不该出现在账上' },
+      sessionId: 'manual',
+      executed: true,
+    });
+    const asText = JSON.stringify((await svc.tail(10)).records[0]);
+    expect(asText).not.toContain('这条正文不该出现在账上');
   });
 
   it('导出：新路径写得出、已存在的路径拒绝覆盖', async () => {

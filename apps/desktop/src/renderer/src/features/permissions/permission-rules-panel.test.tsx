@@ -200,10 +200,16 @@ describe('权限页 · 执行审计', () => {
     await screen.findByText(/没有覆盖它/);
   });
 
-  it('覆盖范围要写清楚：git 与打开外部程序尚未接入（半本账不能看起来像全账）', async () => {
+  it('三扇门接完就要把「尚未接入」删掉，同时说出这一轮真没覆盖的那一格', async () => {
     auditTail.mockResolvedValue(page());
     mount([]);
-    await screen.findByText(/git/);
-    expect(document.body.textContent).toContain('尚未接入');
+    const scope = await screen.findByText(/覆盖范围/);
+    expect(scope.textContent).toContain('git');
+    expect(scope.textContent).toContain('外部程序');
+    expect(scope.textContent).toContain('钩子配置');
+    // 接线不留尾巴：上一轮那句"尚未接入"如果还留着，界面就在宣称一本它其实没记的账
+    expect(document.body.textContent).not.toContain('尚未接入');
+    // 反过来也不许：内置终端每次都当面问、不经过策略判定，所以它不在判定账里 —— 这句必须说出来
+    expect(scope.textContent).toContain('内置终端');
   });
 });

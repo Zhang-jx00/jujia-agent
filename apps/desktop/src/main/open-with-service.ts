@@ -8,8 +8,11 @@ import {
   assertOpenHardAskInert,
   decideOpenTarget,
   openRequestSummary,
+  openToolName,
   type OpenTarget,
 } from './open-with-gate';
+import { auditedGateRun, type GateAuditMarks } from './audit-gate';
+import type { AuditService } from './audit-service';
 
 /**
  * 「打开方式」的运行期胶水（M10 收尾）。
@@ -41,6 +44,8 @@ export interface OpenWithDeps {
   openInSystemBrowser: (url: string) => Promise<void>;
   launchProgram: (exePath: string, url: string) => Promise<void>;
   exeStore?: ExePathStore;
+  /** 执行审计（R8.6）：地址交给外部这件事必须留一条判定账。必填，理由见 `git-service.ts` 同名那格 */
+  audit: AuditService;
 }
 
 export interface OpenWithService {
@@ -160,12 +165,28 @@ export function createOpenWithService(deps: OpenWithDeps): OpenWithService {
     }
   };
 
-  const openWith = async (target: OpenTarget, url: string): Promise<OpenWithResult> => {
+  /**
+   * 过门 + 交出去 + **记一笔**（R8.6）。
+   *
+   * 记账在 `auditedGateRun` 的 `finally` 里，不在下面每条 return 之前 ——
+   * 这个函数有九条出口（网址不合法、internal、没选程序、程序不可用、策略拒、允许、
+   * 自证失败、人拒、超时、交给外部时失败、成功），逐条插迟早漏一条。
+   * 网址那一格走 `commandKey`：**与工具命令同一个摘要**（剔密 + 长度上限），不另写一份。
+   */
+  const openWith = async (target: OpenTarget, url: string): Promise<OpenWithResult> =>
+    auditedGateRun(deps.audit, openToolName(target), (mark) => openWithCore(target, url, mark));
+
+  const openWithCore = async (
+    target: OpenTarget,
+    url: string,
+    mark: (patch: GateAuditMarks) => void,
+  ): Promise<OpenWithResult> => {
     const checked = safeUrl(url);
     if (!checked.ok) return checked;
     const finalUrl = checked.url;
 
     // 内置那一档就是现有主链路：不额外索求授权，交由 IPC 层去开视图
+    // （也不进权限门，所以账上不会凭空多出一条"问过人的判定"）
     if (target === 'internal') return { ok: true, target, asked: false, decision: null };
 
     let exePath: string | null = null;
@@ -186,6 +207,12 @@ export function createOpenWithService(deps: OpenWithDeps): OpenWithService {
       rules: policy.rules,
       alwaysAsk: policy.alwaysAsk,
     });
+    const gateArgs: Record<string, unknown> = {
+      target,
+      url: finalUrl,
+      ...(exePath !== null ? { exePath } : {}),
+    };
+    mark({ gate, args: gateArgs, commandKey: 'url' });
 
     if (gate.action === 'deny') return refused(`${target === 'custom' ? '自选程序' : '系统浏览器'}被权限策略拒绝：${gate.reason}`);
     if (gate.action === 'allow') {
@@ -198,16 +225,17 @@ export function createOpenWithService(deps: OpenWithDeps): OpenWithService {
 
     const request: PermissionRequest = {
       id: randomUUID(),
-      toolName: target === 'custom' ? 'open_with_custom' : 'open_with_system',
+      toolName: openToolName(target),
       kind: 'exec',
       summary: openRequestSummary(target, { url: finalUrl, ...(exePath !== null ? { exePath } : {}) }),
-      args: { target, url: finalUrl, ...(exePath !== null ? { exePath } : {}) },
+      args: gateArgs,
       paths: [],
       // 外发档位永远是硬 ask：false 由自证保证（上面那行 assert 不通过就到不了这里）
       bypassable: gate.bypassable,
     };
     const answer = await deps.resolvePermission(request);
     const decision = typeof answer === 'string' ? answer : answer.decision;
+    mark({ asked: true, answer: decision });
 
     if (decision === 'deny' || decision === 'timeout') {
       return refused(decision === 'timeout' ? '确认超时，未交给外部程序' : '你拒绝了，地址未交给任何外部程序');

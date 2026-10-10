@@ -33,7 +33,7 @@ import type { IpcContext } from './context';
  * 渲染层能写的只有"默认预选哪一档"（那只是下拉框的位置，不是授权）。
  */
 export function registerBrowserIpc(ctx: IpcContext): void {
-  const { handle, deps, loadPolicy } = ctx;
+  const { handle, deps, loadPolicy, audit } = ctx;
 
   const browser = createBrowserService({
     getWindow: () => deps.getWindow?.(),
@@ -101,6 +101,7 @@ export function registerBrowserIpc(ctx: IpcContext): void {
     getWorkspaceRoot: async () => (await getWorkspaceInfo()).root,
     ...createRealLaunchers(),
     exeStore: createFileExePathStore(),
+    audit,
   });
 
   /** 三档统一入口：界面只有一个"打开"按钮，返回形状也只有一个 */

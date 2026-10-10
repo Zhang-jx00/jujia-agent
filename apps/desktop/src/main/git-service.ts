@@ -24,6 +24,8 @@ import {
   shouldRememberAlwaysAllow,
   type GitAction,
 } from './git-gate';
+import { auditedGateRun, type GateAuditMarks } from './audit-gate';
+import type { AuditService } from './audit-service';
 /**
  * git 服务的运行期胶水（M8 接线）。
  *
@@ -45,6 +47,11 @@ export interface GitServiceDeps {
   loadPolicy: () => Promise<GitPolicy>;
   /** 权限审批桥 —— 与工具执行共用同一条通道、同一个弹窗 */
   resolvePermission: PermissionResolver;
+  /**
+   * 执行审计（R8.5 建账、本轮把 git 门接进来）。
+   * **必填**：可选参数会变成"忘了传也照样跑"，那就又回到"判定发生过但账上没有"。
+   */
+  audit: AuditService;
 }
 
 export type GitQuery<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -125,11 +132,23 @@ export function createGitService(deps: GitServiceDeps): GitService {
   /**
    * 写操作的权限门。**这是本模块唯一真正过门的路径**，所以写得直白：
    * 判档 → 自证档位没被改松 → 查会话白名单（只有软 ask 查得到）→ 问人 → 按回答决定做不做。
+   *
+   * 外面这一层只做一件事：**把判定事实记进审计账本**（R8.6）。
+   * 记账放在 `finally` 而不是散在下面各条 return 之前，是因为这个函数有六条出口，
+   * 逐条插 = 迟早漏一条（工具侧同一结论见 `executor.ts` 的 `runTool`）。
    */
   const guarded = async (
     action: GateAction,
     detail: { paths?: string[]; message?: string; remote?: string; branch?: string | null },
     execute: (root: string) => Promise<GitOutcome>,
+  ): Promise<GitActionResult> =>
+    auditedGateRun(deps.audit, gitToolName(action), (mark) => guardedCore(action, detail, execute, mark));
+
+  const guardedCore = async (
+    action: GateAction,
+    detail: { paths?: string[]; message?: string; remote?: string; branch?: string | null },
+    execute: (root: string) => Promise<GitOutcome>,
+    mark: (patch: GateAuditMarks) => void,
   ): Promise<GitActionResult> => {
     const opened = await openRepo();
     if (!opened.ok) return refused(opened.error);
@@ -138,6 +157,17 @@ export function createGitService(deps: GitServiceDeps): GitService {
     const policy = await deps.loadPolicy();
     const gate = decideGitAction({ action, mode: policy.mode, rules: policy.rules, alwaysAsk: policy.alwaysAsk });
     const toolName = gitToolName(action);
+    // 弹窗与账本用的是**同一份** args —— 两处各拼一份早晚漂移（账上记的却不是问过人的那份）
+    const gateArgs: Record<string, unknown> = {
+      action,
+      paths: detail.paths ?? [],
+      message: detail.message ?? '',
+      // push 的两个参数进 args：弹窗与审计都要能看见"发到哪个远端、哪条分支"，
+      // 而不是只有一句文案 —— 事后对账看的是字段。
+      ...(detail.remote === undefined ? {} : { remote: detail.remote }),
+      ...(detail.branch === undefined ? {} : { branch: detail.branch }),
+    };
+    mark({ gate, args: gateArgs });
 
     if (gate.action === 'deny') return refused(`${toolName} 被权限策略拒绝：${gate.reason}`, 'policy:deny');
     if (gate.action === 'allow') return finish(await execute(root), false, 'policy:allow');
@@ -146,6 +176,7 @@ export function createGitService(deps: GitServiceDeps): GitService {
     assertHardAskInert(action, gate);
 
     if (gate.bypassable === true && remembered.has(toolName)) {
+      // 软 ask 被会话白名单压掉：**没问过人**，所以只标 executed（由返回的 ok 推出），不许标 answer
       return finish(await execute(root), false, 'allow_always(cached)');
     }
 
@@ -156,21 +187,14 @@ export function createGitService(deps: GitServiceDeps): GitService {
       // "这次要写历史"的提示由 summary 承担 —— commit 那条明确写「会写入仓库历史」。
       kind: 'write',
       summary: gitRequestSummary(action, detail),
-      args: {
-        action,
-        paths: detail.paths ?? [],
-        message: detail.message ?? '',
-        // push 的两个参数进 args：弹窗与审计都要能看见"发到哪个远端、哪条分支"，
-        // 而不是只有一句文案 —— 事后对账看的是字段。
-        ...(detail.remote === undefined ? {} : { remote: detail.remote }),
-        ...(detail.branch === undefined ? {} : { branch: detail.branch }),
-      },
+      args: gateArgs,
       paths: detail.paths ?? [],
       // 档位一路带到按钮上：commit 是硬 ask，这里给 false，弹窗就不该长出「总是允许」
       bypassable: gate.bypassable,
     };
     const answer = await deps.resolvePermission(request);
     const decision = typeof answer === 'string' ? answer : answer.decision;
+    mark({ asked: true, answer: decision });
 
     if (decision === 'deny' || decision === 'timeout') {
       return {

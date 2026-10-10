@@ -300,8 +300,9 @@ export function PermissionRulesPanel(): ReactElement {
           文件正文与密钥值不进这本账，导出时也没有第二次加工。
         </p>
         <p className="p0-warn">
-          覆盖范围：工具调用（内置 / MCP / 技能 / 画布）。git 提交与推送、打开外部程序、改钩子配置
-          <strong>尚未接入</strong>（R8.6）—— 现在这本账不是全账。
+          覆盖范围：工具调用（内置 / MCP / 技能 / 画布）· git 暂存 / 提交 / 推送 · 交给外部程序（系统与自选）·
+          钩子配置改动。<strong>用户手驱动的内置终端</strong>不在本账里 —— 它不经过策略判定，
+          每次启动都当面问，所以没有"判定"可记（要纳入得先给它定义判定形状，已登记待排）。
         </p>
         {auditMsg && (
           <p className={auditMsg.kind === 'ok' ? 'p0-ok' : 'p0-err'} role={auditMsg.kind === 'ok' ? 'status' : 'alert'}>

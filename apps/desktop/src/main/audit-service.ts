@@ -18,9 +18,10 @@ import { getDataRoot } from './paths';
  * - 判定内容由执行器 / 各权限门交出来（它们各自只有一处出口），服务不再重新推导；
  * - 写失败不阻断做事，但状态里数得出来（见 `status()` 与界面上那句实话）。
  *
- * **本轮覆盖范围（如实）**：工具调用（内置 / MCP / 技能 / 画布 / 手动执行）。
- * git 提交与推送、打开外部程序、改钩子配置这三个**非工具门**尚未接入（下一轮）——
- * 界面上必须把这句话写出来，不能让一份只记了一半的账看起来像全账。
+ * **覆盖范围（如实）**：工具调用（内置 / MCP / 技能 / 画布 / 手动执行）+ 三扇非工具门
+ * （git 暂存·提交·推送、交给外部程序、钩子配置改动；出口见 `audit-gate.ts`）。
+ * **不在本账**：用户手驱动的内置终端 —— 它不走 `decideGate`，每次当面问，没有"判定"可记；
+ * 界面上必须把这一格说出来，不能让一本缺页的账看起来像全账。
  */
 
 export interface PolicyHealth {
@@ -41,6 +42,12 @@ export interface AuditGateInput {
   durationMs?: number | undefined;
   /** 这件事做没做成（deny = 没做） */
   executed: boolean;
+  /**
+   * 「这件事的可读形态」放在哪一格（交给同一个 `summarizeArgs`：剔密 + 400 字上限，**不另写一份**）。
+   * 三扇门各有各的形态：交给外部程序的是地址、钩子配置里是将来要执行的命令；
+   * git 不给这一格 —— 它的对账对象是路径（已经走 `paths`），提交信息属于正文。
+   */
+  commandKey?: string | undefined;
 }
 
 export interface AuditService {
@@ -121,7 +128,7 @@ export function createAuditService(deps: AuditServiceDeps): AuditService {
           ...(input.answer !== undefined ? { answer: input.answer } : {}),
           ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
           reason: input.reason,
-          args: summarize(input.args),
+          args: summarize(input.args, input.commandKey),
           rules: deps.policyHealth(),
         }),
       );

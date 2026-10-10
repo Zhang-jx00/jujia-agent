@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PermissionDecision, PermissionRequest, PermissionResolver } from '@jujia/agent-core';
 import { createGitService, type GitPolicy } from './git-service';
+import type { AuditGateInput, AuditService } from './audit-service';
 
 /**
  * git 服务层的验收（M8 接线）。
@@ -35,12 +36,36 @@ const resolver: PermissionResolver = (req) => {
 
 const policy = (over: Partial<GitPolicy> = {}): GitPolicy => ({ mode: 'default', rules: [], alwaysAsk: [], ...over });
 
+/**
+ * 记账桩（R8.6）：只收集 `recordGate` 的入参，不碰磁盘。
+ * 断言全部落在"交出来的判定事实"上 —— 账本文件本身由 `audit-log.test.ts` / `audit-service.test.ts` 钉。
+ */
+const gates: AuditGateInput[] = [];
+const auditStub = {
+  async recordTool() {},
+  async recordGate(input: AuditGateInput) {
+    gates.push(input);
+  },
+  async tail() {
+    return { records: [], total: 0, unparsed: 0, dropped: 0, notice: '', file: '', workspaceRoot: '' };
+  },
+  async status() {
+    return { file: '', lines: 0, dropped: 0, writeFailures: 0, lastError: '' };
+  },
+  async exportTo() {
+    return { lines: 0, file: '' };
+  },
+  dir: () => 'x',
+} satisfies AuditService;
+
 function makeService(over: Partial<GitPolicy> = {}, root: () => Promise<string | null> = async () => repo) {
   asked.length = 0;
+  gates.length = 0;
   return createGitService({
     getWorkspaceRoot: root,
     loadPolicy: async () => policy(over),
     resolvePermission: resolver,
+    audit: auditStub,
   });
 }
 
@@ -378,5 +403,136 @@ describe('push（M8 收口）：真远端做真值', () => {
     expect(r.ok).toBe(false);
     expect(typeof r.error).toBe('string');
     expect(r.error).not.toBe('');
+  });
+});
+
+describe('git 门接进执行审计（R8.6）', () => {
+  async function currentBranch(): Promise<string> {
+    const r = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repo, windowsHide: true });
+    return r.stdout.trim();
+  }
+
+  function onlyGate(): AuditGateInput {
+    expect(gates.length).toBe(1);
+    const rec = gates[0];
+    if (rec === undefined) throw new Error('git 门没有把判定交进审计');
+    return rec;
+  }
+
+  it('提交被批准：一条 git_commit，问过、答 allow_once、事真的做成了', async () => {
+    answer = 'allow_once';
+    const svc = makeService();
+    await writeFile(join(repo, 'audit-a.txt'), 'audit-a\n', 'utf8');
+    await svc.stage(['audit-a.txt']);
+    gates.length = 0;
+    const before = await commitCount();
+    const r = await svc.commit('审计测试提交');
+    expect(r.ok).toBe(true);
+    const rec = onlyGate();
+    expect(rec.subject).toBe('git_commit');
+    expect(rec.outcome).toBe('ask');
+    expect(rec.asked).toBe(true);
+    expect(rec.answer).toBe('allow_once');
+    expect(rec.executed).toBe(true);
+    expect(await commitCount()).toBe(before + 1);
+  });
+
+  it('提交被拒：账上是 ask + deny + 没做成，仓库里也确实没有新提交', async () => {
+    answer = 'deny';
+    const svc = makeService();
+    await writeFile(join(repo, 'audit-b.txt'), 'audit-b\n', 'utf8');
+    await svc.stage(['audit-b.txt']);
+    gates.length = 0;
+    const before = await commitCount();
+    const r = await svc.commit('不该发生的提交');
+    expect(r.ok).toBe(false);
+    const rec = onlyGate();
+    expect(rec.outcome).toBe('ask');
+    expect(rec.answer).toBe('deny');
+    expect(rec.executed).toBe(false);
+    expect(await commitCount()).toBe(before);
+  });
+
+  it('软 ask 被会话白名单压掉的那一次：第二条账 asked=false 且不许有 answer，但 executed=true', async () => {
+    answer = 'allow_always';
+    const svc = makeService();
+    await writeFile(join(repo, 'audit-c.txt'), 'audit-c\n', 'utf8');
+    await writeFile(join(repo, 'audit-d.txt'), 'audit-d\n', 'utf8');
+    gates.length = 0;
+
+    // 第一次：真的问过人了，答复是「本次会话总是允许」
+    const first = await svc.stage(['audit-c.txt']);
+    expect(first.ok).toBe(true);
+    expect(gates.length).toBe(1);
+    expect(gates[0]?.asked).toBe(true);
+    expect(gates[0]?.answer).toBe('allow_always');
+
+    // 第二次：白名单压掉了弹窗 —— 判定仍然是 ask，但**不许**写成"问过"、更不许编一个 answer
+    const second = await svc.stage(['audit-d.txt']);
+    expect(second.ok).toBe(true);
+    expect(gates.length).toBe(2);
+    const rec = gates[1];
+    expect(rec?.outcome).toBe('ask');
+    expect(rec?.asked).toBe(false);
+    expect(rec?.answer).toBeUndefined();
+    expect(rec?.executed).toBe(true);
+  });
+
+  it('命中 deny 规则：一条 deny、没问过、没做成，理由里带着那条规则', async () => {
+    const svc = makeService({
+      rules: [
+        {
+          id: 'r-audit',
+          pattern: 'git_commit',
+          action: 'deny',
+          enabled: true,
+          createdAt: '2026-10-10T00:00:00.000Z',
+          updatedAt: '2026-10-10T00:00:00.000Z',
+        },
+      ],
+    });
+    gates.length = 0;
+    const before = await commitCount();
+    const r = await svc.commit('被规则拦下的提交');
+    expect(r.ok).toBe(false);
+    const rec = onlyGate();
+    expect(rec.outcome).toBe('deny');
+    expect(rec.asked).toBe(false);
+    expect(rec.executed).toBe(false);
+    expect(rec.reason).toContain('git_commit');
+    expect(await commitCount()).toBe(before);
+  });
+
+  it('没选工作区（判定还没发生）：一条账都不记', async () => {
+    const svc = makeService({}, async () => null);
+    gates.length = 0;
+    const r = await svc.commit('无仓库提交');
+    expect(r.ok).toBe(false);
+    expect(gates.length).toBe(0);
+  });
+
+  it('批了但 git 自己失败（远端不存在）：executed=false —— 不许把"批过"记成"做过"', async () => {
+    answer = 'allow_once';
+    const svc = makeService();
+    gates.length = 0;
+    const r = await svc.push('没有配过的远端', await currentBranch());
+    expect(r.ok).toBe(false);
+    const rec = onlyGate();
+    expect(rec.subject).toBe('git_push');
+    expect(rec.asked).toBe(true);
+    expect(rec.executed).toBe(false);
+  });
+
+  it('进账的就是弹窗那一份参数（两处各拼一份早晚漂移）：remote 与 branch 都在键名里', async () => {
+    answer = 'allow_once';
+    const svc = makeService();
+    gates.length = 0;
+    const b = await currentBranch();
+    await svc.push('origin', b);
+    const rec = onlyGate();
+    const args = rec.args as Record<string, unknown>;
+    expect(args.remote).toBe('origin');
+    expect(args.branch).toBe(b);
+    expect(args.action).toBe('push');
   });
 });

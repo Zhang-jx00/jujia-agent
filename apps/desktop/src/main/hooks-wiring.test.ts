@@ -61,4 +61,19 @@ describe('HOOKS_SET 真的过权限门', () => {
     expect(ext).toContain('hookCommandsOf(input)');
     expect(ext).toContain('args: { path: configPath, config: input }');
   });
+
+  it('钩子门的判定交进执行审计：出口在判档之前开始，标了 gate 也标了问过（R8.6）', () => {
+    const wrapAt = ext.indexOf('auditedGateRun(ctx.audit, HOOKS_MODIFY_TOOL');
+    expect(wrapAt).toBeGreaterThan(-1);
+    // 出口必须**包住**判档：反过来写（判完再进出口）就变成"只有走到底的路径才记账"
+    expect(wrapAt, '记账出口在 decideHooksModify 之后才开始').toBeLessThan(ext.indexOf('decideHooksModify('));
+    expect(ext).toContain("mark({ gate, args: { path: configPath, commands, config: input }, commandKey: 'commands' })");
+    expect(ext).toContain('mark({ asked: true, answer: decision })');
+    // 要执行的命令是这条门真正"交出去"的东西：账上得留下剔密后的可读形态，而不是只有个指纹
+    expect(ext).toContain("commandKey: 'commands'");
+    // 命令清单在进入判定之前就算好了（判定之后再算会漏掉 deny 那条路径）
+    expect(ext.indexOf('const commands = hookCommandsOf(input)'), 'commands 算晚了').toBeLessThan(
+      ext.indexOf('decideHooksModify('),
+    );
+  });
 });
