@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ToolRunResult, WorkspaceInfo } from '@jujia/shared-ipc';
+import { IconCheck, IconX } from '../../ui/icons';
 
 /**
  * 工作区卡片 + 工具自检台（W3）。
@@ -119,7 +120,7 @@ export function WorkspaceCard(): ReactElement {
               {last && (
                 <div className="w3-probe">
                   <p className={last.ok ? 'p0-ok' : 'p0-err'} role="status">
-                    {last.ok ? '✓' : '✗'} {last.toolName} · {last.durationMs}ms
+                    {last.ok ? <IconCheck /> : <IconX />} {last.toolName} · {last.durationMs}ms
                     {last.asked ? ` · 已询问用户（${last.decision ?? '无响应'}）` : ' · 无需询问'}
                   </p>
                   <pre>{last.content}</pre>

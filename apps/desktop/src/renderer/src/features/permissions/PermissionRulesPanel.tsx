@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { AuditPageView, PermissionMode, PermissionRuleView } from '@jujia/shared-ipc';
+import { IconTriangleAlert } from '../../ui/icons';
 
 /**
  * 权限设置页（W5c / M15）。
@@ -334,7 +335,7 @@ export function PermissionRulesPanel(): ReactElement {
                       <span className="p0-subtitle"> {r.reason}</span>
                       {r.args.command !== undefined && <code> {r.args.command}</code>}
                       {r.rules !== undefined && r.rules.degraded && (
-                        <span className="p0-warn"> ⚠ 这一条判定时规则表当时没读出来（按空表跑的）</span>
+                        <span className="p0-warn"> <IconTriangleAlert /> 这一条判定时规则表当时没读出来（按空表跑的）</span>
                       )}
                     </span>
                   </li>

@@ -606,6 +606,18 @@ button:disabled {
   font-weight: 500;
 }
 
+/* 内联图标（R19）：随文字颜色走（stroke=currentColor），只负责对齐与不压缩。
+   与 13/14px 正文同高、基线略下移，避免图标把行高顶起来。 */
+.jj-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  vertical-align: -0.125em;
+}
+
+.jj-tool-icon .jj-icon {
+  vertical-align: middle;
+}
+
 .jj-muted {
   color: var(--c-text-secondary);
   font-size: var(--fs-small);

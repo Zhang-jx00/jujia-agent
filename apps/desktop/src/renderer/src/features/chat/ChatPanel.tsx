@@ -12,6 +12,7 @@ import { olderPageNotice, toHistoryBubbles } from './history-bubbles';
 import { truncationNotice } from './done-notice';
 import { belongsToSession } from './stream-routing';
 import { ToolCard } from './ToolCard';
+import { IconPencil, IconTriangleAlert, IconX } from '../../ui/icons';
 
 interface Bubble {
   id: string;
@@ -23,7 +24,7 @@ interface Bubble {
   error?: string;
   /**
    * 不是错误、但用户必须看见的一句话（目前只有"回答被上游截断"，T26）。
-   * 刻意不与 `error` 共用一格：那一条前面挂着 ✗，把"不完整"显示成"失败"是另一种误导。
+   * 刻意不与 `error` 共用一格：那一条前面挂着失败图标，把"不完整"显示成"失败"是另一种误导。
    */
   notice?: string;
 }
@@ -800,7 +801,7 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
         {viewState === 'empty' && (
           <div className="jj-state jj-enter">
             <span className="jj-state-icon" aria-hidden="true">
-              ✎
+              <IconPencil size={22} />
             </span>
             <p>还没有对话。选好连接，在下面输入第一句。</p>
             <p className="p0-subtitle">提示：Agent 在改动文件前会弹出确认，你可以拒绝或改参数。</p>
@@ -817,7 +818,7 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
         {viewState === 'error' && (
           <div className="jj-state jj-enter">
             <span className="jj-state-icon" aria-hidden="true">
-              ⚠
+              <IconTriangleAlert size={22} />
             </span>
             <p className="p0-err">{lastError}</p>
             <button type="button" className="jj-btn jj-transition jj-pressable" onClick={() => setLastError(null)}>
@@ -849,8 +850,12 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
             <div>
               {b.content || (b.streaming ? '…' : '')}
               {b.streaming && <span className="w2-caret" />}
-              {b.error && <div className="p0-err">✗ {b.error}</div>}
-              {/* 被截断的回答挂在这里，不挂成 ✗（T26）：那是"不完整"，不是"失败" */}
+              {b.error && (
+                <div className="p0-err">
+                  <IconX /> {b.error}
+                </div>
+              )}
+              {/* 被截断的回答挂在这里，不挂成失败图标（T26）：那是"不完整"，不是"失败" */}
               {b.notice && <div className="p0-warn">{b.notice}</div>}
               {/*
                 长期记忆的**唯一写入口**：只有人按下这个按钮才会写。

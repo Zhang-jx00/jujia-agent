@@ -145,6 +145,7 @@
 | 铺设7 | `apps/desktop/src/main/{schedule-store,schedule-service}.ts` · `apps/desktop/src/main/ipc/schedule.ts` | 定时任务的**落盘与发动机**（M7）：账本（校验只一处 · 读改写在临界区 · 拒"免审批"键）、tick 与"一次只跑一条"、到点走同一扇门 |
 | 铺设7 | `apps/desktop/src/main/ipc/turn-trigger.ts` | **起一轮对话的唯一入口**（M7 从 `ipc/chat.ts` 抽出）：用户敲字与定时到点共用它，权限参数汇聚点因此只有一个 |
 | 铺设7 | `apps/desktop/src/renderer/src/features/schedule/` | 定时任务页（M7）：清单只搬运主进程算好的"下一次"，规则子集与"定时≠免审批"写在屏幕上 |
+| 优化6 | `apps/desktop/src/renderer/src/ui/`（`icons.tsx`） | 内联图标集（R19）：Lucide · ISC · 零运行时依赖；`aria-hidden` 的 `svg[data-icon]` + `stroke=currentColor` 统一契约 |
 | 铺设10 | `packages/agent-core/src/tools/builtin/note-tool.ts` | 记忆写入 `append_note` 工具本体（与 `main/pending-notes.ts` 同批） |
 
 ## 三、记录规则（今后一律遵守）

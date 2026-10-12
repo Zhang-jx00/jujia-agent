@@ -11,6 +11,7 @@ import { WorkspaceCard } from './features/workspace/WorkspaceCard';
 import { PermissionDialog } from './features/permission/PermissionDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { KeepAlive } from './KeepAlive';
+import { IconTriangleAlert } from './ui/icons';
 
 // 懒加载：连接页与对话页不在首屏，拆出去可显著减小初始 bundle（懒加载策略见 PERF-BUDGET）
 const ConnectionsPanel = lazy(() =>
@@ -329,7 +330,7 @@ function Overview({ info, config }: { info: AppInfo; config: ConfigSnapshot }): 
         <h2>配置（原子存储，含损坏自愈）</h2>
         {config.recovered && (
           <p className="p0-warn" role="status">
-            ⚠ 本次启动检测到配置不可用，已从
+            <IconTriangleAlert /> 本次启动检测到配置不可用，已从
             {config.recoveredFrom === 'backup' ? '备份 .bak' : '默认值'}
             自愈写回
             {config.recoveredAt ? `（${config.recoveredAt}）` : ''}。损坏文件已隔离为{' '}

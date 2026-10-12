@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { TREE_MAX_ENTRIES } from '@jujia/shared-ipc';
 import { isPdfPath, isTruncatedRead, parseListing, shouldRefuseSave, TREE_QUERY_LIMIT, type Listing } from './ide-parse';
+import { IconFileText, IconFolder } from '../../ui/icons';
 /**
  * PDF 查看器**按需加载**：它连带 pdfjs（~800KB）与内置字体/cmap（~1.4MB）共 2.2MB 懒加载块 ——
  * 只有真的点开一份 PDF 才值得付这份代价，光开「文件」页签不该付。
@@ -266,7 +267,7 @@ function TreeNode({
               title={childRel}
               onClick={() => void (e.isDir ? onToggle(childRel) : onOpen(childRel))}
             >
-              {`${e.isDir ? '📁' : '📄'} ${e.name}`}
+              {e.isDir ? <IconFolder /> : <IconFileText />} {e.name}
             </button>
             {e.isDir && listings[childRel] !== undefined && (
               <TreeNode rel={childRel} depth={depth + 1} listings={listings} onToggle={onToggle} onOpen={onOpen} />

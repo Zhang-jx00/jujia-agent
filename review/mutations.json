@@ -1,5 +1,5 @@
 {
-  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）；M20–M21 来自扩容 3（文档查看：innerHTML 不许回来 / 链接协议白名单不许放宽）；M22–M23 来自铺设 6（记忆写入：路径守卫不许退化成拼字符串 / 写类档位不许降成读）；M26–M32 来自安全内核修复轮（外部审查 T1 只读绕过敏感判定 / T2 NTFS 备用数据流 / T3 钩子子进程环境 / T4 钩子配置写入过门）；M33–M37 来自外部审查修复 2（P1 第一批：T7 流式两条时间界限 / T5 会话闸门 / T6 落盘记账与清单串行）；M40 来自组件测试首批（错误边界的捕获状态）；M41–M44 来自外部审查修复 3（T19 硬 ask 不渲染「总是允许」/ T9 超时精准关闭与批准计划回读）；M71–M81 来自无限画布 M9a 前三步（图契约与键名扫描 · 编排层纯规则 · 豁免清单）；M82–M84 来自 M9a 接线锁（界面归属判别 · 事件归属字段 · 执行链路不许另起）；M85 来自复核 047 第二遍实验（停止被判成完成）；M86–M88 来自 M9b B1（对齐辅助线 / 命令面板 / 吸附时机）；M89 来自 CSS 版接线锁（样式规则整块失去）；M90–M92 来自 B2 局部重跑；M93–M99 来自 B3 条件分支；M100–M103 来自 M8 push 收口（推送被降成软 ask / 推送绕过权限门 / 远端名形状校验失守 / 外发文案被换成中性一句）；M104–M105 来自加固 4（cmd 元字符表 / 经 cmd 的判据分叉）；**M106–M119 来自修复批二**（T23 终端会话生命周期：接回失效 / 上限失效 / 尾部不截 / 截错头 / 不记 tail / seq 不动 / 卸载又杀会话 / 决策被绕过 / 状态通道永远答「没有」/ 硬 ask 被放宽；T24 文档页阅读位置：换文件带走旧位置 / 空路径也记 / 滚动没接上 / 读失败不忘）；M127–M128 来自修复批三（下）T30（入参上限被摘 / handler 绕开契约）。基线：本轮主提交；M193–M205 来自铺设 7（M7 定时任务：算式层拒收口径与锚点边界 · 补跑水位线 · 只跑一条 · 免审批键拒收 · 装配即启动）；M206–M211 来自优化5（R18：展开用真实高度轨道过渡 · 箭头同元素转 180° · 收起态 inert · 按压反馈覆盖可点家族）",
+  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）；M20–M21 来自扩容 3（文档查看：innerHTML 不许回来 / 链接协议白名单不许放宽）；M22–M23 来自铺设 6（记忆写入：路径守卫不许退化成拼字符串 / 写类档位不许降成读）；M26–M32 来自安全内核修复轮（外部审查 T1 只读绕过敏感判定 / T2 NTFS 备用数据流 / T3 钩子子进程环境 / T4 钩子配置写入过门）；M33–M37 来自外部审查修复 2（P1 第一批：T7 流式两条时间界限 / T5 会话闸门 / T6 落盘记账与清单串行）；M40 来自组件测试首批（错误边界的捕获状态）；M41–M44 来自外部审查修复 3（T19 硬 ask 不渲染「总是允许」/ T9 超时精准关闭与批准计划回读）；M71–M81 来自无限画布 M9a 前三步（图契约与键名扫描 · 编排层纯规则 · 豁免清单）；M82–M84 来自 M9a 接线锁（界面归属判别 · 事件归属字段 · 执行链路不许另起）；M85 来自复核 047 第二遍实验（停止被判成完成）；M86–M88 来自 M9b B1（对齐辅助线 / 命令面板 / 吸附时机）；M89 来自 CSS 版接线锁（样式规则整块失去）；M90–M92 来自 B2 局部重跑；M93–M99 来自 B3 条件分支；M100–M103 来自 M8 push 收口（推送被降成软 ask / 推送绕过权限门 / 远端名形状校验失守 / 外发文案被换成中性一句）；M104–M105 来自加固 4（cmd 元字符表 / 经 cmd 的判据分叉）；**M106–M119 来自修复批二**（T23 终端会话生命周期：接回失效 / 上限失效 / 尾部不截 / 截错头 / 不记 tail / seq 不动 / 卸载又杀会话 / 决策被绕过 / 状态通道永远答「没有」/ 硬 ask 被放宽；T24 文档页阅读位置：换文件带走旧位置 / 空路径也记 / 滚动没接上 / 读失败不忘）；M127–M128 来自修复批三（下）T30（入参上限被摘 / handler 绕开契约）。基线：本轮主提交；M193–M205 来自铺设 7（M7 定时任务：算式层拒收口径与锚点边界 · 补跑水位线 · 只跑一条 · 免审批键拒收 · 装配即启动）；M206–M211 来自优化5（R18：展开用真实高度轨道过渡 · 箭头同元素转 180° · 收起态 inert · 按压反馈覆盖可点家族）；M212–M215 来自优化6（R19：图标 aria-hidden 契约 · currentColor · 字符画/emoji 清扫）",
   "mutations": [
     {
       "id": "M1",
@@ -1688,6 +1688,38 @@
       "find": ".app-tab:active,\nbutton.jj-btn:active:not(:disabled),",
       "replace": "x-app-tab-disabled:active,\nbutton.x-jj-btn:active:not(:disabled),",
       "test": "apps/desktop/src/renderer/src/motion-wiring.test.ts"
+    },
+    {
+      "id": "M212",
+      "desc": "图标不再对读屏隐藏：装饰性图形被当成\"有含义的内容\"念出来",
+      "file": "apps/desktop/src/renderer/src/ui/icons.tsx",
+      "find": "      aria-hidden=\"true\"\n      focusable=\"false\"",
+      "replace": "      focusable=\"false\"",
+      "test": "apps/desktop/src/renderer/src/ui/icons.test.tsx"
+    },
+    {
+      "id": "M213",
+      "desc": "图标颜色钉成固定值（currentColor 被换掉）：深色主题下与文字脱钩，主题一换就瞎",
+      "file": "apps/desktop/src/renderer/src/ui/icons.tsx",
+      "find": "      stroke=\"currentColor\"",
+      "replace": "      stroke=\"#ffffff\"",
+      "test": "apps/desktop/src/renderer/src/ui/icons.test.tsx"
+    },
+    {
+      "id": "M214",
+      "desc": "文件树把 emoji 塞回字符串（📁/📄 回来了）—— 风格一夜回到字符画",
+      "file": "apps/desktop/src/renderer/src/features/ide/IdePanel.tsx",
+      "find": "              {e.isDir ? <IconFolder /> : <IconFileText />} {e.name}",
+      "replace": "              {`${e.isDir ? '\\u{1F4C1}' : '\\u{1F4C4}'} ${e.name}`}",
+      "test": "apps/desktop/src/renderer/src/ui/icons.test.tsx"
+    },
+    {
+      "id": "M215",
+      "desc": "工具卡状态又用字符表示（◌/✓/✗ 回来了）—— 与内联图标两套并存",
+      "file": "apps/desktop/src/renderer/src/features/chat/ToolCard.tsx",
+      "find": "  const stateIcon =\n    state === 'running' ? <IconLoaderCircle /> : state === 'ok' ? <IconCheck /> : <IconX />;",
+      "replace": "  const stateIcon = state === 'running' ? '\\u25CC' : state === 'ok' ? '\\u2713' : '\\u2717';",
+      "test": "apps/desktop/src/renderer/src/ui/icons.test.tsx"
     }
   ]
 }

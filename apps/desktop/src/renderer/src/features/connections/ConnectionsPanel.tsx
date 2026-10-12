@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ConnectionInput, ConnectionView, TestResult } from '@jujia/shared-ipc';
+import { IconCheck, IconX } from '../../ui/icons';
 
 /**
  * 厂商预设 —— **2026-09-18 依官方文档实测核实**，不可凭记忆改动。
@@ -291,7 +292,7 @@ export function ConnectionsPanel({ onChanged }: Props): ReactElement {
                   </span>
                   {result && (
                     <span className={result.ok ? 'p0-ok' : 'p0-err'}>
-                      {result.ok ? '✓' : '✗'} {result.message}
+                      {result.ok ? <IconCheck /> : <IconX />} {result.message}
                       {result.ok ? `（${result.latencyMs}ms）` : ''}
                     </span>
                   )}

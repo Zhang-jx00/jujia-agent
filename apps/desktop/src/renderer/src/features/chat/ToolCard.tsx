@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
+import { IconCheck, IconChevronDown, IconLoaderCircle, IconX } from '../../ui/icons';
 
 /**
  * 工具卡（W6）：三级信息密度
@@ -64,7 +65,9 @@ export function ToolCard({ data }: { data: ToolCardData }): ReactElement {
   }, [level]);
 
   const state = data.phase === 'running' ? 'running' : data.ok ? 'ok' : 'bad';
-  const icon = state === 'running' ? '◌' : state === 'ok' ? '✓' : '✗';
+  // 状态图标是**内联 SVG**（R19）：随文字颜色走、尺寸一致；旁边永远有状态文字，所以对读屏隐藏
+  const stateIcon =
+    state === 'running' ? <IconLoaderCircle /> : state === 'ok' ? <IconCheck /> : <IconX />;
   const statusText = state === 'running' ? '执行中' : state === 'ok' ? '完成' : '失败';
 
   return (
@@ -76,7 +79,7 @@ export function ToolCard({ data }: { data: ToolCardData }): ReactElement {
         onClick={() => setLevel(level === 'L0' ? 'L1' : 'L0')}
       >
         <span className={`jj-tool-icon${state === 'running' ? ' jj-tool-icon-spinning' : ''}`}>
-          {icon}
+          {stateIcon}
         </span>
         <code className="jj-tool-name">{data.name}</code>
         <span className="jj-tool-kind">{KIND_HINT[data.name] ?? '工具'}</span>
@@ -85,7 +88,7 @@ export function ToolCard({ data }: { data: ToolCardData }): ReactElement {
         </span>
         {data.summary && <span className="jj-tool-summary">{data.summary}</span>}
         <span className="jj-caret" data-caret="" data-open={level !== 'L0'} aria-hidden="true">
-          ⌄
+          <IconChevronDown />
         </span>
       </button>
 

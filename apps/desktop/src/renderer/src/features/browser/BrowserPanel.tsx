@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { BrowserExeState, BrowserOpenTarget, BrowserState } from '@jujia/shared-ipc';
+import { IconRotateCw } from '../../ui/icons';
 
 /**
  * 内置浏览器页签（M10 · 轨道扩容计划 1）。
@@ -253,7 +254,7 @@ export function BrowserPanel(): ReactElement {
           disabled={!opened || busy}
           title="重新加载"
         >
-          ⟳
+          <IconRotateCw size={14} />
         </button>
         <button
           type="button"
