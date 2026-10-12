@@ -46,11 +46,18 @@ describe('展开/收起按设计基线做（R18）', () => {
   });
 
   it('按压反馈覆盖主要可点家族（100ms 轻微缩放）', () => {
-    for (const sel of ['.app-tab', 'button.jj-btn', 'button.w2-btn', 'button.w2-btn-primary', '.jj-tool-l0']) {
-      expect(motion, `按压规则应当覆盖 ${sel}`).toContain(sel);
+    // 关键：**要在 :active 那一组里**逐家族找到 —— 只在别处出现过同样的选择器名
+    // 不算数（M211 首轮就是这样逃掉的：过渡那组还留着名字，按下却什么都不发生）。
+    const activeBlock = /按压与悬停反馈统一接入[\s\S]*?\.jj-tool-l0:active \{[^}]*\}/.exec(motion)?.[0] ?? '';
+    expect(activeBlock, '找不到"按压反馈"那一组规则').not.toBe('');
+    for (const sel of ['.app-tab:active', 'button.jj-btn:active:not(:disabled)', 'button.w2-btn:active:not(:disabled)', 'button.w2-btn-primary:active:not(:disabled)', '.jj-tool-l0:active']) {
+      expect(activeBlock, `按压组里缺少 ${sel}`).toContain(sel);
     }
-    expect(motion).toContain('scale(0.97)');
-    expect(motion).toContain('--motion-duration-instant');
+    expect(activeBlock).toContain('scale(0.97)');
+    // 过渡也在同一组里声明（transform 要走 100ms 的微交互时长）
+    const pressBlock = /按压与悬停反馈统一接入[\s\S]*?\.jj-tool-l0 \{[^}]*\}/.exec(motion)?.[0] ?? '';
+    expect(pressBlock).toContain('--motion-duration-instant');
+    expect(pressBlock).toContain('.app-tab');
   });
 
   it('过场时长只用动效令牌，不写裸毫秒（令牌层之外的裸数就是下一处漂移）', () => {
