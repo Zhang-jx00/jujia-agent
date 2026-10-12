@@ -24,8 +24,9 @@ import {
   type ToolRegistry,
   type GateAuditInfo,
 } from '@jujia/agent-core';
-import type { StreamEvent } from '@jujia/shared-ipc';
+import { TOOL_OUTPUT_FLUSH_CHARS, TOOL_OUTPUT_QUIET_MS, TOOL_OUTPUT_TAIL_CHARS, type StreamEvent } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
+import { createToolOutputRelay } from './tool-output-relay';
 import { pickHistoryPage } from './history-window';
 import { getDataRoot } from './paths';
 import { buildModelHistory, mergeTurnResult } from './model-history';
@@ -337,6 +338,19 @@ export function sendMessage(
   void (async () => {
     let seq = 0;
     let resolved: 'stop' | 'length' | 'content_filter' | 'aborted' | 'error' | 'tool_calls' = 'stop';
+    /**
+     * 实时输出的中转（R8.7）：**每一轮一份**，按 callId 分线。
+     * 交给界面的是"截至此刻的尾部快照"；主进程负责攒批（别一条一事件刷爆 IPC）与保留上限
+     * （别把一次刷屏留在内存里）。声明在 `try` 外面，`finally` 才收尾得到它。
+     */
+    const outputStreams = createToolOutputRelay({
+      maxTailChars: TOOL_OUTPUT_TAIL_CHARS,
+      flushChars: TOOL_OUTPUT_FLUSH_CHARS,
+      quietMs: TOOL_OUTPUT_QUIET_MS,
+      pushTail: (callId, name, tail) => {
+        emit({ type: 'tool_output', sessionId: session.id, callId, name, tail });
+      },
+    });
 
     try {
       const { record, apiKey } = await resolveConnection(connectionId);
@@ -467,7 +481,12 @@ export function sendMessage(
                 name: ev.name,
                 argumentsText: ev.argumentsText,
               });
+            } else if (ev.type === 'tool_output') {
+              outputStreams.onChunk(ev.callId, ev.name, ev.chunk);
             } else if (ev.type === 'tool_end') {
+              // 先补发这份尾巴再发 tool_end：界面收到的顺序必须与真实发生顺序一致
+              // （反过来会看到"先显示完成、后又冒出一段输出"）
+              outputStreams.onEnd(ev.callId);
               emit({
                 type: 'tool_end',
                 sessionId: session.id,
@@ -538,6 +557,8 @@ export function sendMessage(
     } finally {
       session.running = false;
       session.controller = null;
+      // 用户中途停止 / 出错时也要把压着的输出交出去：已经跑出来的东西不该因为"没跑完"而消失
+      outputStreams.closeAll();
       // **落盘点在轮次结束处**，不是每条 token：中途写会把半截回答留在盘上，
       // 也让一次长回答产生成百上千次 IO
       await flushSession(session);

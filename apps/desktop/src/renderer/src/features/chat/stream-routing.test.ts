@@ -27,8 +27,11 @@ describe('belongsToSession', () => {
     expect(belongsToSession({ sessionId: 'A' }, '')).toBe(false);
   });
 
-  it('六类事件都带 sessionId（少了这个字段，上面三条都无从谈起）', () => {
-    // 契约在 shared-ipc 里；这里钉的是"契约确实给了这个字段"这一事实
+  it('每一类流事件都必须带 sessionId（少了这个字段，上面三条都无从谈起）', () => {
+    // 契约在 shared-ipc 里；这里钉的是"契约确实给了这个字段"这一事实。
+    // 判据用"成员数 == 带 sessionId 的人数"这种**结构不变量**，不写死"就是 6 类"——
+    // 写死条目的锁在本仓已经咬过三次自己人（CSS 锁的子串匹配、check-docs 的段落 indexOf、
+    // ide-wiring 的通道清单），而本轮加第七类事件（tool_output）当场又咬了一次。
     const here = dirname(fileURLToPath(import.meta.url));
     // 本文件在 apps/desktop/src/renderer/src/features/chat/ —— 到仓库根要上 7 层
     const contracts = readFileSync(
@@ -39,7 +42,11 @@ describe('belongsToSession', () => {
       contracts.indexOf('export const streamEventSchema'),
       contracts.indexOf('export type StreamEvent'),
     );
-    expect((block.match(/sessionId: z.string\(\)/g) ?? []).length).toBe(6);
+    const members = (block.match(/type: z\.literal\('([a-z_]+)'\)/g) ?? []).length;
+    const withSession = (block.match(/sessionId: z\.string\(\)/g) ?? []).length;
+    // 防失焦下限：真的扫到了多类事件（不是段落定位器失效导致两边都是 0 而"相等"）
+    expect(members).toBeGreaterThan(5);
+    expect(withSession).toBe(members);
   });
 });
 

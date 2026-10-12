@@ -34,3 +34,4 @@ export * from './context/compaction';
 export * from './context/injection-notice';
 export * from './audit/redact';
 export * from './audit/record';
+export * from './tools/output-pump';

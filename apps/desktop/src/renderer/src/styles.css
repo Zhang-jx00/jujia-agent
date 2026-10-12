@@ -509,6 +509,22 @@ button:disabled {
   color: var(--c-text-secondary);
 }
 
+/*
+ * 长命令的实时输出尾部（R8.7）：不展开卡片也能看见，所以必须在 L0 之下就占位。
+ * 高度有界（超过就内部滚动）—— 一次刷屏不该把整条对话顶出屏幕。
+ */
+.jj-tool-tail {
+  margin: 0;
+  padding: 6px 10px;
+  max-height: 9rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: var(--fs-caption);
+  color: var(--c-text-secondary);
+  border-left: 2px solid var(--c-border);
+}
+
 /* L1：卡片（内容做 opacity/translateY 入场，容器高度瞬时变化——不做高度动画） */
 .jj-tool-l1 {
   padding: var(--space-sm) var(--space-md) var(--space-md);

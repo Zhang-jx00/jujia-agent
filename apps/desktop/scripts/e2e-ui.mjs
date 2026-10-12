@@ -128,13 +128,45 @@ const streamServer = createServer((req, res) => {
   req.on('data', (c) => (body += String(c)));
   req.on('end', () => {
     let prompt = '';
+    let hasToolReply = false;
     try {
       const parsed = JSON.parse(body);
       const msgs = Array.isArray(parsed.messages) ? parsed.messages : [];
       const lastUser = [...msgs].reverse().find((m) => m && m.role === 'user');
       prompt = String(lastUser?.content ?? '');
+      // 工具轮跑完之后，下一轮请求里会带一条 role=tool 的消息 —— 用它区分"要调工具"与"该收尾了"
+      hasToolReply = msgs.some((m) => m && m.role === 'tool');
     } catch {
       // 解析不出来就按默认档（A）走：这一步测的是事件分发，不是解析健壮性
+    }
+    /**
+     * R8.7（实时输出）那一幕：先只回一个 `run_command` 调用，等工具跑完再收尾。
+     * 命令行里那条"先吐一行、静默三秒、再吐一行"是故意的 ——
+     * 只有这种形状能证明"输出是边跑边出现的"，而不是跑完一次性给出来。
+     */
+    const cmdMarker = /E2E_CMD ([A-Z0-9_-]+)/.exec(prompt)?.[1] ?? '';
+    if (cmdMarker !== '' && !hasToolReply) {
+      const command =
+        process.platform === 'win32'
+          ? `echo ${cmdMarker}-EARLY & ping -n 4 127.0.0.1 >nul & echo ${cmdMarker}-LATE`
+          : `echo ${cmdMarker}-EARLY; sleep 3; echo ${cmdMarker}-LATE`;
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(
+        `data: ${JSON.stringify({
+          choices: [{ delta: { tool_calls: [{ index: 0, id: 'e2e-call-1', function: { name: 'run_command', arguments: JSON.stringify({ command }) } }] } }],
+        })}\n\n`,
+      );
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
+    if (cmdMarker !== '' && hasToolReply) {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'E2E-CMD-FINAL' } }] })}\n\n`);
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
     }
     // 两条都是慢流（A 先结束、B 后结束）：只有这样才存在"A 的事件到达时 B 还在流"这个现场
     const scene = prompt.includes('STREAM_B') ? 'B' : 'A';
@@ -2793,6 +2825,69 @@ try {
   }
   ok(`审计：工具与三扇非工具门都在账上（gate 行 ${String(gateLines.length)} 条），有指纹有长度；正文进不去，该看得见的一条没少`);
 
+  step('R8.7 长命令实时输出：先吐的那行在命令跑完之前就得看得见（不是跑完一次性给出）');
+  /**
+   * 这一幕只能是界面级证据：单测能证明"事件发出来了"，证明不了"人在命令还挂着的时候看见了"。
+   * 假服务被安排成"先要一个 run_command 调用"，那条命令故意**先吐一行、静默三秒、再吐一行**
+   * —— 只按字节攒批的话这里全程空白，正是本轮补静默刷新要修掉的东西。
+   */
+  const streamMarker = `E2ESTREAM${String(Date.now()).slice(-5)}`;
+  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await win3.locator('select').first().selectOption(seededStreamConnId);
+  await win3.locator('button', { hasText: '新会话' }).first().click();
+  const streamChatBox = win3.locator('textarea[placeholder^="输入消息"]');
+  await streamChatBox.fill(`E2E_CMD ${streamMarker}`);
+  await win3.locator('button', { hasText: '发送' }).first().click();
+
+  if ((await waitText3(`需要你确认：run_command`, 15_000)) !== true) {
+    fail('模型要求的 run_command 没有弹审批（对话链路的权限门不在这一步的验收面里，但后面的断言全依赖它）', (await body3()).slice(0, 900));
+  }
+  await win3.locator('button', { hasText: '允许一次' }).first().click();
+  // 先等审批弹窗真的关掉：它的标题里带着整条命令行，含 EARLY / LATE 两个字面 ——
+  // 拿整页文本来判"哪一行先出现"会把弹窗里的字面当成输出（本轮第一次跑就是这么红的）
+  await win3.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
+
+  /** 只看工具卡上那一格（语义锚点），不看整页文本 */
+  const tailText = async () => {
+    const box = win3.locator('[data-tool-tail]').first();
+    if ((await box.count()) === 0) return '';
+    return (await box.textContent()) ?? '';
+  };
+
+  // ① 先吐的那一行必须在**命令还在跑**的时候就出现在卡片上
+  let earlyTail = '';
+  let sawEarlyWhileRunning = false;
+  let sawLateEarly = false;
+  for (let i = 0; i < 60; i += 1) {
+    const tail = await tailText();
+    if (tail.includes(`${streamMarker}-EARLY`)) {
+      earlyTail = tail;
+      sawEarlyWhileRunning = (await body3()).includes('执行中');
+      sawLateEarly = tail.includes(`${streamMarker}-LATE`);
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (earlyTail === '') {
+    fail('命令跑了半天，工具卡上没有任何实时输出（攒批没被刷新，或整条链某一环没接）', (await body3()).slice(0, 900));
+  }
+  if (sawLateEarly) fail('两行是一起到的：静默期刷新没起作用，等于跑完再回放', earlyTail.slice(0, 400));
+  if (!sawEarlyWhileRunning) {
+    fail('先吐的那一行是等命令跑完才出现的 —— 那不是"实时输出"，是结果回放', earlyTail.slice(0, 400));
+  }
+  ok('实时输出：命令还在跑，先吐的那一行已经单独显示在工具卡上（后一行还没到）');
+
+  // ② 命令结束后：最后一段快照补全，收尾话也说对
+  if ((await waitText3(`${streamMarker}-LATE`, 20_000)) !== true) {
+    fail('命令跑完了，界面上却始终没见到后一行（closeAll / onEnd 的补发没生效）', (await body3()).slice(0, 900));
+  }
+  if ((await waitText3('E2E-CMD-FINAL', 20_000)) !== true) {
+    fail('工具跑完后模型没有收尾回答（工具轮之后的第二轮没走通）', (await body3()).slice(0, 900));
+  }
+  const tailBoxes = await win3.locator('[data-tool-tail]').count();
+  if (tailBoxes === 0) fail('工具卡上的实时输出那一格没有语义锚点（data-tool-tail）');
+  ok('收尾之后：最后一段输出补全，模型的收尾回答也照常到达');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -2812,5 +2907,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 干净退出');
 process.exit(0);

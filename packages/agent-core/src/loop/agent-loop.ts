@@ -63,6 +63,15 @@ export type LoopEvent =
       summary: string;
       durationMs: number;
     }
+  /**
+   * 长命令的**实时输出**（R8.7 · M4 收尾其三）。
+   *
+   * 只有工具自己往 `ToolContext.onToolOutput` 交东西时才有这一条（目前是 `run_command`）。
+   * 它**不进会话历史、不进模型**：喂给模型的是跑完之后的 `content`。
+   * 为什么必须带 `callId`：一次回答里模型可以连着调好几个工具，
+   * 不带来源的输出会串到别的气泡上去（外部审查 T5 就是同一个形状）。
+   */
+  | { type: 'tool_output'; callId: string; name: string; chunk: string }
   | { type: 'turn_end'; turn: number; branch: LoopBranch }
   /**
    * 用量：**整轮累计**，不是单次调用的数字。
@@ -351,7 +360,11 @@ export async function runAgentTurn(
         argumentsText: call.argumentsText,
       });
 
-      const outcome = await executeOne(call, deps, execute);
+      const outcome = await executeOne(call, deps, execute, (text) => {
+        // 空块不发：一次空事件会让界面多一次重绘，而"没有输出"不是输出
+        if (text === '') return;
+        params.emit({ type: 'tool_output', callId: call.id, name: call.name, chunk: text });
+      });
       messages.push({ role: 'tool', toolCallId: call.id, content: outcome.content });
       params.emit({
         type: 'tool_end',
@@ -383,6 +396,7 @@ async function executeOne(
   call: AssembledToolCall,
   deps: AgentLoopDeps,
   execute: typeof runTool,
+  onOutput: (text: string) => void,
 ): Promise<{ ok: boolean; content: string; durationMs: number }> {
   if (!deps.registry.has(call.name) && call.name !== HANDOFF_TOOL_NAME) {
     return {
@@ -403,7 +417,8 @@ async function executeOne(
   const result: RunToolResult = await execute(
     tool,
     call.arguments,
-    { workspaceRoot: deps.workspaceRoot },
+    // 实时输出通道：谁在跑就用谁的 callId 标出去，循环不在这里加工内容
+    { workspaceRoot: deps.workspaceRoot, onToolOutput: onOutput },
     deps.permission,
     {
       ...(deps.alwaysAllow ? { alwaysAllow: deps.alwaysAllow } : {}),

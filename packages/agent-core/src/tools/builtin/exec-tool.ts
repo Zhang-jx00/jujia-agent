@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { stat } from 'node:fs/promises';
+import { StringDecoder } from 'node:string_decoder';
 import { z } from 'zod';
 import { killProcessTree } from '../../commands/process';
 import { buildTerminalEnv, pickShell } from '../../terminal/terminal';
@@ -38,6 +39,13 @@ export const DEFAULT_EXEC_TIMEOUT_MS = 30_000;
 export const MAX_EXEC_TIMEOUT_MS = 300_000;
 /** 输出上限（stdout + stderr 各自）：超出即截断并如实标注，绝不假装完整 */
 export const MAX_EXEC_OUTPUT_BYTES = 256 * 1024;
+
+/**
+ * 到达上限后递给实时输出通道的**唯一一句**说明（R8.7）。
+ * 为什么要专门留这一句：模型拿到的正文是被截断的，界面如果继续滚，
+ * 就等于在同一次执行里给人看两份不一样的东西；停下来、并说清为什么停，才是同一件事。
+ */
+export const EXEC_STREAM_STOP_NOTICE = '（输出已达上限，后续内容不再实时显示；完整结果以本次工具返回为准）';
 
 export interface ExecArgs {
   command: string;
@@ -97,16 +105,17 @@ export function clampTimeout(ms: number | undefined): number {
 /** 按字节上限裁剪；返回是否裁过（调用方必须在正文里如实标注） */
 export function capOutput(text: string, limit = MAX_EXEC_OUTPUT_BYTES): { text: string; truncated: boolean } {
   if (Buffer.byteLength(text, 'utf8') <= limit) return { text, truncated: false };
-  return {
-    text: Buffer.from(text, 'utf8').subarray(0, limit).toString('utf8'),
-    truncated: true,
-  };
+  // 用 StringDecoder 而不是 `subarray(...).toString('utf8')`：
+  // 后者会把结尾那半个字节序列解成 U+FFFD —— 那是"截断"这个动作自己造出来的假字符，
+  // 命令并没有真吐出替换字符（本轮实测：limit 切在"文"字中间时旧写法给 '中\ufffd'）
+  const decoder = new StringDecoder('utf8');
+  return { text: decoder.write(Buffer.from(text, 'utf8').subarray(0, limit)), truncated: true };
 }
 
-function toText(chunk: unknown): string {
-  if (typeof chunk === 'string') return chunk;
-  if (chunk instanceof Uint8Array) return Buffer.from(chunk).toString('utf8');
-  return '';
+function toBuffer(chunk: unknown): Buffer {
+  if (typeof chunk === 'string') return Buffer.from(chunk, 'utf8');
+  if (chunk instanceof Uint8Array) return Buffer.from(chunk);
+  return Buffer.alloc(0);
 }
 
 /**
@@ -149,28 +158,46 @@ export function execOnce(args: ExecArgs, ctx: ToolContext, deps: ExecDeps): Prom
     let outTruncated = false;
     let errTruncated = false;
     let timedOut = false;
+    /**
+     * 每条流各持一个解码器：**跨块的汉字不能被当成两块各解一次**（旧写法解一半会吐 U+FFFD，
+     * 本轮的测试先把它证成了红：`'退出码 0｜工作目录 .\n\ufffd\ufffd文测试'`）。
+     * 未凑齐的字节序列留在解码器里等下一块，这是唯一不丢字的解法。
+     */
+    const outDecoder = new StringDecoder('utf8');
+    const errDecoder = new StringDecoder('utf8');
+    const stream = (text: string): void => {
+      if (text !== '') ctx.onToolOutput?.(text);
+    };
     // 用对象持有：回调里的赋值不会被控制流分析跟踪，直接写 `let e: Error | null` 会让下面的
     // 判空把类型窄化成 never（TS 实测）
     const spawnFailure: { err: Error | null } = { err: null };
 
     child.stdout.on('data', (chunk) => {
       if (outTruncated) return;
-      stdout += toText(chunk);
+      const text = outDecoder.write(toBuffer(chunk));
+      stdout += text;
       // 必须在**追加之后**按字节判：单个 chunk 就可能超过上限（node 的 data 事件最大约 64KB）
       if (Buffer.byteLength(stdout, 'utf8') > MAX_EXEC_OUTPUT_BYTES) {
         const capped = capOutput(stdout);
         stdout = capped.text;
         outTruncated = true;
+        ctx.onToolOutput?.(EXEC_STREAM_STOP_NOTICE);
+        return;
       }
+      stream(text);
     });
     child.stderr.on('data', (chunk) => {
       if (errTruncated) return;
-      stderr += toText(chunk);
+      const text = errDecoder.write(toBuffer(chunk));
+      stderr += text;
       if (Buffer.byteLength(stderr, 'utf8') > MAX_EXEC_OUTPUT_BYTES) {
         const capped = capOutput(stderr);
         stderr = capped.text;
         errTruncated = true;
+        ctx.onToolOutput?.(EXEC_STREAM_STOP_NOTICE);
+        return;
       }
+      stream(text);
     });
     child.on('error', (err) => {
       spawnFailure.err = err;
@@ -194,6 +221,19 @@ export function execOnce(args: ExecArgs, ctx: ToolContext, deps: ExecDeps): Prom
 
     if (spawnFailure.err !== null) {
       throw new ToolError('io_error', `进程执行失败：${spawnFailure.err.message}`);
+    }
+
+    // 流结束时解码器里可能还压着半个字符（命令被信号截断时常见）。
+    // 交给 end()：它给的是替换字符 —— **命令确实在那里断了**，比悄悄丢掉那半个字要诚实。
+    if (!outTruncated) {
+      const rest = outDecoder.end();
+      stdout += rest;
+      stream(rest);
+    }
+    if (!errTruncated) {
+      const rest = errDecoder.end();
+      stderr += rest;
+      stream(rest);
     }
 
     const durationMs = Date.now() - startedAt;

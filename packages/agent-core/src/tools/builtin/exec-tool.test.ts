@@ -10,6 +10,7 @@ import {
   MAX_EXEC_OUTPUT_BYTES,
   MAX_EXEC_TIMEOUT_MS,
   EXEC_TOOL_NAME,
+  EXEC_STREAM_STOP_NOTICE,
   buildExecInvocation,
   capOutput,
   clampTimeout,
@@ -48,6 +49,12 @@ afterEach(async () => {
 interface FakeOptions {
   stdout?: string;
   stderr?: string;
+  /**
+   * 按顺序发出的**多个数据块**（R8.7 要用它复现两件事：
+   * ① 一个汉字的字节被切在两块之间；② 输出一路滚、界面要一路看得见）。
+   * 给了这个就不再走 stdout/stderr 的单发路径。
+   */
+  chunks?: ReadonlyArray<readonly ['stdout' | 'stderr', Buffer]>;
   exitCode?: number | null;
   /** true = 永远不退（用来触发超时） */
   hang?: boolean;
@@ -72,6 +79,12 @@ function makeFake(opts: FakeOptions = {}) {
   let pendingError: Error | null = null;
 
   function emitData(): void {
+    if (opts.chunks !== undefined) {
+      for (const [which, buf] of opts.chunks) {
+        for (const cb of dataListeners[which]) cb(buf);
+      }
+      return;
+    }
     if (opts.stdout !== undefined) for (const cb of dataListeners.stdout) cb(Buffer.from(opts.stdout, 'utf8'));
     if (opts.stderr !== undefined) for (const cb of dataListeners.stderr) cb(Buffer.from(opts.stderr, 'utf8'));
   }
@@ -454,5 +467,112 @@ describe('真跑一条命令（不注入假 spawn）', () => {
     const cmd = process.platform === 'win32' ? 'ping -n 30 127.0.0.1 >nul' : 'sleep 30';
     const r = await runCommandTool.run({ command: cmd, timeoutMs: 800 }, ctx());
     expect(r.content).toContain('超时');
+  });
+});
+
+/* ---------------- 实时输出与跨块解码（R8.7） ---------------- */
+
+describe('长命令的实时输出：一块不丢、不乱码、到上限就明说', () => {
+  const streamCtx = (sink: string[]): ToolContext => ({
+    workspaceRoot: root,
+    onToolOutput: (text: string) => {
+      sink.push(text);
+    },
+  });
+
+  it('一个汉字的字节被切在两块之间时不许变成乱码（现状：每块各解一次会吐出 U+FFFD）', async () => {
+    const zh = Buffer.from('中', 'utf8');
+    expect(zh.length).toBe(3);
+    const fake = makeFake({
+      chunks: [
+        ['stdout', zh.subarray(0, 2)],
+        ['stdout', Buffer.concat([zh.subarray(2), Buffer.from('文测试', 'utf8')])],
+      ],
+    });
+    const r = await execOnce({ command: 'node x.mjs' }, ctx(), fake.deps);
+    expect(r.content).toContain('中文测试');
+    expect(r.content).not.toContain('\uFFFD');
+  });
+
+  it('每一块都交给 onToolOutput，拼接起来等于全文（一块不丢、也不重）', async () => {
+    const fake = makeFake({
+      chunks: [
+        ['stdout', Buffer.from('第一段\n', 'utf8')],
+        ['stdout', Buffer.from('第二段\n', 'utf8')],
+        ['stdout', Buffer.from('收尾', 'utf8')],
+      ],
+    });
+    const sink: string[] = [];
+    const r = await execOnce({ command: 'node x.mjs' }, streamCtx(sink), fake.deps);
+    expect(r.ok).toBe(true);
+    expect(sink.join('')).toBe('第一段\n第二段\n收尾');
+    // 攒批不在这一层（那是传输层的事），这里只保证"来一块交一块"
+    expect(sink.length).toBe(3);
+  });
+
+  it('stderr 也在流（不然报错滚屏时界面只显示"执行中"）', async () => {
+    const fake = makeFake({
+      chunks: [
+        ['stderr', Buffer.from('boom\n', 'utf8')],
+        ['stdout', Buffer.from('out\n', 'utf8')],
+      ],
+    });
+    const sink: string[] = [];
+    await execOnce({ command: 'node x.mjs' }, streamCtx(sink), fake.deps);
+    expect(sink.join('')).toBe('boom\nout\n');
+  });
+
+  it('没有 onToolOutput 的调用方照常跑（画布与手动执行这条路径不受影响）', async () => {
+    const fake = makeFake({ stdout: 'quiet\n' });
+    const r = await execOnce({ command: 'node x.mjs' }, ctx(), fake.deps);
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('quiet');
+  });
+
+  it('超过输出上限之后停止实时输出，并说一次"后面为什么不显示了"', async () => {
+    const big = Buffer.from('x'.repeat(60_000), 'utf8');
+    const fake = makeFake({
+      chunks: [
+        ['stdout', big],
+        ['stdout', big],
+        ['stdout', big],
+        ['stdout', big],
+        ['stdout', big],
+        ['stdout', big],
+      ],
+    });
+    const sink: string[] = [];
+    const r = await execOnce({ command: 'node x.mjs' }, streamCtx(sink), fake.deps);
+    expect(r.content).toContain('已截断');
+    const notices = sink.filter((s) => s === EXEC_STREAM_STOP_NOTICE);
+    expect(notices.length).toBe(1);
+    // 说过一次就不再刷：上限之后的内容模型看不见，界面也不许装作看得见
+    expect(sink[sink.length - 1]).toBe(EXEC_STREAM_STOP_NOTICE);
+    expect(sink.join('').length).toBeLessThanOrEqual(MAX_EXEC_OUTPUT_BYTES + EXEC_STREAM_STOP_NOTICE.length + 100);
+  });
+
+  it('capOutput 裁在半个字符上时不留下乱码（纯函数边界）', () => {
+    const r = capOutput('中文测试', 4);
+    expect(r.truncated).toBe(true);
+    expect(r.text).toBe('中');
+    expect(r.text).not.toContain('\uFFFD');
+    expect(Buffer.byteLength(r.text, 'utf8')).toBeLessThanOrEqual(4);
+  });
+
+  it('错误输出这一路到上限也要说一次（两条流各自独立，不能只报一条）', async () => {
+    const big = Buffer.from('e'.repeat(60_000), 'utf8');
+    const fake = makeFake({
+      chunks: [
+        ['stderr', big],
+        ['stderr', big],
+        ['stderr', big],
+        ['stderr', big],
+        ['stderr', big],
+      ],
+    });
+    const sink: string[] = [];
+    const r = await execOnce({ command: 'node x.mjs' }, streamCtx(sink), fake.deps);
+    expect(r.content).toContain('错误输出已截断');
+    expect(sink.filter((s) => s === EXEC_STREAM_STOP_NOTICE).length).toBe(1);
   });
 });

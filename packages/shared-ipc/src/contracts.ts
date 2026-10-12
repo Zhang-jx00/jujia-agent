@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TOOL_OUTPUT_TAIL_CHARS } from './limits';
 
 /** 应用与运行时信息（P0 打通链路用；后续阶段会逐步扩充字段）。 */
 export const appInfoSchema = z.object({
@@ -167,6 +168,21 @@ export const streamEventSchema = z.discriminatedUnion('type', [
     ok: z.boolean(),
     summary: z.string(),
     durationMs: z.number().int().nonnegative(),
+  }),
+  /**
+   * 长命令的**实时输出**（R8.7 · M4 收尾其三）。
+   *
+   * `tail` 是"截至此刻的尾部快照"，不是增量片段 —— 界面只做一次替换。
+   * 这么做换来两件实事：① 切走页签期间错过的块不会真丢（回来仍是最新那一份），
+   * ② 不需要终端那套 `seq` 去重（少一个机制就少一种错法）。
+   * `callId` 必填：一次回答里模型可以连着调好几个工具，不带来源的输出会串到别的气泡上（T5 同形）。
+   */
+  z.object({
+    type: z.literal('tool_output'),
+    sessionId: z.string(),
+    callId: z.string(),
+    name: z.string(),
+    tail: z.string().max(TOOL_OUTPUT_TAIL_CHARS),
   }),
   z.object({
     type: z.literal('usage'),

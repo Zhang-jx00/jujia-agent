@@ -37,6 +37,11 @@ interface ToolLine {
   summary?: string;
   durationMs?: number;
   argumentsText?: string;
+  /**
+   * 实时输出的**尾部快照**（R8.7）。只在本次运行期间存在于内存里 ——
+   * 会话历史与喂给模型的都是跑完之后的 `summary`，半截输出不进任何一处的盘。
+   */
+  tail?: string;
 }
 
 interface Props {
@@ -159,6 +164,14 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
             argumentsText: event.argumentsText,
           },
         ]);
+        return;
+      }
+      if (event.type === 'tool_output') {
+        // 整段替换，不做拼接：主进程发来的就是"截至此刻的尾部"，
+        // 因此切走页签期间错过的块不会真丢（回来那一份仍是最新的）
+        setToolLines((prev) =>
+          prev.map((t) => (t.callId === event.callId ? { ...t, tail: event.tail } : t)),
+        );
         return;
       }
       if (event.type === 'tool_end') {

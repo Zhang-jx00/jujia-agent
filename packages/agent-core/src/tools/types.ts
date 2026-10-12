@@ -60,6 +60,15 @@ export interface ToolContext {
   /** 工作区根目录（绝对路径）。所有路径操作必须落在其内部 */
   workspaceRoot: string;
   signal?: AbortSignal;
+  /**
+   * 长命令的**实时输出**通道（R8.7 · M4 收尾其三）。
+   *
+   * 只有真的会持续吐数据的工具才用它（目前是 `run_command`）；不传就是照常等跑完一次给全文
+   * —— 画布与手动执行这两条路径没接界面流，**不能**假装接了。
+   * 语义边界：这一格只影响"人现在看不看得见"，**不影响模型收到什么**
+   * （喂给模型的是跑完之后的 `content`，两者不是一套文本，也就不会出现"界面有正文里没有"）。
+   */
+  onToolOutput?: (text: string) => void;
 }
 
 /** 工具执行结果：给模型看的是 content，给用户看的是 evidence */

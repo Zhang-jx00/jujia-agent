@@ -23,6 +23,11 @@ export interface ToolCardData {
   durationMs?: number;
   /** 原始参数文本（模型给出的 JSON 字符串） */
   argumentsText?: string;
+  /**
+   * 长命令的**实时输出尾部**（R8.7）。只在本次运行期间存在于内存：
+   * 它是"现在在跑什么"的可见性，不是结果 —— 结果仍然是 `summary`（跑完之后那一份）。
+   */
+  tail?: string;
 }
 
 const KIND_HINT: Record<string, string> = {
@@ -81,6 +86,16 @@ export function ToolCard({ data }: { data: ToolCardData }): ReactElement {
           {level === 'L0' ? '›' : '⌄'}
         </span>
       </button>
+
+      {data.tail !== undefined && data.tail !== '' && (
+        <pre
+          className="jj-pre jj-tool-tail"
+          data-tool-tail={data.callId}
+          aria-label={data.phase === 'running' ? '实时输出（命令仍在运行）' : '实时输出（末尾片段）'}
+        >
+          {data.tail}
+        </pre>
+      )}
 
       {level !== 'L0' && (
         <div className="jj-tool-l1 jj-enter">

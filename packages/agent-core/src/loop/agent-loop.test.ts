@@ -637,3 +637,112 @@ describe('T26：被上游截断要作为独立事实传出去', () => {
     expect(res.truncated).toBeNull();
   });
 });
+
+describe('长命令的实时输出：tool_output 事件（R8.7 · M4 收尾其三）', () => {
+  /**
+   * 循环这一层的职责只有一件：**把工具交出来的每一块输出，配上"这是哪一次调用"发出去**。
+   * 所以这里注入假 execute —— 真的 `run_command` 那条路归 `exec-tool.test.ts` 管
+   * （跨层测试不能替模块自己的测试代言，本仓记过这条）。
+   */
+  function streamingExecute(chunks: ReadonlyArray<string>): NonNullable<AgentLoopDeps['execute']> {
+    return ((_tool: { name: string }, _args: unknown, ctx: { onToolOutput?: (t: string) => void }) => {
+      for (const chunk of chunks) ctx.onToolOutput?.(chunk);
+      return Promise.resolve({
+        outcome: { ok: true, content: '跑完了', evidence: {} },
+        asked: false,
+        durationMs: 1,
+      });
+    }) as NonNullable<AgentLoopDeps['execute']>;
+  }
+
+  it('工具交出两块输出 → 两条 tool_output，且都落在 tool_start 与 tool_end 之间', async () => {
+    const { chat } = scriptedChat([
+      { calls: [{ name: 'run_command', args: { command: 'node x.mjs' }, id: 'call-1' }] },
+      { text: '好了' },
+    ]);
+    const events: LoopEvent[] = [];
+    await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: '跑一下' }],
+        emit: (e) => events.push(e),
+      },
+      { ...makeDeps(chat, allow().resolver), execute: streamingExecute(['第一块\n', '第二块\n']) },
+    );
+
+    const outputs = events.filter((e) => e.type === 'tool_output');
+    expect(outputs.length).toBe(2);
+    expect(outputs.map((e) => (e.type === 'tool_output' ? e.chunk : ''))).toEqual(['第一块\n', '第二块\n']);
+    const kinds = events.map((e) => e.type);
+    expect(kinds.indexOf('tool_start')).toBeLessThan(kinds.indexOf('tool_output'));
+    expect(kinds.lastIndexOf('tool_output')).toBeLessThan(kinds.indexOf('tool_end'));
+    for (const e of outputs) {
+      if (e.type !== 'tool_output') continue;
+      expect(e.callId).toBe('call-1');
+      expect(e.name).toBe('run_command');
+    }
+  });
+
+  it('两个调用各自吐输出：callId 必须认得出是谁（不许串到后一次调用头上）', async () => {
+    const { chat } = scriptedChat([
+      { calls: [{ name: 'write_file', args: { path: 'a.txt', content: '1' }, id: 'cA' }] },
+      { calls: [{ name: 'write_file', args: { path: 'b.txt', content: '2' }, id: 'cB' }] },
+      { text: 'done' },
+    ]);
+    const seen: string[] = [];
+    const events: LoopEvent[] = [];
+    const execute = ((_tool: { name: string }, args: unknown, ctx: { onToolOutput?: (t: string) => void }) => {
+      const path = (args as { path: string }).path;
+      ctx.onToolOutput?.(`来自 ${path}`);
+      return Promise.resolve({ outcome: { ok: true, content: 'ok', evidence: {} }, asked: false, durationMs: 1 });
+    }) as NonNullable<AgentLoopDeps['execute']>;
+    await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: 'x' }],
+        emit: (e) => {
+          events.push(e);
+          if (e.type === 'tool_output') seen.push(`${e.callId}:${e.chunk}`);
+        },
+      },
+      { ...makeDeps(chat, allow().resolver), execute },
+    );
+
+    expect(seen).toEqual(['cA:来自 a.txt', 'cB:来自 b.txt']);
+  });
+
+  it('工具一个字都没吐 → 一条 tool_output 都不许有（不许造空事件）', async () => {
+    const { chat } = scriptedChat([
+      { calls: [{ name: 'run_command', args: { command: 'true' }, id: 'call-1' }] },
+      { text: '好了' },
+    ]);
+    const events: LoopEvent[] = [];
+    await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: 'x' }],
+        emit: (e) => events.push(e),
+      },
+      { ...makeDeps(chat, allow().resolver), execute: streamingExecute([]) },
+    );
+    expect(events.filter((e) => e.type === 'tool_output').length).toBe(0);
+  });
+
+  it('不接这个通道的调用方不受影响：真实默认执行器 + write_file 的事件序列里没有 tool_output', async () => {
+    const { chat } = scriptedChat([
+      { calls: [{ name: 'write_file', args: { path: 'quiet.txt', content: 'hi' }, id: 'call-1' }] },
+      { text: '好了' },
+    ]);
+    const events: LoopEvent[] = [];
+    await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: 'x' }],
+        emit: (e) => events.push(e),
+      },
+      makeDeps(chat, allow().resolver),
+    );
+    expect(events.filter((e) => e.type === 'tool_output').length).toBe(0);
+    expect((await stat(join(root, 'quiet.txt'))).isFile()).toBe(true);
+  });
+});

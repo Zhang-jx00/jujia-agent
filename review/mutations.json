@@ -1456,6 +1456,86 @@
       "find": "    const gate = marks.gate;",
       "replace": "    const gate = result === undefined ? undefined : marks.gate;",
       "test": "apps/desktop/src/main/audit-gate.test.ts"
+    },
+    {
+      "id": "M183",
+      "desc": "跨块的字节流又逐块各解一次（回到本轮修掉前）：一个汉字被切在两块之间就变成乱码，模型与界面上都是",
+      "file": "packages/agent-core/src/tools/builtin/exec-tool.ts",
+      "find": "      const text = outDecoder.write(toBuffer(chunk));",
+      "replace": "      const text = toBuffer(chunk).toString(\"utf8\");",
+      "test": "packages/agent-core/src/tools/builtin/exec-tool.test.ts"
+    },
+    {
+      "id": "M184",
+      "desc": "输出上限裁在半个字符上时又留下假乱码（capOutput 不走解码器）",
+      "file": "packages/agent-core/src/tools/builtin/exec-tool.ts",
+      "find": "  return { text: decoder.write(Buffer.from(text, 'utf8').subarray(0, limit)), truncated: true };",
+      "replace": "  return { text: Buffer.from(text, 'utf8').subarray(0, limit).toString('utf8'), truncated: true };",
+      "test": "packages/agent-core/src/tools/builtin/exec-tool.test.ts"
+    },
+    {
+      "id": "M185",
+      "desc": "标准输出到上限后不再说\"后面为什么不显示了\"：界面从此安静，谁也不知道是截断还是卡住",
+      "file": "packages/agent-core/src/tools/builtin/exec-tool.ts",
+      "find": "        outTruncated = true;\n        ctx.onToolOutput?.(EXEC_STREAM_STOP_NOTICE);",
+      "replace": "        outTruncated = true;",
+      "test": "packages/agent-core/src/tools/builtin/exec-tool.test.ts"
+    },
+    {
+      "id": "M186",
+      "desc": "静默期刷新被摘掉（只按字节攒批）：先吐两行然后安静半分钟的构建命令全程空白",
+      "file": "packages/agent-core/src/tools/output-pump.ts",
+      "find": "      timer = arm(() => {\n        timer = undefined;\n        flushNow();\n      });",
+      "replace": "      timer = undefined;",
+      "test": "packages/agent-core/src/tools/output-pump.test.ts"
+    },
+    {
+      "id": "M187",
+      "desc": "批次交空之后不撤静默定时器：留下悬空回调，下一次会再交一份空快照",
+      "file": "packages/agent-core/src/tools/output-pump.ts",
+      "find": "    if (buffer === '') {\n      clearTimer();\n      return;\n    }",
+      "replace": "    if (buffer === '') return;",
+      "test": "packages/agent-core/src/tools/output-pump.test.ts"
+    },
+    {
+      "id": "M188",
+      "desc": "循环不再给工具实时输出通道：整条链在第一环就断（界面永远只看见\"执行中\"）",
+      "file": "packages/agent-core/src/loop/agent-loop.ts",
+      "find": "    { workspaceRoot: deps.workspaceRoot, onToolOutput: onOutput },",
+      "replace": "    { workspaceRoot: deps.workspaceRoot },",
+      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
+    },
+    {
+      "id": "M189",
+      "desc": "主进程收到 tool_output 却不喂中转层：事件到这里就消失（契约、界面全都在，唯独没人接）",
+      "file": "apps/desktop/src/main/chat-service.ts",
+      "find": "              outputStreams.onChunk(ev.callId, ev.name, ev.chunk);",
+      "replace": "              void ev.chunk;",
+      "test": "apps/desktop/src/main/tool-output-wiring.test.ts"
+    },
+    {
+      "id": "M190",
+      "desc": "轮次收尾不再 closeAll（用户中途停止时压着的输出丢失 —— 恰恰是最需要看见它的时候）",
+      "file": "apps/desktop/src/main/chat-service.ts",
+      "find": "      outputStreams.closeAll();",
+      "replace": "      // （本轮不收尾）",
+      "test": "apps/desktop/src/main/tool-output-wiring.test.ts"
+    },
+    {
+      "id": "M191",
+      "desc": "尾部快照的大小上限被写成天文数字：一条 IPC 事件能带着一整篇刷屏正文进渲染层",
+      "file": "packages/shared-ipc/src/contracts.ts",
+      "find": "    tail: z.string().max(TOOL_OUTPUT_TAIL_CHARS),",
+      "replace": "    tail: z.string().max(999999999),",
+      "test": "packages/shared-ipc/src/stream-event.test.ts"
+    },
+    {
+      "id": "M192",
+      "desc": "新事件漏写 sessionId：全局广播再也没有归属闸口（T5 那条污染路径原地复活）",
+      "file": "packages/shared-ipc/src/contracts.ts",
+      "find": "    type: z.literal('tool_output'),\n    sessionId: z.string(),",
+      "replace": "    type: z.literal('tool_output'),",
+      "test": "apps/desktop/src/renderer/src/features/chat/stream-routing.test.ts"
     }
   ]
 }
