@@ -1547,11 +1547,11 @@
     },
     {
       "id": "M194",
-      "desc": "日历日偏移退回\"加整 24 小时\"：跨夏令时那天差一天，按日重复的任务在该跳过的日子触发",
+      "desc": "日历日偏移退回\"加整 24 小时\"：夏令时回拨那天落到前一天 23:00 —— 日期差一天，按日重复的任务在该跳过的日子触发（本机无夏令时观测不到，改由把进程时区设成纽约的用例钉住）",
       "file": "packages/agent-core/src/schedule/rrule.ts",
       "find": "  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);",
       "replace": "  return new Date(baseMs + days * DAY_MS);",
-      "test": "packages/agent-core/src/schedule/rrule.test.ts"
+      "test": "packages/agent-core/src/schedule/rrule-dst.test.ts"
     },
     {
       "id": "M195",
