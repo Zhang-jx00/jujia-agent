@@ -12,6 +12,7 @@ import {
   type DialogStyle,
   type ThemePack,
 } from '@jujia/ui-tokens';
+import { IconTriangleAlert } from '../../ui/icons';
 
 /**
  * 外观设置页（W23 第二部分）。
@@ -309,7 +310,9 @@ export function AppearancePanel({ pack, onSave }: AppearancePanelProps): ReactEl
           </>
         ) : (
           <>
-            <strong>⚠ 可读性不足：</strong>
+            <strong>
+              <IconTriangleAlert /> 可读性不足：
+            </strong>
             {contrast.advice}
             {contrast.suggestedForeground && (
               <button
