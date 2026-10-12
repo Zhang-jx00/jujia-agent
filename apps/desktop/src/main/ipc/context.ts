@@ -23,6 +23,7 @@ import { readConfigSnapshot } from '../config-store';
 import type { PermissionBridge } from '../permission-bridge';
 import type { HandleRegistrar } from './handle';
 import { createTrustedHandle } from './handle';
+import { createTurnTrigger, type TurnTrigger } from './turn-trigger';
 
 /** `registerIpcHandlers` 的注入面（由 main/index.ts 传入；测试用假实现驱动真实链路） */
 export interface IpcDeps {
@@ -73,6 +74,8 @@ export interface IpcContext {
   audit: AuditService;
   loadPolicy: () => Promise<IpcPolicy>;
   fetchImpl: typeof fetch;
+  /** 起一轮对话的唯一入口（M7 · R9）。用户敲字与定时到点共用它，见 `ipc/turn-trigger.ts` */
+  startTurn: TurnTrigger;
 }
 
 export function createIpcContext(deps: IpcDeps): IpcContext {
@@ -146,6 +149,45 @@ export function createIpcContext(deps: IpcDeps): IpcContext {
     workspaceRoot: () => lastWorkspaceRoot,
   });
 
+  /** 每次现读的权限上下文（缓存会让用户以为删掉的规则还在拦截） */
+  const loadPolicy = async (): Promise<IpcPolicy> => {
+    const snapshot = await readConfigSnapshot();
+    const [rules, rulesHealth] = await Promise.all([permissionRules.list(), permissionRules.health()]);
+    // 审计记账要的两样"当时的事实"就在这里落定：规则表健康度 + 工作区根
+    lastHealth = {
+      source: rulesHealth.source,
+      count: rules.filter((r) => r.enabled).length,
+      recovered: rulesHealth.recovered,
+    };
+    const info = await getWorkspaceInfo();
+    lastWorkspaceRoot = info.root ?? '';
+    return {
+      mode: snapshot.config.permissionMode,
+      rules,
+      rulesHealth,
+      // 高危清单：引擎级兜底（命中即硬 ask）。来自配置，不经渲染层写入
+      alwaysAsk: snapshot.config.alwaysAskTools,
+    };
+  };
+
+  /**
+   * 起一轮对话的唯一入口（M7 · R9）。
+   *
+   * 放在上下文里而不是让 `ipc/chat.ts` 与定时任务各建一份：这一串参数（模式 / 规则 /
+   * 高危清单 / 钩子 / 注册表 / 技能清单 / 审计出口）少传一项不会报错，只会让引擎裸奔。
+   */
+  const startTurn = createTurnTrigger({
+    deps,
+    fetchImpl,
+    mcpDebug,
+    plugins,
+    skills,
+    registry,
+    hookRunner,
+    loadPolicy,
+    audit,
+  });
+
   return {
     deps,
     handle: createTrustedHandle(),
@@ -159,27 +201,7 @@ export function createIpcContext(deps: IpcDeps): IpcContext {
     permissionRules,
     audit,
     fetchImpl,
-    loadPolicy: async (): Promise<IpcPolicy> => {
-      const snapshot = await readConfigSnapshot();
-      const [rules, rulesHealth] = await Promise.all([
-        permissionRules.list(),
-        permissionRules.health(),
-      ]);
-      // 审计记账要的两样"当时的事实"就在这里落定：规则表健康度 + 工作区根
-      lastHealth = {
-        source: rulesHealth.source,
-        count: rules.filter((r) => r.enabled).length,
-        recovered: rulesHealth.recovered,
-      };
-      const info = await getWorkspaceInfo();
-      lastWorkspaceRoot = info.root ?? '';
-      return {
-        mode: snapshot.config.permissionMode,
-        rules,
-        rulesHealth,
-        // 高危清单：引擎级兜底（命中即硬 ask）。来自配置，不经渲染层写入
-        alwaysAsk: snapshot.config.alwaysAskTools,
-      };
-    },
+    startTurn,
+    loadPolicy,
   };
 }

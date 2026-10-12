@@ -192,6 +192,19 @@ describe('清单只是缓存', () => {
     });
   });
 
+  it('清单还没成型时先落一个新会话：盘上已有的会话不许被这一笔挤掉（R9 e2e 抓到的真缺陷）', async () => {
+    const store = createSessionStore(root);
+    const older = ID;
+    await record(store, meta(older), [toStoredMessage('user', '早就在盘上')]);
+    // 模拟"清单还没成型"（缓存被删 / 从未写过）—— 这时任何人落一笔新会话
+    await rm(join(root, 'index.json'), { force: true });
+    const newer = 'c3d4e5f6-2222-4000-8000-000000000000';
+    await record(store, meta(newer), [toStoredMessage('user', '刚到')]);
+    const listed = await store.list();
+    // 旧的那个必须还在：缓存是目录的影子，不是"谁先写谁说了算"
+    expect(listed.map((m) => m.id).sort()).toEqual([older, newer].sort());
+  });
+
   it('两个会话同时更新清单：读—改—写被串行化，谁都不被覆盖（T6③）', async () => {
     const store = createSessionStore(root);
     const other = 'b2c3d4e5-1111-4000-8000-000000000000';

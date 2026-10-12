@@ -30,29 +30,27 @@ import {
   compactApply,
   compactStatus,
   historyPage,
-  hydrateSession,
   listSessions,
   markAllResidentEnded,
   markSessionEnded,
   pendingNotePreview,
   pendingNoteResolve,
   pendingNotesList,
-  sendMessage,
   stopMessage,
 } from '../chat-service';
 import { getWorkspaceInfo } from '../workspace';
-import { summarizeCatalog } from '@jujia/agent-core';
 import type { IpcContext } from './context';
 
 /**
- * 连接管理与对话。
+ * 连接管理与对话的通道。
  *
- * 对话这一路是**权限参数的汇聚点**：模式、用户规则、高危清单、钩子运行器、
- * 共享注册表全部要在这里传给 `sendMessage` —— 少传一项，界面看起来一切正常但引擎在裸奔
- * （W10g 之前就是死代码状态）。所以这些参数**逐个显式列出来**，不用展开对象蒙混。
+ * **起一轮对话的汇聚点不在这里** —— 它在 `ipc/turn-trigger.ts` 的 `startTurn`（M7 · R9 抽出去的）。
+ * 理由：模式、用户规则、高危清单、钩子运行器、共享注册表、技能清单、审计出口这一串参数，
+ * 少传一项的表现不是报错而是"界面看起来一切正常、引擎在裸奔"（W10g 之前的死代码状态）；
+ * 而定时任务到点也要起一轮，两处各写一份清单就一定会漂。这里只负责通道与入参契约。
  */
 export function registerChatIpc(ctx: IpcContext): void {
-  const { handle, deps, fetchImpl, mcpDebug, plugins, skills, registry, hookRunner, loadPolicy, audit } = ctx;
+  const { handle, fetchImpl, startTurn } = ctx;
 
   /* ------------------------------ 连接管理 ------------------------------ */
 
@@ -111,52 +109,14 @@ export function registerChatIpc(ctx: IpcContext): void {
     // 全空白仍是"空"（zod 的 min(1) 只看长度，挡不住 `'   '`）
     if (text.trim() === '') throw new Error('消息不能为空');
 
-    // 工作区决定了工具是否可用；未选择时仍可对话，但工具会被路径校验拒绝
-    const ws = await getWorkspaceInfo();
-    const policy = await loadPolicy();
-    await plugins.refresh(ws.valid ? ws.root : null);
-    const skillCatalog = await skills.refresh(ws.valid ? ws.root : null);
-    mcpDebug('[plugins] ' + plugins.summary());
-    mcpDebug('[skills] ' + summarizeCatalog(skillCatalog));
-    // 重启后第一次发问：会话不在内存里就从磁盘装回来（6a 的"续上"就走这一步）。
-    // **装不回来不能静默**（外部审查 T6④）：静默回落成"新建会话从零开始"，
-    // 用户看到的是"我明明接着昨天的话聊，它怎么全忘了"，而没有任何地方说为什么。
-    let historyWarning: string | null = null;
-    if (typeof sessionId === 'string' && sessionId !== '') {
-      try {
-        await hydrateSession(sessionId, connectionId);
-      } catch (err) {
-        historyWarning = `历史未能恢复，这一轮从空上下文继续（磁盘上的旧记录一字未动）。原因：${
-          err instanceof Error ? err.message : String(err)
-        }`;
-        console.warn('[chat] 会话历史装载失败，已按"空上下文继续"处理：', err);
-      }
-    }
-    const result = sendMessage(
-      {
-        connectionId,
-        text,
-        ...(typeof sessionId === 'string' && sessionId !== '' ? { sessionId } : {}),
-      },
-      deps.emitStream,
-      {
-        fetcher: fetchImpl,
-        permission: deps.permission.resolve,
-        // 执行审计：判定事实交回上下文里那**唯一**的一个服务（不在这里再建一个）
-        onDecision: (info) => {
-          void audit.recordTool(info);
-        },
-        workspaceRoot: ws.valid ? ws.root : null,
-        // 同一个注册表：内置工具 + 已批准的 MCP 工具都在这里，模型才看得到它们
-        registry,
-        mode: policy.mode,
-        rules: policy.rules,
-        alwaysAsk: policy.alwaysAsk,
-        hooks: hookRunner,
-        skillCatalogText: skills.catalogText(),
-      },
-    );
-    return chatSendResultSchema.parse({ ...result, accepted: true, warning: historyWarning });
+    // 起一轮的全部汇聚点（策略、注册表、钩子、审计、技能清单）在 `startTurn` 里，只有那一处；
+    // 定时任务到点走的是同一个函数 —— 抄两份参数清单早晚漏一项。
+    const result = await startTurn({
+      connectionId,
+      text,
+      ...(typeof sessionId === 'string' && sessionId !== '' ? { sessionId } : {}),
+    });
+    return chatSendResultSchema.parse({ ...result, accepted: true, warning: result.warning });
   });
 
   handle(IPC.CHAT_STOP, async (_e, sessionId: unknown): Promise<boolean> => {

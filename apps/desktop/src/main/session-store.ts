@@ -188,8 +188,18 @@ export function createSessionStore(sessionsRoot: string): SessionStore {
 
   const upsertIndex = (meta: SessionMeta): Promise<void> =>
     onIndexChain(async () => {
-      const { data } = await index.read();
-      const rest = data.sessions.filter((s) => s.id !== meta.id);
+      const { data, source } = await index.read();
+      /**
+       * 缓存还没成型时（首次写 / index.json 被删 / 读不出来）**先从目录重建再合并**。
+       *
+       * 少了这一步，第一笔"落一个新会话"就会把 `{sessions:[新的]}` 写成整份清单 ——
+       * 盘上早就在的会话从此既不在索引里、也不会触发重建（`list()` 见索引非空就信它），
+       * 等于被静默挤掉。R9 的 e2e 把它从"潜伏"变成"必现"：定时任务在开机时就起了一轮，
+       * 那一轮抢在任何人列会话之前写了第一笔索引。
+       * 口径不变：**目录是事实，索引是影子**；影子不许反过来决定事实。
+       */
+      const base = source === 'default' ? await rebuildIndex(sessionsRoot) : data.sessions;
+      const rest = base.filter((s) => s.id !== meta.id);
       await index.write({ sessions: [meta, ...rest].slice(0, 500) });
     });
 

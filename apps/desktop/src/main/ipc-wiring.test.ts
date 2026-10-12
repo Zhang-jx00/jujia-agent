@@ -58,6 +58,13 @@ const context = strippedOf('./ipc/context.ts');
 const tools = strippedOf('./ipc/tools.ts');
 const chat = strippedOf('./ipc/chat.ts');
 const core = strippedOf('./ipc/core.ts');
+/**
+ * M7 · R9：起一轮对话的代码从 `ipc/chat.ts` 抽到了 `ipc/turn-trigger.ts`
+ * （定时任务也要起一轮，抄两份参数清单早晚漏一项）。
+ * 下面这几条锁**判的还是同一件事**（对话链路带齐注册表 / 模式 / 规则 / 钩子 / 技能清单），
+ * 只是扫描范围跟着搬 —— 搬范围可以，放宽判据不行。
+ */
+const trigger = strippedOf('./ipc/turn-trigger.ts');
 
 /** 窗口关闭必须收尾挂起的审批（轨道回归计划 2 · R-03） */
 const indexSource = stripComments(read('./index.ts'));
@@ -157,15 +164,26 @@ describe('工具注册表接线（防止各处各建一个）', () => {
   it('对话链路也用同一个实例（否则模型看不到 MCP 工具）', () => {
     // 在 sendMessage(...) 的调用体内查找，而不是死盯某几行文本 ——
     // 参数会随功能增加（例如 W5c 加了 mode/rules），但"传的是共享实例"这个不变量不能变
-    const from = chat.indexOf('sendMessage(');
+    const from = trigger.indexOf('sendMessage(');
     expect(from).toBeGreaterThan(-1);
-    const body = callBody(chat, 'sendMessage(');
+    const body = callBody(trigger, 'sendMessage(');
     expect(body).toContain('registry,');
     expect(body).not.toContain('createDefaultRegistry()');
   });
 
+  it('起一轮对话只有一个调用点（第二份参数清单迟早漏一项）', () => {
+    // 结构不变量，不是"这一行在不在"：谁再复制一份 sendMessage 调用，这里当场红
+    expect(union.split('sendMessage(').length - 1).toBe(1);
+    expect(trigger.split('sendMessage(').length - 1).toBe(1);
+    // 而且只有 turn-trigger 认识它；通道层与定时任务都只能通过 startTurn 起轮
+    expect(chat).not.toContain('sendMessage(');
+    expect(strippedOf('./ipc/schedule.ts')).not.toContain('sendMessage(');
+    expect(strippedOf('./ipc/schedule.ts')).toContain('startTurn');
+    expect(strippedOf('./ipc/context.ts')).toContain('createTurnTrigger({');
+  });
+
   it('对话链路带上权限模式与规则（否则规则表只对 TOOL_RUN 生效）', () => {
-    const body = callBody(chat, 'sendMessage(');
+    const body = callBody(trigger, 'sendMessage(');
     expect(body).toContain('mode: policy.mode');
     expect(body).toContain('rules: policy.rules');
     expect(body).toContain('alwaysAsk: policy.alwaysAsk');
@@ -186,13 +204,13 @@ describe('工具注册表接线（防止各处各建一个）', () => {
 
   it('技能服务被接进对话链路，且清单走同一条系统提示', () => {
     expect(context).toContain('createSkillsService(registry');
-    const body = callBody(chat, 'sendMessage(');
+    const body = callBody(trigger, 'sendMessage(');
     expect(body).toContain('skillCatalogText: skills.catalogText()');
   });
 
   it('钩子运行器被接进工具执行与对话链路（否则钩子配置等于摆设）', () => {
     expect(tools).toContain('hooks: hookRunner');
-    expect(chat).toContain('hooks: hookRunner');
+    expect(trigger).toContain('hooks: hookRunner');
   });
 
   it('钩子配置在启动时被加载，且走同一个运行器实例', () => {
@@ -204,7 +222,9 @@ describe('工具注册表接线（防止各处各建一个）', () => {
   it('插件贡献的技能目录被接进技能来源，且刷新顺序在对话链路里', () => {
     expect(context).toContain('createPluginsService()');
     expect(context).toContain('plugins.skillSources(workspaceRoot)');
-    const refresh = chat.slice(chat.indexOf('await plugins.refresh('), chat.indexOf('await plugins.refresh(') + 220);
+    const at = trigger.indexOf('await plugins.refresh(');
+    const refresh = trigger.slice(at, at + 220);
+    expect(at).toBeGreaterThan(-1);
     expect(refresh).toContain('skills.refresh(');
   });
 

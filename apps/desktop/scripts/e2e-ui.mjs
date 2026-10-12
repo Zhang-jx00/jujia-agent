@@ -321,8 +321,52 @@ writeFileSync(
   }),
   'utf8',
 );
-const seededSession = 'e2e00000-0000-4000-8000-000000000000';
-mkdirSync(join(dataDir, 'sessions', seededSession), { recursive: true });
+/**
+ * M7 · R9 定时任务的种子：**应用启动之前**就在盘上留一条"已经欠了几次"的任务。
+ *
+ * 为什么从盘上种而不是界面上建：这一步要验的正是"开机补跑"这一条路 ——
+ * 现场必须是"上一个进程没跑、日历上已经过了好几个点"，而那只能由启动前的磁盘状态造出来。
+ * 锚点刻意落在**整分**（秒与毫秒归零）：于是"落盘的 lastRunAt 是不是某个触发时刻"
+ * 可以用"秒是不是 00"一眼分辨 —— 写成"跑的那一刻"的实现会留下 arbitrary 秒数，当场露形。
+ * jitterMs 给 0 是为了让这一步对时钟抖动不敏感（抖动本身由 M193–M202 的单测与变异管）。
+ */
+const seededTaskId = 'e2etask000-0000-4000-8000-000000000001';
+const scheduleAnchor = (() => {
+  const d = new Date();
+  d.setSeconds(0, 0);
+  d.setMinutes(d.getMinutes() - 3);
+  return d;
+})();
+mkdirSync(join(dataDir, 'schedules'), { recursive: true });
+writeFileSync(
+  join(dataDir, 'schedules', 'tasks.json'),
+  JSON.stringify({
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    data: {
+      tasks: [
+        {
+          id: seededTaskId,
+          name: 'E2E 定时补跑',
+          rule: 'FREQ=MINUTELY',
+          prompt: 'E2E_SCHEDULE 这是一条定时任务该自己起的一轮',
+          connectionId: seededEchoConnId,
+          anchorAt: scheduleAnchor.toISOString(),
+          sessionId: null,
+          enabled: true,
+          jitterMs: 0,
+          // 锚点那一次算"已经跑过"，之后每分钟一次 —— 到开机时至少欠两次
+          lastRunAt: scheduleAnchor.toISOString(),
+          lastSkipped: 0,
+          lastError: '',
+        },
+      ],
+    },
+  }),
+  'utf8',
+);
+
+const seededSession = 'e2e00000-0000-4000-8000-000000000000';mkdirSync(join(dataDir, 'sessions', seededSession), { recursive: true });
 writeFileSync(
   join(dataDir, 'sessions', seededSession, 'messages.jsonl'),
   [
@@ -2888,6 +2932,70 @@ try {
   if (tailBoxes === 0) fail('工具卡上的实时输出那一格没有语义锚点（data-tool-tail）');
   ok('收尾之后：最后一段输出补全，模型的收尾回答也照常到达');
 
+  step('M7 定时任务：开机补跑只补一次、跳过几次要说出来，且水位线记的是"那一次"而不是"此刻"');
+  await win3.locator('nav.app-tabs button', { hasText: '定时' }).first().click();
+  if ((await waitText3('E2E 定时补跑', 10_000)) !== true) {
+    fail('定时任务页没有列出启动前就埋在磁盘上的那条任务（清单没读盘，或通道没接）', await body3());
+  }
+  const scopeText = await body3();
+  if (!scopeText.includes('免审批')) {
+    fail('界面上没说清"到点照样要审批" —— 定时 ≠ 免审批 是这一条能力的安全边界，不能只写在文档里', scopeText.slice(0, 900));
+  }
+
+  const taskFile = join(dataDir, 'schedules', 'tasks.json');
+  if (!existsSync(taskFile)) fail(`定时任务没落盘（找不到 ${taskFile}）`);
+  const seededTask = JSON.parse(readFileSync(taskFile, 'utf8')).data.tasks.find((t) => t.id === seededTaskId);
+  if (!seededTask) fail('磁盘上没有那条种子任务', readFileSync(taskFile, 'utf8').slice(0, 400));
+
+  // ① 补跑只补一次：界面上出现"跳过 N 次"，而账上只往前走了一步
+  const row = win3.locator(`[data-schedule-id="${seededTaskId}"]`).first();
+  if ((await row.count()) === 0) fail('任务行上没有语义锚点 data-schedule-id（界面级断言随之失效）');
+  const skippedBox = row.locator('[data-schedule-skipped]');
+  if ((await skippedBox.count()) === 0) {
+    fail('欠了三次却没有任何"跳过"的说法（至多补一次是要求，说明跳过了几次也是要求）', await row.innerText());
+  }
+  const skippedText = await skippedBox.innerText();
+  if (!/跳过\s*\d+\s*次/.test(skippedText)) {
+    fail(`"跳过"那句话没报数：${skippedText.slice(0, 120)}`, await row.innerText());
+  }
+
+  // ② 水位线是"被补的那一次"，不是"跑的那一刻"：锚点落在整分上，所以秒必须是 00
+  const watermark = new Date(String(seededTask.lastRunAt));
+  if (Number.isNaN(watermark.getTime())) fail(`lastRunAt 不是一个时刻：${String(seededTask.lastRunAt)}`);
+  if (!(seededTask.lastRunAt ?? '').includes(':00.000Z')) {
+    fail(
+      `水位线写成了"此刻"而不是"补的那一次"（${String(seededTask.lastRunAt)} 不在整分上）—— 这样会把刚发生还没跑的那一笔静默吃掉`,
+    );
+  }
+  if (watermark.getTime() <= scheduleAnchor.getTime()) {
+    fail(`水位线还停在锚点（${String(seededTask.lastRunAt)}），说明这一轮压根没跑`, JSON.stringify(seededTask));
+  }
+  if (typeof seededTask.sessionId !== 'string' || seededTask.sessionId === '') {
+    fail('任务没有绑定会话（到点这一轮不知道写进哪儿）', JSON.stringify(seededTask));
+  }
+
+  // ③ 到点真的起了一轮：那轮的问题与回答落在会话文件里（磁盘真值，不是界面自述）
+  const schedJsonl = join(dataDir, 'sessions', seededTask.sessionId, 'messages.jsonl');
+  for (let i = 0; i < 60 && !existsSync(schedJsonl); i += 1) await win3.waitForTimeout(200);
+  if (!existsSync(schedJsonl)) fail(`到点起的那一轮没落盘（${schedJsonl} 不在）`, JSON.stringify(seededTask));
+  const schedLines = readFileSync(schedJsonl, 'utf8').split('\n').filter(Boolean);
+  const schedAsk = schedLines.find((l) => l.includes('E2E_SCHEDULE'));
+  if (!schedAsk) fail('任务里那句话没有变成发给模型的一轮提问', schedLines.join('\n').slice(0, 500));
+  if (!schedLines.some((l) => l.includes('"role":"assistant"'))) {
+    fail('到点那一轮只有问没有答（起轮没走通对话链路）', schedLines.join('\n').slice(0, 500));
+  }
+
+  // ④ 停用是真停用：写盘、且水位线不再往前走
+  const beforeStop = String(seededTask.lastRunAt);
+  await row.locator('button', { hasText: '停用' }).first().click();
+  await win3.waitForTimeout(400);
+  const stopped = JSON.parse(readFileSync(taskFile, 'utf8')).data.tasks.find((t) => t.id === seededTaskId);
+  if (stopped.enabled !== false) fail('点了停用而磁盘上还是启用（界面与账各说各话）', JSON.stringify(stopped));
+  if (String(stopped.lastRunAt) !== beforeStop) {
+    fail(`停用之后水位线还在动（${beforeStop} → ${String(stopped.lastRunAt)}）—— 停用不就该不起`, JSON.stringify(stopped));
+  }
+  ok('开机补跑：只补最近一次并报出跳过几次；水位线落在整分（是那一次，不是此刻）；那一轮真落进会话文件；停用真的不再起轮');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -2907,5 +3015,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 干净退出');
 process.exit(0);

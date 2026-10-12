@@ -44,3 +44,21 @@ export const TOOL_OUTPUT_FLUSH_CHARS = 2_000;
  * 没有这一条的话，只按字节攒批会让"先吐两行、然后安静半分钟"的构建命令全程空白。
  */
 export const TOOL_OUTPUT_QUIET_MS = 250;
+
+/**
+ * 定时任务（M7 · R9）的上界。
+ *
+ * 为什么抖动是真的、不是装饰：一台机器上挂五条"每天 09:00"的任务，
+ * 到点会同时起五轮模型调用；抖动把这一批摊开。它**按任务 id 派生且落盘固定**，
+ * 重启后不许换点 —— 换了点就会被当成"这一次还没跑过"而重复补跑。
+ *
+ * 为什么 `SCHEDULE_TICK_MS` 比抖动窗口小： tick 是"多久看一眼有没有到点的"，
+ * 它决定触发的最大误差；tick 30s 配抖动 120s，最坏晚 150s 起一条日程，
+ * 而这些都是**可见的**（界面上的"下次"已经把抖动加进去了）。
+ */
+export const MAX_SCHEDULED_TASKS = 50;
+export const SCHEDULE_NAME_MAX_CHARS = 40;
+export const SCHEDULE_RULE_MAX_CHARS = 200;
+export const SCHEDULE_PROMPT_MAX_CHARS = 4000;
+export const SCHEDULE_TICK_MS = 30_000;
+export const SCHEDULE_JITTER_WINDOW_MS = 120_000;

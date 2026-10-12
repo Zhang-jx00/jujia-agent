@@ -34,6 +34,12 @@ import {
   permissionRequestSchema,
   permissionRuleInputSchema,
   permissionRuleViewSchema,
+  scheduleDeleteSchema,
+  scheduleEventSchema,
+  scheduleListResultSchema,
+  scheduleMutationResultSchema,
+  scheduleSaveSchema,
+  scheduleToggleSchema,
   streamEventSchema,
   testResultSchema,
   toolRunResultSchema,
@@ -69,6 +75,12 @@ import {
   type PluginsState,
   type PermissionRuleInput,
   type PermissionRuleView,
+  type ScheduleDeleteInput,
+  type ScheduleEventPayload,
+  type ScheduleListResult,
+  type ScheduleMutationResult,
+  type ScheduleSaveInput,
+  type ScheduleToggleInput,
   type StreamEvent,
   type TestResult,
   type ToolRunResult,
@@ -585,6 +597,47 @@ const api = {
     };
     ipcRenderer.on(IPC.CANVAS_EVENT, handler);
     return () => ipcRenderer.removeListener(IPC.CANVAS_EVENT, handler);
+  },
+
+  /* ---------------------------- 定时任务（M7 · R9） ---------------------------- */
+
+  /**
+   * 清单。「下一次是几点」由主进程算好一起给 ——
+   * 界面自己再算一遍就是第二套算式，会出现"显示 09:00、实际 09:40 才跑"。
+   */
+  async scheduleList(): Promise<ScheduleListResult> {
+    return scheduleListResultSchema.parse(await ipcRenderer.invoke(IPC.SCHEDULE_LIST));
+  },
+
+  /** 新增或修改；规则不合法时主进程直接拒，错误原样带回来（不存在"存下来但永不触发"） */
+  async scheduleSave(input: ScheduleSaveInput): Promise<ScheduleMutationResult> {
+    const parsed = scheduleSaveSchema.parse(input);
+    return scheduleMutationResultSchema.parse(await ipcRenderer.invoke(IPC.SCHEDULE_SAVE, parsed));
+  },
+
+  /** 停用 / 启用。停用不删账：上次跑过几次、跳过几次还得看得见 */
+  async scheduleToggle(input: ScheduleToggleInput): Promise<ScheduleMutationResult> {
+    const parsed = scheduleToggleSchema.parse(input);
+    return scheduleMutationResultSchema.parse(await ipcRenderer.invoke(IPC.SCHEDULE_TOGGLE, parsed));
+  },
+
+  async scheduleDelete(input: ScheduleDeleteInput): Promise<ScheduleMutationResult> {
+    const parsed = scheduleDeleteSchema.parse(input);
+    return scheduleMutationResultSchema.parse(await ipcRenderer.invoke(IPC.SCHEDULE_DELETE, parsed));
+  },
+
+  /**
+   * 订阅"到点"事件（main → renderer 推送）。
+   * 有了它界面才不用轮询状态；回调拿到的是过完契约的事件，形状不对的一条都不进界面。
+   */
+  onScheduleEvent(listener: (event: ScheduleEventPayload) => void): () => void {
+    const handler = (_e: unknown, payload: unknown): void => {
+      const parsed = scheduleEventSchema.safeParse(payload);
+      if (parsed.success) listener(parsed.data);
+      else console.warn('[schedule] 丢弃形状不合法的事件：', parsed.error.message);
+    };
+    ipcRenderer.on(IPC.SCHEDULE_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC.SCHEDULE_EVENT, handler);
   },
 
   async gitStage(paths: string[]): Promise<GitActionResultView> {

@@ -26,7 +26,7 @@ function stripComments(src: string): string {
 }
 
 const EXECUTOR = stripComments(read('../../../../packages/agent-core/src/tools/executor.ts'));
-const CHAT = stripComments(read('./ipc/chat.ts'));
+const CHAT = stripComments(read('./ipc/turn-trigger.ts'));
 const TOOLS = stripComments(read('./ipc/tools.ts'));
 const CANVAS = stripComments(read('./ipc/canvas.ts'));
 const IPC = stripComments(read('./ipc.ts'));

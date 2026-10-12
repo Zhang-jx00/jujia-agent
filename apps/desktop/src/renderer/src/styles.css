@@ -1179,6 +1179,134 @@ html[data-jj-bg-kind='glass'] .app-shell {
   color: var(--success);
 }
 
+/* --------------------------- 定时任务（M7 · R9） --------------------------- */
+/*
+ * 清单**故意不复用** .jj-perm-list / .jj-perm-rule：那是权限页在用的名字，
+ * e2e 数"规则行"的断言会把这里也数进去（同 jj-audit-list 那次的教训：两个列表共用类名 =
+ * 一条断言问不出它真正想问的东西）。
+ */
+
+.jj-schedule-scope {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--bg-container) 88%, var(--bg-layout));
+}
+
+.jj-schedule-scope-list {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+  font-size: var(--fs-caption, 12px);
+  color: var(--text-secondary);
+}
+
+.jj-schedule-scope-list li {
+  word-break: break-word;
+}
+
+.jj-schedule-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.jj-schedule-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+}
+
+/* 停用是"这轮不跑、账还留着"：淡一点但字要读得清（与 .jj-perm-rule-off 同一观感） */
+.jj-schedule-row-off {
+  opacity: 0.62;
+}
+
+.jj-schedule-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.jj-schedule-name {
+  font-weight: 600;
+}
+
+.jj-schedule-meta {
+  font-size: var(--fs-caption, 12px);
+  color: var(--text-secondary);
+}
+
+.jj-schedule-rule {
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  word-break: break-all;
+}
+
+.jj-schedule-prompt {
+  font-size: var(--fs-caption, 12px);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.jj-schedule-chip {
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 11px;
+  color: var(--warning);
+}
+
+.jj-schedule-line-err {
+  margin: 0;
+  font-size: var(--fs-caption, 12px);
+  word-break: break-word;
+}
+
+.jj-schedule-note {
+  margin: 0;
+  font-size: var(--fs-caption, 12px);
+  word-break: break-word;
+}
+
+.jj-schedule-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.jj-schedule-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.jj-schedule-form input,
+.jj-schedule-form select,
+.jj-schedule-form textarea {
+  background: var(--bg-layout);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.jj-schedule-form textarea {
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  resize: vertical;
+}
+
 /* --------------------------- 生命周期钩子（W5d） --------------------------- */
 
 .jj-hooks-table {

@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { TOOL_OUTPUT_TAIL_CHARS } from './limits';
+import {
+  SCHEDULE_JITTER_WINDOW_MS,
+  SCHEDULE_NAME_MAX_CHARS,
+  SCHEDULE_PROMPT_MAX_CHARS,
+  SCHEDULE_RULE_MAX_CHARS,
+  TOOL_OUTPUT_TAIL_CHARS,
+} from './limits';
 
 /** 应用与运行时信息（P0 打通链路用；后续阶段会逐步扩充字段）。 */
 export const appInfoSchema = z.object({
@@ -1129,6 +1135,108 @@ export const gitLogResultSchema = z.union([
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 export type GitLogResult = z.infer<typeof gitLogResultSchema>;
+
+/* ------------------------------------------------------------------ *
+ * M7 · R9：定时任务
+ *
+ * 三条约定写在这里，不是散在实现里：
+ * - **账本上没有"免审批"这一格**。`autoApprove` / `alwaysAllow` / `skipPermission`
+ *   这类键在保存时就被拒（不是"存着不用"），到点触发照走同一扇权限门 ——
+ *   停牌①的口径：不自行开常驻放行的口子。
+ * - **`.strict()`**：载荷多一个字段就该被发现。上面那条"拒收未知键"正是靠它兜底。
+ * - **`nextDueAt` 由主进程算**（`scheduleViewSchema`）：界面自己算一遍就是第二套算式，
+ *   显示 09:00 而实际 09:40 才跑，是那种没人报 bug、只会再也不信这功能的错。
+ * ------------------------------------------------------------------ */
+
+export const scheduledTaskSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    name: z.string().min(1).max(SCHEDULE_NAME_MAX_CHARS),
+    /** RRULE 子集原文；语义由 `agent-core/schedule/rrule` 判，这里只管形状 */
+    rule: z.string().min(1).max(SCHEDULE_RULE_MAX_CHARS),
+    /** 到点交给模型的那句话（不执行任何命令 —— 命令由模型请求、由权限门批） */
+    prompt: z.string().min(1).max(SCHEDULE_PROMPT_MAX_CHARS),
+    connectionId: z.string().min(1).max(128),
+    /** 这条任务最早可能触发的那一刻；改规则不跟着改它 */
+    anchorAt: z.string().min(1),
+    /** 绑定到哪一个会话（第一次触发才建，之后复用，不每次新灌一条会话） */
+    sessionId: z.string().nullable(),
+    enabled: z.boolean(),
+    /** 按 id 派生并**落盘固定**：重启后换点就会被当成"这一次还没跑过"而重复补跑 */
+    jitterMs: z.number().int().nonnegative().max(SCHEDULE_JITTER_WINDOW_MS),
+    /** 上一次真触发的时刻 —— 同时是补跑的水位线 */
+    lastRunAt: z.string().nullable(),
+    /** 上次触发时替用户跳过了多少次（0 = 正常到点，不是补跑） */
+    lastSkipped: z.number().int().nonnegative(),
+    /** 上次触发的可见失败原因；空串 = 没有。不静默 */
+    lastError: z.string(),
+  })
+  .strict();
+export type ScheduledTask = z.infer<typeof scheduledTaskSchema>;
+
+/** 界面 → 主进程：新增（无 `id`）或修改（带 `id`） */
+export const scheduleSaveSchema = z
+  .object({
+    id: z.string().max(64).nullable(),
+    name: z.string(),
+    rule: z.string(),
+    prompt: z.string(),
+    connectionId: z.string(),
+  })
+  .strict();
+export type ScheduleSaveInput = z.infer<typeof scheduleSaveSchema>;
+
+/** 增删改之后一律把整份清单回给界面（界面不乐观改状态 —— 服务端才是事实） */
+export const scheduleMutationResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), tasks: z.array(scheduledTaskSchema) }),
+  z.object({ ok: z.literal(false), error: z.string(), tasks: z.array(scheduledTaskSchema) }),
+]);
+export type ScheduleMutationResult = z.infer<typeof scheduleMutationResultSchema>;
+
+/** 启停与删除的入参（每个跨进程入参都过契约，不靠 handler 里手写 typeof） */
+export const scheduleToggleSchema = z
+  .object({ id: z.string().min(1).max(64), enabled: z.boolean() })
+  .strict();
+export type ScheduleToggleInput = z.infer<typeof scheduleToggleSchema>;
+
+export const scheduleDeleteSchema = z.object({ id: z.string().min(1).max(64) }).strict();
+export type ScheduleDeleteInput = z.infer<typeof scheduleDeleteSchema>;
+
+/**
+ * 主进程算好的一份视图：任务本体 + 下一次该醒的时刻 + 该说的话。
+ * `nextDueAt` 为 null 只有一种原因：规则或锚点坏了，而那时 `note` 一定非空。
+ */
+export const scheduleViewSchema = z
+  .object({
+    task: scheduledTaskSchema,
+    nextDueAt: z.string().nullable(),
+    note: z.string(),
+  })
+  .strict();
+export type ScheduleView = z.infer<typeof scheduleViewSchema>;
+
+export const scheduleListResultSchema = z
+  .object({
+    views: z.array(scheduleViewSchema),
+    /** 清单读不出来时的实话（回落备份、版本不认识…）；空串 = 一切正常 */
+    health: z.string(),
+  })
+  .strict();
+export type ScheduleListResult = z.infer<typeof scheduleListResultSchema>;
+
+/** 到点这件事要主动通知界面（界面因此重读清单；不做轮询，轮询是第二个定时器） */
+export const scheduleEventSchema = z
+  .object({
+    taskId: z.string(),
+    name: z.string(),
+    kind: z.enum(['fired', 'failed', 'invalid-rule']),
+    /** 给人看的一句话（含"跳过 N 次"），有上界，不塞正文 */
+    note: z.string().max(500),
+    at: z.string(),
+  })
+  .strict();
+export type ScheduleEventPayload = z.infer<typeof scheduleEventSchema>;
+
 
 /* ------------------------------------------------------------------ *
  * M19：轻量 IDE 的 PDF 打开（只读）

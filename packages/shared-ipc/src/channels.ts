@@ -228,6 +228,26 @@ export const IPC = {
    * 渲染层据此判断"这是不是我正在看的那张图的第几个节点"，而不是靠"看起来像"。
    */
   CANVAS_EVENT: 'canvas:event',
+
+  /* ---------------------------- 定时任务（M7 · R9） ---------------------------- */
+
+  /**
+   * 读清单。返回的不只是任务本体，还有**主进程算好的"下一次该醒"**：
+   * 让界面自己再算一遍就是第二套算式，会出现"显示 09:00、实际 09:40 才跑"。
+   */
+  SCHEDULE_LIST: 'schedule:list',
+  /** 新增或修改（带 id 就是改）。规则坏了在这里就拒，不留"存着但永不触发"的条目 */
+  SCHEDULE_SAVE: 'schedule:save',
+  /** 停用 / 启用。停用不删账（上次跑过几次、跳过了几次还得看得见） */
+  SCHEDULE_TOGGLE: 'schedule:toggle',
+  SCHEDULE_DELETE: 'schedule:delete',
+  /**
+   * main → renderer：**到点这件事**的推送（跑了 / 失败了 / 规则坏了）。
+   *
+   * 有了它界面才不用轮询（轮询是第二个定时器）。事件只带一句人话与任务名，不带正文；
+   * 要说"这一轮答了什么"仍在对话流里，那条路已有会话归属闸口（T5）。
+   */
+  SCHEDULE_EVENT: 'schedule:event',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

@@ -12,6 +12,7 @@ import { registerAuditIpc } from './ipc/audit';
 import { registerPermissionRulesIpc } from './ipc/permissions';
 import { registerPdfIpc } from './ipc/pdf';
 import { registerCanvasIpc } from './ipc/canvas';
+import { registerScheduleIpc } from './ipc/schedule';
 
 export type { IpcDeps };
 
@@ -48,4 +49,5 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerAuditIpc(ctx);
   registerPdfIpc(ctx);
   registerCanvasIpc(ctx);
+  registerScheduleIpc(ctx);
 }

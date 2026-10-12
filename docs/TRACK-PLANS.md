@@ -18,7 +18,7 @@
 | **轨道拓展计划** | **可扩展点**：技能（Skills）、钩子（Hooks）、插件、双色/外观、自定义规则 | 让**用户/第三方**能把能力插进来（而不是我们自己加功能） |
 | **轨道加固计划** | **基础代码的强度**：安全基线、路径沙箱、IPC 边界、审批分级、密钥保护、原子存储 | 不改功能形态，只让**既有行为更抗攻击/更抗误用** |
 | **轨道升级计划** | **替换与迁移**：依赖大版本、渲染管线、provider 适配、协议版本 | 把"旧做法换成新做法"，行为**大体不变** |
-| **轨道优化计划** | **效率与资源**：启动/交互性能、内存上界、渲染合批、测试耗时 | 行为不变，**更快/更省/更稳** |
+| **轨道优化计划** | **效率与资源**（启动/交互性能、内存上界、渲染合批、测试耗时）与**体验打磨**（视觉一致性、动效、微交互细节） | 行为与能力不变：**更快 / 更省 / 更稳 / 更好用**（体验打磨同样不许改变"能做什么"） |
 | **轨道规整计划** | **结构与规范**：目录、命名、清理、测试策略、文档导航、门禁清单、记录口径 | 不碰行为，只让**结构与规范**回到有序 |
 | **轨道排查计划** | **系统排查与记录**：全项目找问题、变异测试、复核台账、许可证扫描 | 产出是**问题清单与证据**，不是修复 |
 | **轨道接驳计划** | **功能之间的对接方式**：渲染层↔IPC↔主进程↔引擎、工具桥、插件贡献接入、钩子与权限门的挂接、画布↔编码 | 单独看每块都对，问题是**两块之间怎么连** |
@@ -141,6 +141,10 @@
 | 铺设8 | `packages/agent-core/src/tools/builtin/exec-tool.ts` | 内置 exec `run_command`（每次硬 ask + 工作目录守卫 + 环境脱敏） |
 | 铺设8 | `packages/agent-core/src/audit/` · `apps/desktop/src/main/{audit-log,audit-service,audit-gate}.ts` · `apps/desktop/src/main/ipc/audit.ts` | 执行审计（M4 收尾其二）：判定事实出口（工具侧 `runTool` 的 `finally`；非工具侧 `audit-gate.ts` 的 `auditedGateRun`，git / 打开外部程序 / 钩子配置三扇共用）、**落盘前剔密**、按天 JSONL 与导出 |
 | 铺设8 | `packages/agent-core/src/tools/output-pump.ts` · `apps/desktop/src/main/{tool-output-relay,tool-output-wiring.test,tool-output-relay.test}.ts` | 长命令的实时输出（M4 收尾其三）：攒批与尾部快照（双上界）、按 callId 分线、链条接线锁 |
+| 铺设7 | `packages/agent-core/src/schedule/`（`rrule.ts` · `catchup.ts`） | 定时任务的**算式层**（M7）：RRULE 子集的解析与拒收口径、下一次/截至此刻的触发时刻、错过次数、稳定抖动；补跑口径（至多补一次 + 说出跳过几次）也是纯函数 |
+| 铺设7 | `apps/desktop/src/main/{schedule-store,schedule-service}.ts` · `apps/desktop/src/main/ipc/schedule.ts` | 定时任务的**落盘与发动机**（M7）：账本（校验只一处 · 读改写在临界区 · 拒"免审批"键）、tick 与"一次只跑一条"、到点走同一扇门 |
+| 铺设7 | `apps/desktop/src/main/ipc/turn-trigger.ts` | **起一轮对话的唯一入口**（M7 从 `ipc/chat.ts` 抽出）：用户敲字与定时到点共用它，权限参数汇聚点因此只有一个 |
+| 铺设7 | `apps/desktop/src/renderer/src/features/schedule/` | 定时任务页（M7）：清单只搬运主进程算好的"下一次"，规则子集与"定时≠免审批"写在屏幕上 |
 | 铺设10 | `packages/agent-core/src/tools/builtin/note-tool.ts` | 记忆写入 `append_note` 工具本体（与 `main/pending-notes.ts` 同批） |
 
 ## 三、记录规则（今后一律遵守）

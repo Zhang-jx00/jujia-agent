@@ -35,3 +35,5 @@ export * from './context/injection-notice';
 export * from './audit/redact';
 export * from './audit/record';
 export * from './tools/output-pump';
+export * from './schedule/rrule';
+export * from './schedule/catchup';

@@ -17,6 +17,12 @@ const read = (...rel: string[]): string => strip(readFileSync(join(here, ...rel)
 
 const chatService = read('chat-service.ts');
 const chatIpc = read('ipc', 'chat.ts');
+/**
+ * M7 · R9：`hydrateSession` 与"装不回来要带出 warning"这一段，从 `ipc/chat.ts`
+ * 搬进了 `ipc/turn-trigger.ts`（定时任务与用户敲字共用一个起轮入口）。
+ * 判据一字未改，只是跟着搬：catch 在触发器里、`warning` 仍必须一路送到返回值。
+ */
+const turnTrigger = read('ipc', 'turn-trigger.ts');
 const preload = read('..', 'preload', 'index.ts');
 const panel = read('..', 'renderer', 'src', 'features', 'chat', 'ChatPanel.tsx');
 const policy = read('..', '..', '..', '..', 'packages', 'agent-core', 'src', 'permissions', 'policy.ts');
@@ -40,7 +46,11 @@ describe('存储层确实被用（不是躺在文件里的死代码）', () => {
   it('IPC 层把三条能力接上，且发送前先 hydrate', () => {
     expect(chatIpc).toContain('handle(IPC.CHAT_LIST,');
     expect(chatIpc).toContain('historyPage(sessionId, page)');
-    expect(chatIpc).toContain('await hydrateSession(sessionId, connectionId)');
+    // hydrate 这一句跟着"起一轮"搬进了 turn-trigger —— 判据不变：**发问之前必须先把历史装回来**
+    expect(turnTrigger).toContain('await hydrateSession(sid, connectionId)');
+    expect(turnTrigger.indexOf('await hydrateSession(sid, connectionId)')).toBeLessThan(
+      turnTrigger.indexOf('sendMessage('),
+    );
   });
 
   it('预加载桥暴露的是具体方法（不泄漏 ipcRenderer 本体）', () => {
@@ -109,11 +119,13 @@ describe('落盘记账与"历史没装回来"不许静默（外部审查 T6）',
   });
 
   it('hydrate 失败必须带出提示：既 catch 了，也把 warning 送进返回值', () => {
-    expect(chatIpc).toContain('historyWarning');
-    expect(chatIpc).toContain('历史未能恢复，这一轮从空上下文继续');
-    expect(chatIpc).toContain('warning: historyWarning');
+    // catch 与那句话在 turn-trigger（起轮的汇聚点），送进通道返回值那一跳在 ipc/chat.ts ——
+    // 这条链**两环都要钉**：只钉一端的话，中间丢了 warning 照样全绿（T35 同族：接线锁要钉住每一环）
+    expect(turnTrigger).toContain('历史未能恢复，这一轮从空上下文继续');
+    expect(turnTrigger).toContain('return { ...result, warning }');
+    expect(chatIpc).toContain('warning: result.warning');
     // 反向锁：以前那行"吞掉错误"的写法不许回来
-    expect(chatIpc).not.toMatch(/hydrateSession\([^)]*\)\.catch\(\(\) => undefined\)/);
+    expect(turnTrigger).not.toMatch(/hydrateSession\([^)]*\)\.catch\(\(\) => undefined\)/);
   });
 
   it('契约里 warning 是 nullable 而不是 optional（"没提示"与"少传一格"必须是两件事）', () => {
