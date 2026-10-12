@@ -82,7 +82,7 @@ describe('全仓清扫：字符图标与 emoji 不许回来', () => {
    * M214/M215 首轮就是这个缺口逃掉的 —— 变异把 `📁` 写成 `\u{1F4C1}`，
    * 源码里再也搜不到那个字形，清扫却照样绿。（转义只是另一种写法，不是另一件事。）
    */
-  const FORBIDDEN = [
+  const FORBIDDEN: ReadonlyArray<readonly [string, string]> = [
     ['📁', '\\u{1F4C1}'],
     ['📄', '\\u{1F4C4}'],
     ['⟳', '\\u27F3'],
