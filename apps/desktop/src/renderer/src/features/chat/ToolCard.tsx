@@ -7,9 +7,11 @@ import type { ReactElement } from 'react';
  * - **L1**：点开显示关键参数与结果摘要（卡片）
  * - **L2**：再点开进入 Drawer，看完整参数与完整输出
  *
- * 动效纪律（见 styles/motion.css 顶部铁律）：
- * - 展开**不做高度动画**——只让内容做 opacity/translateY 入场，容器高度瞬时变化。
- *   高度动画会触发布局重算，是掉帧与 CLS 的主要来源；
+ * 动效纪律（见 `docs/DESIGN-BASELINE.md` 与 styles/motion.css 顶部铁律）：
+ * - L1 的展开/收起走**真实内容高度的连续过渡**（`.jj-collapse` 的 `grid-template-rows 0fr↔1fr`），
+ *   内容**始终挂载** —— 重挂载就是"文字突然出现"，那是被明令禁止的形状；
+ *   收起时用 `inert` + `aria-hidden` 让它退出可达性树（而不是从 DOM 里消失）；
+ * - 箭头是**同一个元素旋转 180°**（`.jj-caret`），不许"换一个字符"；
  * - Drawer 用 `transform: translateY` 进场（合成器线程，不触发重排）；
  * - 入场只错峰 1 级，同屏不同时动多个元素。
  */
@@ -82,8 +84,8 @@ export function ToolCard({ data }: { data: ToolCardData }): ReactElement {
           {data.durationMs !== undefined ? `${data.durationMs}ms` : statusText}
         </span>
         {data.summary && <span className="jj-tool-summary">{data.summary}</span>}
-        <span className="jj-tool-caret" aria-hidden="true">
-          {level === 'L0' ? '›' : '⌄'}
+        <span className="jj-caret" data-caret="" data-open={level !== 'L0'} aria-hidden="true">
+          ⌄
         </span>
       </button>
 
@@ -97,35 +99,42 @@ export function ToolCard({ data }: { data: ToolCardData }): ReactElement {
         </pre>
       )}
 
-      {level !== 'L0' && (
-        <div className="jj-tool-l1 jj-enter">
-          <dl className="jj-tool-kv">
-            <dt>状态</dt>
-            <dd className={state === 'bad' ? 'jj-danger' : state === 'ok' ? 'jj-ok' : ''}>
-              {statusText}
-            </dd>
-            <dt>参数</dt>
-            <dd>
-              <pre className="jj-pre">{prettyArgs(data.argumentsText)}</pre>
-            </dd>
-            {data.summary && (
-              <>
-                <dt>结果</dt>
-                <dd>
-                  <pre className="jj-pre">{data.summary}</pre>
-                </dd>
-              </>
-            )}
-          </dl>
-          <button
-            type="button"
-            className="jj-btn jj-btn-quiet jj-transition"
-            onClick={() => setLevel('L2')}
-          >
-            查看完整输出
-          </button>
+      {/*
+        L1：**始终挂载**，靠容器轨道 0fr↔1fr 做真实高度的连续过渡（见 motion.css 的 .jj-collapse）。
+        收起时加 `inert` + `aria-hidden`：内容对键盘/读屏不可达，但对过渡仍"存在"
+        （从 DOM 里摘掉再插回来 = 文字突然出现，正是本轮要消灭的形状）。
+      */}
+      <div className="jj-collapse" data-collapsed={level === 'L0' ? 'true' : 'false'}>
+        <div {...(level === 'L0' ? { inert: true, 'aria-hidden': true } : {})}>
+          <div className="jj-tool-l1">
+            <dl className="jj-tool-kv">
+              <dt>状态</dt>
+              <dd className={state === 'bad' ? 'jj-danger' : state === 'ok' ? 'jj-ok' : ''}>
+                {statusText}
+              </dd>
+              <dt>参数</dt>
+              <dd>
+                <pre className="jj-pre">{prettyArgs(data.argumentsText)}</pre>
+              </dd>
+              {data.summary && (
+                <>
+                  <dt>结果</dt>
+                  <dd>
+                    <pre className="jj-pre">{data.summary}</pre>
+                  </dd>
+                </>
+              )}
+            </dl>
+            <button
+              type="button"
+              className="jj-btn jj-btn-quiet jj-transition"
+              onClick={() => setLevel('L2')}
+            >
+              查看完整输出
+            </button>
+          </div>
         </div>
-      )}
+      </div>
 
       {level === 'L2' && (
         <>

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ToolCard } from './ToolCard';
 
 /**
@@ -53,5 +53,65 @@ describe('ToolCard · 实时输出尾部', () => {
     const box = screen.getByLabelText(/实时输出/);
     expect(box.textContent).toBe('最后一屏');
     expect(box.getAttribute('aria-label')).toBe('实时输出（末尾片段）');
+  });
+});
+
+/**
+ * 展开/收起（R18 · 优化5）：按 `docs/DESIGN-BASELINE.md` 的硬要求钉住四条 ——
+ * ① 容器用**真实内容高度**的连续过渡（`grid-template-rows` 的 0fr↔1fr，不是猜一个 max-height）；
+ * ② 箭头是**同一个元素旋转 180°**（不许"换一个字符"）；
+ * ③ 内容**始终挂载**（重挂载 = 文字突然出现），收起时靠 `inert` + `aria-hidden` 退出可达性树；
+ * ④ 收起也有另一端的过渡（两态都在 DOM 上可查）。
+ */
+describe('工具卡的展开/收起是连续过渡，不是瞬时切换', () => {
+  const card = {
+    callId: 'c9',
+    name: 'read_file',
+    phase: 'done' as const,
+    ok: true,
+    argumentsText: '{"path":"a"}',
+  };
+
+  it('收起态：内容已挂载但不可达（inert + aria-hidden），容器带 data-collapsed', () => {
+    render(<ToolCard data={card} />);
+    const wrap = document.querySelector('.jj-collapse');
+    expect(wrap).not.toBeNull();
+    expect(wrap?.getAttribute('data-collapsed')).toBe('true');
+    const inner = wrap?.firstElementChild as HTMLElement | null;
+    expect(inner?.getAttribute('aria-hidden')).toBe('true');
+    expect(inner?.hasAttribute('inert')).toBe(true);
+    expect(document.body.textContent).toContain('"path"'); // 内容确实挂着（展开时才有东西可过渡）
+  });
+
+  it('点开之后：同一容器翻到展开态，内容回到可达性树', () => {
+    render(<ToolCard data={card} />);
+    fireEvent.click(screen.getByRole('button', { name: /read_file/ }));
+    const wrap = document.querySelector('.jj-collapse');
+    expect(wrap?.getAttribute('data-collapsed')).toBe('false');
+    const inner = wrap?.firstElementChild as HTMLElement | null;
+    expect(inner?.getAttribute('aria-hidden')).not.toBe('true');
+    expect(inner?.hasAttribute('inert')).toBe(false);
+  });
+
+  it('箭头是同一个元素旋转 180°：只有 data-open 在变，没有第二个字符', () => {
+    render(<ToolCard data={card} />);
+    const caret = document.querySelector('[data-caret]');
+    expect(caret).not.toBeNull();
+    expect(caret?.getAttribute('data-open')).toBe('false');
+    const closedText = caret?.textContent;
+    fireEvent.click(screen.getByRole('button', { name: /read_file/ }));
+    const caret2 = document.querySelector('[data-caret]');
+    expect(caret2?.getAttribute('data-open')).toBe('true');
+    // 同一个字形：旋转交给 CSS，DOM 文本不许跟着换
+    expect(caret2?.textContent).toBe(closedText);
+  });
+
+  it('再点一次收起（收起也有过渡的另一端）', () => {
+    render(<ToolCard data={card} />);
+    const l0 = screen.getByRole('button', { name: /read_file/ });
+    fireEvent.click(l0);
+    fireEvent.click(l0);
+    expect(document.querySelector('.jj-collapse')?.getAttribute('data-collapsed')).toBe('true');
+    expect(document.querySelector('[data-caret]')?.getAttribute('data-open')).toBe('false');
   });
 });

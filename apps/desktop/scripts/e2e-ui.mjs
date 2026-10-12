@@ -328,13 +328,18 @@ writeFileSync(
  * 现场必须是"上一个进程没跑、日历上已经过了好几个点"，而那只能由启动前的磁盘状态造出来。
  * 锚点刻意落在**整分**（秒与毫秒归零）：于是"落盘的 lastRunAt 是不是某个触发时刻"
  * 可以用"秒是不是 00"一眼分辨 —— 写成"跑的那一刻"的实现会留下 arbitrary 秒数，当场露形。
- * jitterMs 给 0 是为了让这一步对时钟抖动不敏感（抖动本身由 M193–M202 的单测与变异管）。
+ * jitterMs 给 0 是为了让这一步对时钟抖动不敏感（抖动本身由 M193–M205 的单测与变异管）。
+ *
+ * 规则用 **DAILY 而不是 MINUTELY**（实测教训）：MINUTELY 下"跳过次数"只活到下一次到点为止 ——
+ * e2e 跑到这一步已经过去好几分钟，途中那次正常到点会把 lastSkipped 重置成 0，
+ * 断言于是间歇性变红。DAILY 只欠三次、下一次要到明天，断言才是确定的。
  */
 const seededTaskId = 'e2etask000-0000-4000-8000-000000000001';
 const scheduleAnchor = (() => {
   const d = new Date();
   d.setSeconds(0, 0);
-  d.setMinutes(d.getMinutes() - 3);
+  d.setMinutes(d.getMinutes() - 2);
+  d.setDate(d.getDate() - 3);
   return d;
 })();
 mkdirSync(join(dataDir, 'schedules'), { recursive: true });
@@ -348,14 +353,14 @@ writeFileSync(
         {
           id: seededTaskId,
           name: 'E2E 定时补跑',
-          rule: 'FREQ=MINUTELY',
+          rule: 'FREQ=DAILY',
           prompt: 'E2E_SCHEDULE 这是一条定时任务该自己起的一轮',
           connectionId: seededEchoConnId,
           anchorAt: scheduleAnchor.toISOString(),
           sessionId: null,
           enabled: true,
           jitterMs: 0,
-          // 锚点那一次算"已经跑过"，之后每分钟一次 —— 到开机时至少欠两次
+          // 锚点那一次算"已经跑过"，之后每天一次 —— 到开机时正好欠三次、且今天不会再欠
           lastRunAt: scheduleAnchor.toISOString(),
           lastSkipped: 0,
           lastError: '',
@@ -2996,6 +3001,74 @@ try {
   }
   ok('开机补跑：只补最近一次并报出跳过几次；水位线落在整分（是那一次，不是此刻）；那一轮真落进会话文件；停用真的不再起轮');
 
+  step('展开/收起按设计基线做：真实高度轨道过渡 + 箭头同元素旋转 180°（R18）');
+  // 拿**最后一张**工具卡（刚才那次 run_command 的），它的 L1 默认是收起的
+  const motionProbe = await win3.evaluate(async () => {
+    const cards = Array.from(document.querySelectorAll('.jj-tool'));
+    const card = cards[cards.length - 1];
+    if (!card) return { ok: false, why: '页面上没有工具卡' };
+    const collapse = card.querySelector('.jj-collapse');
+    const caret = card.querySelector('[data-caret]');
+    const l0 = card.querySelector('.jj-tool-l0');
+    if (!collapse || !caret || !l0) return { ok: false, why: '工具卡缺 .jj-collapse / [data-caret] / .jj-tool-l0' };
+    const before = {
+      collapsed: collapse.getAttribute('data-collapsed'),
+      transform: getComputedStyle(caret).transform,
+      innerInert: card.querySelector('.jj-collapse > *')?.hasAttribute('inert') ?? null,
+    };
+    const transitionProperty = getComputedStyle(collapse).transitionProperty;
+    l0.click();
+    // 属性立刻翻（DOM 写入是同步的）
+    const attrDeadline = Date.now() + 2000;
+    while (card.querySelector('[data-caret]')?.getAttribute('data-open') !== 'true' && Date.now() < attrDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const caretEl = card.querySelector('[data-caret]');
+    /**
+     * 为什么不在**那一张卡片的那个节点上**直接量 transform：
+     * 自动化里的窗口是遮挡的（`document.visibilityState=visible` 但 Chromium 不产帧），
+     * 实测同一个节点 `matches(".jj-caret[data-open='true']")` 为 true、样式表里规则也在，
+     * 但 `getComputedStyle(...).transform` 一直停在 `none`（过渡时钟不推进）；
+     * 隔离实验（同一份构建 CSS + 同样的 button/aria-hidden 上下文，桌面 Electron 里跑）
+     * 逐条算出 `matrix(-1, 0, 0, -1, 0, 0)` —— 判据本身是好的，是这个窗口量不了"画出来的"值。
+     * 所以这里量两件**确定**的事：① 同一元素的两个状态属性；② 在本页文档里新建一个同标记节点，
+     * 它算出来的就是"展开态该有的终态"。两条合起来 = 箭头确实被规则转了 180°。
+     */
+    const probeNode = (() => {
+      const span = document.createElement('span');
+      span.className = 'jj-caret';
+      span.setAttribute('data-open', 'true');
+      span.style.transition = 'none';
+      document.body.appendChild(span);
+      const t = getComputedStyle(span).transform;
+      span.remove();
+      return t;
+    })();
+    const after = {
+      collapsed: collapse.getAttribute('data-collapsed'),
+      open: caretEl?.getAttribute('data-open') ?? null,
+      matches: caretEl ? caretEl.matches(".jj-caret[data-open='true']") : null,
+      rotatedByRule: probeNode,
+    };
+    return { ok: true, before, after, transitionProperty };
+  });
+  if (motionProbe.ok !== true) fail(`工具卡上量不到动效属性：${String(motionProbe.why)}`);
+  // 失败时把整份探针原样打出来（一次运行拿全信息：属性值、过渡属性、两个状态都在里面）
+  const probeJson = JSON.stringify(motionProbe);
+  if (!String(motionProbe.transitionProperty).includes('grid-template-rows')) {
+    fail(`展开容器没有对 grid-template-rows 做过渡（探针：${probeJson}）——真实高度连续过渡没生效`);
+  }
+  if (motionProbe.before.collapsed !== 'true') fail(`工具卡默认不是收起态（探针：${probeJson}）`);
+  if (motionProbe.before.innerInert !== true) fail(`收起态的内容没有 inert（探针：${probeJson}）—— 键盘能 Tab 进看不见的内容里`);
+  if (motionProbe.after.collapsed !== 'false') fail(`点开之后容器没翻到展开态（探针：${probeJson}）`);
+  if (motionProbe.after.open !== 'true' || motionProbe.after.matches !== true) {
+    fail(`箭头还是收起态（探针：${probeJson}）——同一个元素的两个状态没有同步翻`);
+  }
+  if (motionProbe.after.rotatedByRule !== 'matrix(-1, 0, 0, -1, 0, 0)') {
+    fail(`展开态的规则没把箭头转 180°（探针：${probeJson}）`);
+  }
+  ok('展开用真实高度的轨道过渡（transition-property 含 grid-template-rows）；箭头同元素转 180°（矩阵为负单位阵）；收起态内容 inert');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -3015,5 +3088,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 干净退出');
 process.exit(0);

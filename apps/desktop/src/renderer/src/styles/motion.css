@@ -162,6 +162,68 @@
     background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
+/* ==================== 展开 / 收起（R18 · 见 docs/DESIGN-BASELINE.md） ====================
+ *
+ * 为什么用 `grid-template-rows: 0fr → 1fr` 而不是 `height` / `max-height`：
+ *  - 轨道插值的**目标就是内容自己算出来的高度** —— 不猜数、不用 JS 量高；
+ *  - `max-height` 只能"估一个够大的数"，回弹与跳动都来自那个猜测；
+ *  - 收起与展开都走同一条过渡（两态对称）。
+ * 内容**始终挂载**：重挂载 = 文字突然出现，那是被明令禁止的形状；
+ * 收起时由组件加 `inert` + `aria-hidden`，让内容退出可达性树而不是从 DOM 消失。
+ */
+.jj-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.jj-collapse[data-collapsed='true'] {
+  grid-template-rows: 0fr;
+}
+
+.jj-collapse > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 折叠箭头：**同一个元素**旋转 180°（不许"换一个字符"表示状态） */
+.jj-caret {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.jj-caret[data-open='true'] {
+  transform: rotate(180deg);
+}
+
+/* ==================== 按压与悬停反馈统一接入（R18） ====================
+ * 原先只有 6 个文件手动挂 `.jj-pressable`，页签与各档按钮按下去没有任何反馈。
+ * 这里按"可点元素家族"统一给 100ms 的轻微缩放（motion.css 铁律：微交互 100–200ms）。
+ */
+.app-tab,
+button.jj-btn,
+button.w2-btn,
+button.w2-btn-primary,
+button.w2-btn-danger,
+.jj-tool-l0 {
+  transition:
+    transform var(--motion-duration-instant) var(--motion-ease-in),
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.app-tab:active,
+button.jj-btn:active:not(:disabled),
+button.w2-btn:active:not(:disabled),
+button.w2-btn-primary:active:not(:disabled),
+button.w2-btn-danger:active:not(:disabled),
+.jj-tool-l0:active {
+  transform: scale(0.97);
+}
+
 /* ==================== 无障碍：动效降级（强制） ==================== */
 
 @media (prefers-reduced-motion: reduce) {
