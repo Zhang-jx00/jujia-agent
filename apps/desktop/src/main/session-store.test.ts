@@ -208,11 +208,24 @@ describe('清单只是缓存', () => {
   it('两个会话同时更新清单：读—改—写被串行化，谁都不被覆盖（T6③）', async () => {
     const store = createSessionStore(root);
     const other = 'b2c3d4e5-1111-4000-8000-000000000000';
+    // 阶段一：**清单还不存在**（首写）。这一阶段不串行也常常是对的 ——
+    // "缓存没成型就从目录重建再合并"那条修法会把两条都从目录里捞回来，等于自愈。
     await Promise.all([
       store.saveMeta(meta(ID, { lastUsedAt: '2026-09-27T10:00:00.000Z' })),
       store.saveMeta(meta(other, { lastUsedAt: '2026-09-27T11:00:00.000Z' })),
     ]);
     expect((await store.list()).map((m) => m.id).sort()).toEqual([ID, other].sort());
+
+    // 阶段二：**清单已经成型** —— 这才是"丢了就真丢"的那条路：
+    // 不串行时两个任务读到同一份旧清单，后写的把先写的整条抹掉（M37 第一次全量跑时
+    // 正是只测了阶段一而逃逸；补测试，不放宽判据）。
+    const third = 'c3d4e5f6-2222-4000-8000-000000000000';
+    const fourth = 'd4e5f6a7-3333-4000-8000-000000000000';
+    await Promise.all([
+      store.saveMeta(meta(third, { lastUsedAt: '2026-09-27T12:00:00.000Z' })),
+      store.saveMeta(meta(fourth, { lastUsedAt: '2026-09-27T13:00:00.000Z' })),
+    ]);
+    expect((await store.list()).map((m) => m.id).sort()).toEqual([ID, other, third, fourth].sort());
   });
 });
 
