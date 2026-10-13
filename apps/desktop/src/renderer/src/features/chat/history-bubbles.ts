@@ -12,6 +12,8 @@ export interface HistoryBubble {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  /** 这条消息原本带了几张图（图片本身不落盘，界面据此显示「图片未保留 ×N」） */
+  imageCount?: number | undefined;
 }
 
 /**
@@ -22,14 +24,19 @@ export interface HistoryBubble {
  * `[offset, offset + messages.length)` 这个区间里 —— 只要两页的区间不重叠，key 就不可能撞车。
  */
 export function toHistoryBubbles(
-  messages: ReadonlyArray<{ role: string; content: string }>,
+  messages: ReadonlyArray<{ role: string; content: string; imageCount?: number | undefined }>,
   offset: number,
 ): HistoryBubble[] {
   const out: HistoryBubble[] = [];
   for (let i = 0; i < messages.length; i += 1) {
     const m = messages[i];
     if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
-    out.push({ id: `h-${String(offset + i)}-${m.role}`, role: m.role, content: m.content });
+    out.push({
+      id: `h-${String(offset + i)}-${m.role}`,
+      role: m.role,
+      content: m.content,
+      ...(m.imageCount !== undefined && m.imageCount > 0 ? { imageCount: m.imageCount } : {}),
+    });
   }
   return out;
 }

@@ -1,4 +1,4 @@
-import { RECENT_TAIL_K } from '@jujia/agent-core';
+import { RECENT_TAIL_K, type ChatContentPart } from '@jujia/agent-core';
 
 /**
  * 发给模型的历史怎么窄化、一轮结束后又怎么接回完整记录（6b · 报备 §一/§二，批复②批准）。
@@ -10,6 +10,9 @@ import { RECENT_TAIL_K } from '@jujia/agent-core';
 export interface ModelMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  /** M11：只在出站副本上出现（见 ChatMessage 的同名字段） */
+  contentParts?: ChatContentPart[] | undefined;
+  imageCount?: number | undefined;
 }
 
 const clampIndex = (n: number, len: number): number => Math.min(Math.max(n, 0), len);
@@ -47,4 +50,42 @@ export function mergeTurnResult(
     return full;
   }
   return [...full, ...resultMessages.slice(outbound.length)];
+}
+
+/**
+ * 把本轮图片拼成 content parts（M11 批一）。
+ * - **文字为空就只发图**（纯图消息允许；空 text part 有些服务端不收）；
+ * - 出站副本才用它 —— 会话内存与磁盘里的消息保持纯文本。
+ */
+export function buildContentParts(
+  text: string,
+  images: ReadonlyArray<{ mimeType: string; dataBase64: string }>,
+): ChatContentPart[] {
+  if (images.length === 0) return [];
+  const parts: ChatContentPart[] = [];
+  if (text.trim() !== '') parts.push({ type: 'text', text });
+  for (const img of images) {
+    parts.push({ type: 'image_url', image_url: { url: `data:${img.mimeType};base64,${img.dataBase64}` } });
+  }
+  return parts;
+}
+
+/**
+ * 把这轮 parts 挂到**最后一条 user** 上，返回出站副本（原数组一个元素都不动）。
+ * 为什么是"最后一条 user"：会话里更早的 user 消息没有可重放的图（附件不落盘），
+ * 把它们升级成 parts 形态等于凭空重发早已不在的附件。
+ */
+export function withContentParts(messages: ModelMessage[], parts: ChatContentPart[]): ModelMessage[] {
+  if (parts.length === 0) return messages;
+  let last = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'user') {
+      last = i;
+      break;
+    }
+  }
+  if (last === -1) return messages;
+  const copy = [...messages];
+  copy[last] = { ...(messages[last] as ModelMessage), contentParts: parts };
+  return copy;
 }

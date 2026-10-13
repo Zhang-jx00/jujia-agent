@@ -223,25 +223,47 @@ const echoServer = createServer((req, res) => {
     try {
       const parsed = JSON.parse(raw);
       const msgs = Array.isArray(parsed.messages) ? parsed.messages : [];
-      const last = String([...msgs].reverse().find((m) => m && m.role === 'user')?.content ?? '');
-      if (last.includes('上下文压缩')) content = SUMMARY_6B;
-      else if (last.includes('压成**一条**记忆')) content = NOTE_6B;
-      else if (last.includes('E2E_TRUNC_LEN')) {
-        content = '这一段被长度上限掐住了';
-        finishReason = 'length';
-      } else if (last.includes('E2E_TRUNC_FILTER')) {
-        content = '这一段被内容过滤拦下了';
-        finishReason = 'content_filter';
-      } else if (last.includes('E2E_GARBAGE')) {
-        mode = 'garbage';
+      const lastMsg = [...msgs].reverse().find((m) => m && m.role === 'user');
+      if (lastMsg && Array.isArray(lastMsg.content)) {
+        /**
+         * M11 批一（R14）：图片以 content parts 形态到达时的体检报告。
+         * 真值全部来自**收到的字节**：parts 条数 / 图 part 数 / data URL 的 mime /
+         * 夹具哨兵串还在不在（"剥元数据"这一跳的端到端证据 —— 界面自述不算数）。
+         */
+        const parts = lastMsg.content;
+        const textPart = parts.find((p) => p && p.type === 'text');
+        const imgParts = parts.filter((p) => p && p.type === 'image_url');
+        let mime = '?';
+        let meta = 0;
+        for (const p of imgParts) {
+          const url = String(p?.image_url?.url ?? '');
+          const m = /^data:(image\/[a-z+]+);base64,/.exec(url);
+          if (m) mime = m[1];
+          if (Buffer.from(url.slice(url.indexOf(',') + 1), 'base64').includes('E2E-IMG-META-SENTINEL')) meta = 1;
+        }
+        const head = String(textPart?.text ?? '').slice(0, 16).replace(/\s+/g, ' ');
+        content = `ECHOIMG parts=${String(parts.length)} images=${String(imgParts.length)} mime=${mime} meta=${String(meta)} head=${head}`;
       } else {
-        const systemText = msgs
-          .filter((m) => m && m.role === 'system')
-          .map((m) => String(m.content ?? ''))
-          .join('\n');
-        const rest = msgs.filter((m) => m && m.role !== 'system');
-        const head = `${String(rest[0]?.content ?? '').slice(0, 14).replace(/\s+/g, ' ')}`;
-        content = `ECHO n=${String(rest.length)} sum=${systemText.includes('E2E6B摘要') ? 1 : 0} head=${head}`;
+        const last = String(lastMsg?.content ?? '');
+        if (last.includes('上下文压缩')) content = SUMMARY_6B;
+        else if (last.includes('压成**一条**记忆')) content = NOTE_6B;
+        else if (last.includes('E2E_TRUNC_LEN')) {
+          content = '这一段被长度上限掐住了';
+          finishReason = 'length';
+        } else if (last.includes('E2E_TRUNC_FILTER')) {
+          content = '这一段被内容过滤拦下了';
+          finishReason = 'content_filter';
+        } else if (last.includes('E2E_GARBAGE')) {
+          mode = 'garbage';
+        } else {
+          const systemText = msgs
+            .filter((m) => m && m.role === 'system')
+            .map((m) => String(m.content ?? ''))
+            .join('\n');
+          const rest = msgs.filter((m) => m && m.role !== 'system');
+          const head = `${String(rest[0]?.content ?? '').slice(0, 14).replace(/\s+/g, ' ')}`;
+          content = `ECHO n=${String(rest.length)} sum=${systemText.includes('E2E6B摘要') ? 1 : 0} head=${head}`;
+        }
       }
     } catch {
       // 解析不出来仍回一行：让调用方看见"服务活着但没读懂"，而不是挂在那儿
@@ -3288,6 +3310,108 @@ try {
     fail('存下的图里终止词 / 轮数没保住（界面往返把它丢了？）', savedLoop.slice(0, 600));
   }
   ok('有界循环：命中即停（第 1 轮）且下游照跑；到界=失败并写出"轮次上限"，下游留在 pending；stopKeyword/maxRounds 落盘');
+
+  /**
+   * M11 批一（R14）：图片输入的三层真值。
+   *
+   * 为什么值得加一步 e2e：这是"数据第一次主动离开本机"的入口，三件事单测都只能锁一半 ——
+   * ① **模型究竟收到了什么**（parts 条数 / mime / 元数据块在不在）：真值只有对端（回显服务）看得见；
+   * ② **本机究竟留没留副本**：判据是磁盘上的会话 jsonl（字节一个都不许有，只许有一行 imageCount）；
+   * ③ **界面对不可重放的事说没说真话**：气泡上必须写「图片未保留 ×N」。
+   *
+   * 夹具是一张**带 tEXt 元数据块**的 PNG，哨兵串只存在于夹具里 ——
+   * 服务端在收到的字节里找它：找得到 = 剥离没生效（红），找不到 = 出站前真剥了（绿）。
+   */
+  step('M11 多模态：图片以 parts 形态到达模型（元数据已剥），本机只有一行计数、零字节副本');
+  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await win3.locator('select').first().selectOption(seededEchoConnId);
+  const newChatImg = win3.locator('button', { hasText: '新会话' });
+  for (let i = 0; i < 20 && (await newChatImg.count()) === 0; i += 1) await win3.waitForTimeout(150);
+  if ((await newChatImg.count()) > 0) await newChatImg.first().click();
+
+  /** 造一张带 tEXt 的 PNG（CRC 不校验：剥元数据只走结构；哨兵串 ASCII） */
+  const pngWithTextMarker = (marker) => {
+    const chunk = (type, payload) => {
+      const out = Buffer.alloc(12 + payload.length);
+      out.writeUInt32BE(payload.length, 0);
+      out.write(type, 4, 'ascii');
+      payload.copy(out, 8);
+      return out;
+    };
+    return Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk('IHDR', Buffer.alloc(13)),
+      chunk('tEXt', Buffer.from(marker, 'ascii')),
+      chunk('IEND', Buffer.alloc(0)),
+    ]);
+  };
+  const metaPngBytes = [...pngWithTextMarker('E2E-IMG-META-SENTINEL')];
+  const dropResult = await win3.evaluate(
+    ({ bytes }) => {
+      const file = new File([new Uint8Array(bytes)], 'e2e-meta.png', { type: 'image/png' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const target = document.querySelector('.w2-chat-input');
+      if (target === null) return 'no-target';
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      return 'dropped';
+    },
+    { bytes: metaPngBytes },
+  );
+  if (dropResult !== 'dropped') fail(`拖动图片没有落到输入区（${String(dropResult)}）`);
+  const imgChip = win3.locator('[data-attach-name="e2e-meta.png"]');
+  let chipSeen = false;
+  for (let i = 0; i < 60 && !chipSeen; i += 1) {
+    chipSeen = (await imgChip.count()) > 0;
+    if (!chipSeen) await win3.waitForTimeout(150);
+  }
+  if (!chipSeen) fail('拖动之后待发清单里没有出现这张图（准入链路没走通？）', (await body3()).slice(-600));
+  const inputAreaText = await win3.locator('.w2-chat-input').innerText();
+  if (!inputAreaText.includes('已剥元数据')) {
+    fail('图上没有"已剥元数据"的标记 —— 熔断的那条剥离要么没跑要么没如实标', inputAreaText.slice(0, 400));
+  }
+  if (!inputAreaText.includes('图片会随本条消息发给「e2e 回显假服务」的服务商；本机不保留副本')) {
+    fail('加图之后没有把"发给谁、本机不留副本"说明白', inputAreaText.slice(0, 400));
+  }
+  await win3.locator('textarea[placeholder^="输入消息"]').fill('E2E_IMG 看这张图');
+  await win3.locator('button', { hasText: '发送' }).first().click();
+  // 服务端体检报告：2 parts（文字 + 图）/ 1 图 / png / 哨兵串**不在**（meta=0）
+  if ((await waitText3('ECHOIMG parts=2 images=1 mime=image/png meta=0', 20_000)) !== true) {
+    fail('模型收到的 parts 形状不符合预期（数量 / mime / 元数据剥离至少有一样没成立）', (await body3()).slice(-900));
+  }
+  if (!(await body3()).includes('head=E2E_IMG')) {
+    fail('文字 part 没有随图片一起到达（纯图与带文字两条路混了？）', (await body3()).slice(-600));
+  }
+  if ((await win3.locator('.w2-bubble-user', { hasText: '[图片未保留 ×1]' }).count()) === 0) {
+    fail('气泡上没有「图片未保留 ×1」—— 一条不可重放的消息看起来和纯文字的一模一样');
+  }
+  // 磁盘真值：那一行有 imageCount=1，且**没有任何图片字节**（base64 / data URL 前缀都不许出现）。
+  // 轮询取真值：落盘是异步的（轮末追加），读数早于写就会把"还没写"误判成"没写"。
+  const sessionsRoot = join(dataDir, 'sessions');
+  let imgJsonl = '';
+  let imgLine = '';
+  for (let i = 0; i < 40; i += 1) {
+    for (const name of readdirSync(sessionsRoot)) {
+      const f = join(sessionsRoot, name, 'messages.jsonl');
+      if (!existsSync(f)) continue;
+      const text = readFileSync(f, 'utf8');
+      if (text.includes('E2E_IMG')) {
+        imgJsonl = f;
+        imgLine = text.split('\n').find((l) => l.includes('E2E_IMG')) ?? '';
+        break;
+      }
+    }
+    if (imgJsonl !== '') break;
+    await win3.waitForTimeout(150);
+  }
+  if (imgJsonl === '') fail('磁盘上找不到刚才那条带图消息（会话没落盘？）');
+  if (!imgLine.includes('"imageCount":1')) {
+    fail('落盘的那一行里没有 imageCount=1（重启后连"发过图"都看不出来）', imgLine.slice(0, 300));
+  }
+  if (imgLine.includes('iVBOR') || imgLine.includes('data:image') || imgLine.includes('E2E-IMG-META-SENTINEL')) {
+    fail('图片字节（或其元数据）出现在磁盘上了 —— "不保留副本"被破坏', imgLine.slice(0, 300));
+  }
+  ok('图片以 parts 形态到达模型（2 parts · 1 图 · png · 元数据哨兵已剥）；气泡写「图片未保留 ×1」，磁盘只有一行 imageCount、零字节副本');
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();

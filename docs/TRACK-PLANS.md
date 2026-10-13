@@ -120,6 +120,7 @@
 | 扩容2 | `apps/desktop/src/renderer/src/features/canvas/` | 画布界面（React Flow） |
 | 扩容3 | `packages/shared-ipc/src/pdf-limits.ts` · `apps/desktop/src/main/ipc/pdf.ts` | 轻量 IDE 的 PDF 侧（零出站、大小上限） |
 | 扩容3 | `apps/desktop/src/renderer/src/features/{ide,docs}/` | 文件树 / 编辑器 / diff / 文档页 |
+| 扩容5 | `packages/agent-core/src/media/` · `packages/shared-ipc/src/contracts-media.ts` · `apps/desktop/src/main/{image-intake,model-history}.ts` | 多模态图片输入（M11 批一）：魔数 / 上限 / 剥元数据的**准入内核**（纯层）· IPC 契约 · 图片接收层 · 出站 content parts 拼装 |
 | 接驳 | `apps/desktop/src/main/ipc/` · `apps/desktop/src/main/*-wiring.test.ts` | 渲染层↔IPC↔主进程↔引擎的对接面与接线锁 |
 | 规整 | `apps/desktop/src/renderer/src/{App.tsx,KeepAlive.tsx,styles.css,styles-wiring.test.ts}` · `apps/desktop/src/main/test-policy.test.ts` | 结构与规范（挂载保持 / 样式 / 测试策略） |
 | 规整 | `apps/desktop/scripts/` · `scripts/` | 门禁与工具链（check-docs / verify-pack / run-electron / license-check） |

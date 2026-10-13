@@ -362,6 +362,62 @@ button:disabled {
   resize: vertical;
 }
 
+/* --------- 多模态附件（M11 批一）：待发清单 / 拖动高亮 / "未保留"标记 --------- */
+
+.w2-chat-input.w2-chat-input-drag {
+  outline: 1px dashed rgba(47, 111, 235, 0.65);
+  outline-offset: 4px;
+}
+
+.w2-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.w2-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-container);
+  font-size: 12px;
+}
+
+.w2-attach-thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.w2-attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.w2-attach-remove {
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.w2-attach-remove:hover {
+  color: var(--text);
+}
+
+.w2-img-marker {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 /* ---------------------------- 权限弹窗 ---------------------------- */
 
 .w3-mask {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildModelHistory, mergeTurnResult, type ModelMessage } from './model-history';
+import {
+  buildContentParts,
+  buildModelHistory,
+  mergeTurnResult,
+  withContentParts,
+  type ModelMessage,
+} from './model-history';
 
 /**
  * "收窄发给模型的窗口"与"保留完整历史"这两件事必须分开（6b · 报备 §一/§二）。
@@ -83,5 +89,61 @@ describe('mergeTurnResult：一轮结束后仍然持有完整历史', () => {
     const result = [...outbound, msg('assistant', '新')];
     const merged = mergeTurnResult(src, outbound, result);
     expect(merged.length).toBeGreaterThan(result.length);
+  });
+});
+
+/**
+ * M11 批一（R14）：图片只升级**出站副本**。
+ *
+ * 为什么这两条是安全边界而不是格式细节：内存与磁盘里的消息必须保持纯文本
+ * （图片字节不落盘、也不在内存里留第二份），而"升级成 parts"只能发生在
+ * 交给 provider 的那一份上 —— 写错方向（改原数组）就等于把字节复制进了会话记录。
+ */
+describe('buildContentParts / withContentParts：图片只升级出站副本', () => {
+  const img = { mimeType: 'image/png', dataBase64: 'aGVsbG8=' };
+
+  it('文字 + 图 → [text, image_url]，data URL 用真 mime 与 base64 拼', () => {
+    expect(buildContentParts('看这张', [img])).toEqual([
+      { type: 'text', text: '看这张' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,aGVsbG8=' } },
+    ]);
+  });
+
+  it('文字全空白 → 不发空 text part（有些服务端不收空文本块；纯图消息合法）', () => {
+    expect(buildContentParts('   ', [img])).toEqual([
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,aGVsbG8=' } },
+    ]);
+  });
+
+  it('没有图 → 空数组（调用方据此原样返回，不给纯文字消息平白换形态）', () => {
+    expect(buildContentParts('普通消息', [])).toEqual([]);
+  });
+
+  it('withContentParts 只改最后一条 user，且发的是副本 —— 原数组一个元素都不动', () => {
+    const messages: ModelMessage[] = [
+      msg('system', 'base'),
+      msg('user', '第一句'),
+      msg('assistant', '答'),
+      msg('user', '第二句'),
+    ];
+    const parts = buildContentParts('第二句', [img]);
+    const out = withContentParts(messages, parts);
+    expect(out[3]?.contentParts).toEqual(parts);
+    // 更早的那条 user 不许被升级：图早就不在本机了，升级等于凭空重放
+    expect(out[1]?.contentParts).toBeUndefined();
+    // 原数组（= 内存/磁盘那一份）保持纯文本、且非同一引用
+    expect(messages[3]).toEqual({ role: 'user', content: '第二句' });
+    expect(out).not.toBe(messages);
+    expect(out[3]).not.toBe(messages[3]);
+  });
+
+  it('空 parts → 原数组原样返回（没图的那一轮不留任何痕迹）', () => {
+    const messages: ModelMessage[] = [msg('user', '嗨')];
+    expect(withContentParts(messages, [])).toBe(messages);
+  });
+
+  it('边界：没有 user 消息时原样返回，不假造一条来挂 parts', () => {
+    const messages: ModelMessage[] = [msg('system', 'base')];
+    expect(withContentParts(messages, buildContentParts('x', [img]))).toBe(messages);
   });
 });

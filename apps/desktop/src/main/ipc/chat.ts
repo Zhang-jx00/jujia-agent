@@ -1,7 +1,11 @@
-import { app } from 'electron';
+import { app, dialog } from 'electron';
+import { z } from 'zod';
 import {
   IPC,
   chatHistoryQuerySchema,
+  chatImageBytesSchema,
+  chatPickImagesResultSchema,
+  imageIntakeResultSchema,
   chatSendResultSchema,
   chatSendSchema,
   compactApplySchema,
@@ -38,6 +42,7 @@ import {
   pendingNotesList,
   stopMessage,
 } from '../chat-service';
+import { prepareByteImages, readImageFiles } from '../image-intake';
 import { getWorkspaceInfo } from '../workspace';
 import type { IpcContext } from './context';
 
@@ -105,9 +110,8 @@ export function registerChatIpc(ctx: IpcContext): void {
     // 以前是这里手写 `typeof`，三个字段都没有长度上限 —— 检查散在调用点就会漏。
     const parsed = chatSendSchema.safeParse(payload ?? {});
     if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? '对话参数不合法');
-    const { connectionId, text, sessionId } = parsed.data;
-    // 全空白仍是"空"（zod 的 min(1) 只看长度，挡不住 `'   '`）
-    if (text.trim() === '') throw new Error('消息不能为空');
+    // "消息不能为空"由契约的 refine 判定（全空白也算空；**带图时文字可以为空** —— 纯图消息合法）
+    const { connectionId, text, sessionId, images } = parsed.data;
 
     // 起一轮的全部汇聚点（策略、注册表、钩子、审计、技能清单）在 `startTurn` 里，只有那一处；
     // 定时任务到点走的是同一个函数 —— 抄两份参数清单早晚漏一项。
@@ -115,6 +119,7 @@ export function registerChatIpc(ctx: IpcContext): void {
       connectionId,
       text,
       ...(typeof sessionId === 'string' && sessionId !== '' ? { sessionId } : {}),
+      ...(images !== undefined && images.length > 0 ? { images } : {}),
     });
     return chatSendResultSchema.parse({ ...result, accepted: true, warning: result.warning });
   });
@@ -122,6 +127,41 @@ export function registerChatIpc(ctx: IpcContext): void {
   handle(IPC.CHAT_STOP, async (_e, sessionId: unknown): Promise<boolean> => {
     if (typeof sessionId !== 'string' || sessionId === '') return false;
     return stopMessage(sessionId);
+  });
+
+  /* ------------------------- 多模态输入（M11 批一 · R14） ------------------------- */
+
+  /**
+   * 选图片：原生对话框 → 主进程 stat/读取/剥元数据 → 返回**已准入**的图。
+   * 取消是正常路径（`cancelled=true`，不塞进 problems）；逐张给结果。
+   */
+  handle(IPC.CHAT_PICK_IMAGES, async () => {
+    const win = ctx.deps.getWindow?.();
+    if (win === undefined) {
+      return chatPickImagesResultSchema.parse({ cancelled: true, images: [], problems: [] });
+    }
+    const picked = await dialog.showOpenDialog(win, {
+      title: '选择图片（会随请求发给当前连接的服务商）',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+    });
+    if (picked.canceled || picked.filePaths.length === 0) {
+      return chatPickImagesResultSchema.parse({ cancelled: true, images: [], problems: [] });
+    }
+    const result = await readImageFiles(picked.filePaths);
+    return chatPickImagesResultSchema.parse({ cancelled: false, ...result });
+  });
+
+  /** 拖动/粘贴：渲染层给**原始字节**，走**同一个准入内核**（不比选择器少一道） */
+  handle(IPC.CHAT_IMAGES_PREPARE, async (_e, payload: unknown) => {
+    const parsed = z.array(chatImageBytesSchema).max(8).safeParse(payload ?? []);
+    if (!parsed.success) {
+      return imageIntakeResultSchema.parse({
+        images: [],
+        problems: ['图片载荷不符合契约（一张都没有加入）'],
+      });
+    }
+    return imageIntakeResultSchema.parse(prepareByteImages(parsed.data));
   });
 
   /** 会话清单（磁盘事实）：界面用它列出可继续的历史会话，与内存驻留与否无关 */

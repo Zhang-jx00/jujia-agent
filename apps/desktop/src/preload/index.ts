@@ -5,6 +5,9 @@ import {
   appInfoSchema,
   auditExportResultSchema,
   auditPageSchema,
+  chatImageBytesSchema,
+  chatPickImagesResultSchema,
+  imageIntakeResultSchema,
   logPageViewSchema,
   logReportResultSchema,
   logRevealResultSchema,
@@ -70,6 +73,10 @@ import {
   type LogReportInput,
   type LogReportResult,
   type LogRevealResult,
+  type ChatImageInput,
+  type ChatImageBytes,
+  type ChatPickImagesResult,
+  type ImageIntakeResultView,
   type UpdateCheckResultView,
   type McpApprovalChoice,
   type McpApprovalPlan,
@@ -200,6 +207,8 @@ const api = {
     connectionId: string;
     text: string;
     sessionId?: string;
+    /** 随本条消息发出的已准入图片（base64 形态；准入与剥元数据在主进程做完才回来） */
+    images?: ChatImageInput[];
   }): Promise<ChatSendResult> {
     return chatSendResultSchema.parse(await ipcRenderer.invoke(IPC.CHAT_SEND, payload));
   },
@@ -455,6 +464,16 @@ const api = {
 
   async updateCheck(): Promise<UpdateCheckResultView> {
     return updateCheckResultSchema.parse(await ipcRenderer.invoke(IPC.APP_UPDATE_CHECK));
+  },
+
+  async chatPickImages(): Promise<ChatPickImagesResult> {
+    return chatPickImagesResultSchema.parse(await ipcRenderer.invoke(IPC.CHAT_PICK_IMAGES));
+  },
+
+  async chatImagesPrepare(images: ChatImageBytes[]): Promise<ImageIntakeResultView> {
+    return imageIntakeResultSchema.parse(
+      await ipcRenderer.invoke(IPC.CHAT_IMAGES_PREPARE, z.array(chatImageBytesSchema).max(8).parse(images)),
+    );
   },
 
   async permissionRulesList(): Promise<PermissionRuleView[]> {

@@ -6,6 +6,7 @@ import {
   SCHEDULE_RULE_MAX_CHARS,
   TOOL_OUTPUT_TAIL_CHARS,
 } from './limits';
+import { CHAT_IMAGE_MAX_PER_MESSAGE, chatImageInputSchema } from './contracts-media';
 
 /** 应用与运行时信息（P0 打通链路用；后续阶段会逐步扩充字段）。 */
 export const appInfoSchema = z.object({
@@ -221,11 +222,22 @@ export type StreamEvent = z.infer<typeof streamEventSchema>;
  * **超限一律拒绝并把上限写进理由** —— 截断是静默改用户输入，本仓不做。
  * 两条既有文案（"请先选择一个连接" / "消息不能为空"）原样搬进来，别让界面上的话变样。
  */
-export const chatSendSchema = z.object({
-  connectionId: z.string().min(1, '请先选择一个连接').max(128, '连接标识过长（上限 128）'),
-  text: z.string().min(1, '消息不能为空').max(200_000, '消息过长（上限 20 万字符；更长的内容请放进文件，用文件工具读）'),
-  sessionId: z.string().max(64, '会话标识过长（上限 64）').optional(),
-});
+export const chatSendSchema = z
+  .object({
+    connectionId: z.string().min(1, '请先选择一个连接').max(128, '连接标识过长（上限 128）'),
+    text: z.string().max(200_000, '消息过长（上限 20 万字符；更长的内容请放进文件，用文件工具读）'),
+    sessionId: z.string().max(64, '会话标识过长（上限 64）').optional(),
+    /**
+     * 随本条消息发出的图片（M11 批一）：已过主进程准入（魔数 / 5MB / 剥元数据），
+     * 发给模型时拼成 content parts；**不落盘**（报备批复 B）。
+     */
+    images: z
+      .array(chatImageInputSchema)
+      .max(CHAT_IMAGE_MAX_PER_MESSAGE, '一条消息最多 4 张图片')
+      .optional(),
+  })
+  // 文字可以为空 —— **只有带着图片的时候**（纯图消息）；两边都空依旧是"消息不能为空"
+  .refine((v) => v.text.trim() !== '' || (v.images?.length ?? 0) > 0, { message: '消息不能为空' });
 export type ChatSendPayload = z.infer<typeof chatSendSchema>;
 
 export const chatSendResultSchema = z.object({
@@ -245,6 +257,12 @@ export type ChatSendResult = z.infer<typeof chatSendResultSchema>;
 export const chatMessageSchema = z.object({
   role: z.enum(['system', 'user', 'assistant', 'tool']),
   content: z.string(),
+  /**
+   * 这条消息带着几张图片（M11 批一）。图片**不落盘**（报备批复 B），
+   * 这个数字是重启后唯一的痕迹 —— 界面据此显示「图片未保留 ×N」，
+   * 而不是让带图的消息看起来和纯文字一模一样。
+   */
+  imageCount: z.number().int().positive().optional(),
 });
 export type ChatMessageView = z.infer<typeof chatMessageSchema>;
 

@@ -69,7 +69,10 @@ describe('A：预览与落盘是两个动作，不是同一个', () => {
 describe('A：发给模型的历史只在一个地方被剪', () => {
   it('整轮只有 buildModelHistory 一处产出请求消息，且 runAgentTurn 用的就是它', () => {
     expect([...cs.matchAll(/buildModelHistory\(/g)]).toHaveLength(1);
-    expect(cs).toContain('const outbound = buildModelHistory(session.messages, effectiveThrough);');
+    // R14 起出站副本 = 窄化窗口 + 本轮 parts（parts 只挂副本，见 M11 那组锁）；锚点跟到新形状
+    expect(/withContentParts\(\s*buildModelHistory\(session\.messages, effectiveThrough\)/.test(cs)).toBe(
+      true,
+    );
     expect(cs).toContain('messages: outbound,');
     // 直接把完整历史递给 loop = 剪枝那一层被绕过，K 与水印同时失效
     expect(cs).not.toContain('messages: session.messages');

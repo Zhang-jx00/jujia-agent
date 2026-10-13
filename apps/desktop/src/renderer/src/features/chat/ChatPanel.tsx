@@ -8,10 +8,12 @@ import type {
   StreamEvent,
 } from '@jujia/shared-ipc';
 import { createDeltaBatcher, windowedSlice } from '@jujia/shared/stream-batcher';
+import { ChatComposer } from './ChatComposer';
 import { olderPageNotice, toHistoryBubbles } from './history-bubbles';
 import { truncationNotice } from './done-notice';
 import { belongsToSession } from './stream-routing';
 import { ToolCard } from './ToolCard';
+import { useAttachments } from './use-attachments';
 import { IconPencil, IconTriangleAlert, IconX } from '../../ui/icons';
 
 interface Bubble {
@@ -27,6 +29,11 @@ interface Bubble {
    * 刻意不与 `error` 共用一格：那一条前面挂着失败图标，把"不完整"显示成"失败"是另一种误导。
    */
   notice?: string;
+  /**
+   * 这条消息带了几张图（M11 批一）。图片字节**不落盘、发送后也不留在界面**，
+   * 这个数字是本地唯一的痕迹 —— 界面上以「图片未保留 ×N」如实显示。
+   */
+  imageCount?: number | undefined;
 }
 
 /** 工具卡数据（L0–L2 三级信息密度，见 ToolCard.tsx） */
@@ -103,6 +110,12 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
   const [historyTotal, setHistoryTotal] = useState(0);
   const [saved, setSaved] = useState<ChatSessionMeta[]>([]);
   const [pickId, setPickId] = useState('');
+
+  /**
+   * 待发图片（M11 批一）。状态与准入行为都在 `useAttachments`（本文件行数触顶后
+   * 按"自己一段完整生命周期"切出去的那一块）—— 这里只消费它。
+   */
+  const tray = useAttachments();
 
   /**
    * 6b 的界面态。
@@ -313,6 +326,8 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
     setPageHint(null);
     setNoteHint(null);
     setLastError(null);
+    // 待发图片是"这一条消息"的，不是"这个会话"的 —— 换会话就清掉，免得夹带到别的对话里
+    tray.clear();
   }
 
   /** 继续一个磁盘上的会话（6a 的"重启不丢对话"就落在这里） */
@@ -358,6 +373,9 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
         : bubbles.length === 0
           ? 'empty'
           : 'ready';
+
+  /** 加图提示里点名"发给谁"：隐私表述要落到具体连接，不能只说"服务商" */
+  const connectionName = connections.find((c) => c.id === connectionId)?.name ?? '当前连接';
 
   /* ---------------- 6b：压缩（A）与「结束记要点」（B） ---------------- */
 
@@ -503,11 +521,20 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
 
   async function send(): Promise<void> {
     const text = input.trim();
-    if (!text || !connectionId) return;
+    const images = tray.current();
+    if ((text === '' && images.length === 0) || !connectionId) return;
 
-    const userBubble: Bubble = { id: `u-${Date.now()}`, role: 'user', content: text };
+    const userBubble: Bubble = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: text,
+      ...(images.length > 0 ? { imageCount: images.length } : {}),
+    };
     setBubbles((prev) => [...prev, userBubble]);
     setInput('');
+    // 附件随发送立刻从待发清单拿掉：本地从不保留副本，失败后要重新添加 ——
+    // 保留它会让"发送失败"旁边还挂着 4 张图，看起来像"这些已经发出去了"
+    tray.clear();
     setSending(true);
     setUsage(null);
     setToolLines([]);
@@ -518,6 +545,9 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
         connectionId,
         text,
         ...(sessionId ? { sessionId } : {}),
+        ...(images.length > 0
+          ? { images: images.map((img) => ({ name: img.name, dataBase64: img.dataBase64 })) }
+          : {}),
       });
       selectSession(res.sessionId);
       setHistoryHint(res.warning);
@@ -858,6 +888,14 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
               {/* 被截断的回答挂在这里，不挂成失败图标（T26）：那是"不完整"，不是"失败" */}
               {b.notice && <div className="p0-warn">{b.notice}</div>}
               {/*
+                带图消息的本地痕迹（M11 批一）：图片字节没有任何本地副本，
+                所以这一行不是"占位图"，而是**全部事实**。措辞是「未保留」不是「已过期」——
+                过期暗示还能再取，而真相是本机从来没留过。
+              */}
+              {b.imageCount !== undefined && b.imageCount > 0 && (
+                <div className="w2-img-marker">{`[图片未保留 ×${String(b.imageCount)}]`}</div>
+              )}
+              {/*
                 长期记忆的**唯一写入口**：只有人按下这个按钮才会写。
                 刻意不做"每轮自动记一条" —— 那会把聊天流水灌进长期记忆（卡片 015 叫它 context sludge）。
                 点它之后走的是 `append_note` 工具：写类操作照样要过权限门，路径守卫在写之前跑。
@@ -885,33 +923,21 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
         </p>
       )}
 
-      <div className="w2-chat-input">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="输入消息（Enter 发送，Shift+Enter 换行）"
-          rows={3}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-        />
-        <div className="w2-actions">
-          <button
-            type="button"
-            className="w2-btn-primary"
-            disabled={!connectionId || input.trim() === '' || sending}
-            onClick={() => void send()}
-          >
-            发送
-          </button>
-          <button type="button" className="w2-btn" disabled={!sending} onClick={() => void stop()}>
-            停止
-          </button>
-        </div>
-      </div>
+      <ChatComposer
+        input={input}
+        attached={tray.attached}
+        attachBusy={tray.attachBusy}
+        attachHint={tray.attachHint}
+        connectionName={connectionName}
+        sending={sending}
+        hasConnection={connectionId !== ''}
+        onInput={setInput}
+        onPickImages={() => void tray.pickImages()}
+        onFiles={(files) => void tray.prepareDroppedFiles(files)}
+        onRemoveImage={tray.removeAttached}
+        onSend={() => void send()}
+        onStop={() => void stop()}
+      />
     </div>
   );
 }

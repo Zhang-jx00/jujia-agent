@@ -427,9 +427,9 @@
     },
     {
       "id": "M54",
-      "desc": "剪枝那一层被绕过：整份历史原样发给模型，K 与水印同时失去意义（上下文上界没了）",
+      "desc": "剪枝那一层被绕过：整份历史原样发给模型，K 与水印同时失去意义（上下文上界没了）（锚点随 R14 出站拼装改造跟改；意图与判据一字未改）",
       "file": "apps/desktop/src/main/chat-service.ts",
-      "find": "      const outbound = buildModelHistory(session.messages, effectiveThrough);",
+      "find": "      const outbound = withContentParts(\n        buildModelHistory(session.messages, effectiveThrough),\n        buildContentParts(text, images),\n      );",
       "replace": "      const outbound = session.messages;",
       "test": "apps/desktop/src/main/compact-wiring.test.ts"
     },
@@ -1872,6 +1872,54 @@
       "find": "          emit(id, 'running', step, `第 ${String(round)}/${String(maxRounds)} 轮`);",
       "replace": "          emit(id, 'running', step, '继续');",
       "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M235",
+      "desc": "剥元数据被整个跳过（fail-closed 直接失效：带 GPS 的图原样出门）",
+      "file": "packages/agent-core/src/media/image-prep.ts",
+      "find": "  const stripped = stripImageMetadata(bytes, mime);\n  if (!stripped.ok) {\n    return { ok: false, error: `「${name}」的元数据没能处理干净：${stripped.error} —— 这张图不会发出` };\n  }",
+      "replace": "  const stripped = { ok: true as const, out: bytes, changed: false };",
+      "test": "packages/agent-core/src/media/image-prep.test.ts"
+    },
+    {
+      "id": "M236",
+      "desc": "类型不看魔数、改信扩展名（\"扩展名撒谎\"那一类当场放行）",
+      "file": "packages/agent-core/src/media/image-prep.ts",
+      "find": "  const mime = sniffImageMime(bytes);\n  if (mime === null || !ALLOWED.includes(mime)) {",
+      "replace": "  const ext = name.toLowerCase().split('.').pop() ?? '';\n  const mime: ImageMime | null =\n    ext === 'png' ? 'image/png'\n    : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'\n    : ext === 'webp' ? 'image/webp'\n    : ext === 'gif' ? 'image/gif'\n    : null;\n  if (mime === null || !ALLOWED.includes(mime)) {",
+      "test": "packages/agent-core/src/media/image-prep.test.ts"
+    },
+    {
+      "id": "M237",
+      "desc": "单张 5MB 上限失效（大图原样进入编码与出站）",
+      "file": "packages/agent-core/src/media/image-prep.ts",
+      "find": "  if (bytes.length > IMAGE_MAX_BYTES) {",
+      "replace": "  if (bytes.length > Number.MAX_SAFE_INTEGER) {",
+      "test": "packages/agent-core/src/media/image-prep.test.ts"
+    },
+    {
+      "id": "M238",
+      "desc": "每条 4 张上限失效（intake 层照单全收）",
+      "file": "apps/desktop/src/main/image-intake.ts",
+      "find": "  const accepted = items.slice(0, IMAGE_MAX_PER_MESSAGE);",
+      "replace": "  const accepted = items.slice();",
+      "test": "apps/desktop/src/main/image-intake.test.ts"
+    },
+    {
+      "id": "M239",
+      "desc": "出站 parts 丢掉 image part（图被静默丢弃，文字照发）",
+      "file": "apps/desktop/src/main/model-history.ts",
+      "find": "  for (const img of images) {\n    parts.push({ type: 'image_url', image_url: { url: `data:${img.mimeType};base64,${img.dataBase64}` } });\n  }",
+      "replace": "  for (const img of images) {\n    void img;\n  }",
+      "test": "apps/desktop/src/main/model-history.test.ts"
+    },
+    {
+      "id": "M240",
+      "desc": "历史气泡丢掉图片计数（重启后带图的消息看起来和纯文字一模一样）",
+      "file": "apps/desktop/src/renderer/src/features/chat/history-bubbles.ts",
+      "find": "      ...(m.imageCount !== undefined && m.imageCount > 0 ? { imageCount: m.imageCount } : {}),\n",
+      "replace": "",
+      "test": "apps/desktop/src/renderer/src/features/chat/history-bubbles.test.ts"
     }
   ]
 }

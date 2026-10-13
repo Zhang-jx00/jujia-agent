@@ -254,7 +254,8 @@ function serializeMessage(m: ChatMessage): Record<string, unknown> {
       })),
     };
   }
-  return { role: m.role, content: m.content };
+  // M11：user 消息带 parts 时走多模态形态（只可能在出站副本上出现，见 ChatMessage 注释）
+  return { role: m.role, content: m.contentParts ?? m.content };
 }
 
 /** 有工具调用就产出事件（放在 done 之前） */

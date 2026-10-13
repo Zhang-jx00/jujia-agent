@@ -23,6 +23,12 @@ export interface TurnInput {
   text: string;
   /** 续到已有会话；不传或空串则新建 */
   sessionId?: string;
+  /**
+   * M11 批一：随本条消息发出的图片（已过主进程准入）。
+   * 只有用户敲字这条路会带；定时到点**永远不带**（它的输入就是那句提示词）。
+   * 发信侧（chat-service）还会再跑一遍准入 —— 这里是透传，不是信任。
+   */
+  images?: Array<{ name: string; dataBase64: string }>;
 }
 
 export interface TurnOutcome {
@@ -50,7 +56,7 @@ export interface TurnTriggerSource {
 export function createTurnTrigger(source: TurnTriggerSource): TurnTrigger {
   const { deps, fetchImpl, mcpDebug, plugins, skills, registry, hookRunner, loadPolicy, audit } = source;
 
-  return async ({ connectionId, text, sessionId }) => {
+  return async ({ connectionId, text, sessionId, images }) => {
     // 工作区决定了工具是否可用；未选择时仍可对话，但工具会被路径校验拒绝
     const ws = await getWorkspaceInfo();
     const policy = await loadPolicy();
@@ -80,6 +86,7 @@ export function createTurnTrigger(source: TurnTriggerSource): TurnTrigger {
         connectionId,
         text,
         ...(sid !== null ? { sessionId: sid } : {}),
+        ...(images !== undefined && images.length > 0 ? { images } : {}),
       },
       deps.emitStream,
       {

@@ -43,6 +43,19 @@ describe('toHistoryBubbles', () => {
   it('空页给空数组（不是 undefined 或抛错）', () => {
     expect(toHistoryBubbles([], 0)).toEqual([]);
   });
+
+  it('带图的消息要把张数带进气泡（图片不落盘，这个数字是重启后唯一的痕迹）', () => {
+    const out = toHistoryBubbles(
+      [
+        { role: 'user', content: '看这张', imageCount: 2 },
+        { role: 'assistant', content: '收到' },
+      ],
+      0,
+    );
+    expect(out[0]?.imageCount).toBe(2);
+    // 没有图的消息不许被加上一个莫名其妙的 0 —— "没有"和"0 张"在界面上是两种事实
+    expect(out[1] === undefined ? 'missing' : 'imageCount' in out[1]).toBe(false);
+  });
 });
 
 describe('olderPageNotice：往前翻这一页取到了什么，要能说出来', () => {

@@ -38,6 +38,8 @@ export interface StoredMessage {
   content: string;
   toolCallId?: string;
   toolCalls?: StoredToolCall[];
+  /** M11 批一：这条 user 消息带过几张图（**图片字节不落盘**，只留这一格元数据） */
+  imageCount?: number;
 }
 
 export interface SessionMeta {
@@ -90,7 +92,7 @@ export function toStoredMessage(
   role: StoredRole,
   content: string,
   now: Date = new Date(),
-  extra: { toolCallId?: string; toolCalls?: StoredToolCall[] } = {},
+  extra: { toolCallId?: string; toolCalls?: StoredToolCall[]; imageCount?: number } = {},
 ): StoredMessage {
   const oneLine = content.replace(/\s+/g, ' ').trim();
   const clipped =
@@ -104,6 +106,7 @@ export function toStoredMessage(
     content: clipped,
     ...(extra.toolCallId !== undefined ? { toolCallId: extra.toolCallId } : {}),
     ...(extra.toolCalls !== undefined ? { toolCalls: extra.toolCalls } : {}),
+    ...(extra.imageCount !== undefined ? { imageCount: extra.imageCount } : {}),
   };
 }
 

@@ -3,9 +3,27 @@ import type { AssembledToolCall } from './tool-call-accumulator';
 
 export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
 
+/**
+ * 多模态的内容段（M11 批一 · R14）：只对 **user** 消息生效，且只活在"本轮出站"的副本上
+ * （会话内存与磁盘里的消息永远是纯文本 —— 附件不落盘，报备批复 B）。
+ */
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  /**
+   * 出站副本专用：带上它时序列化走 parts 形态（OpenAI 兼容协议）；
+   * 其它一切读取方（窗口窄化 / 落盘 / 界面回显）都只看 `content`。
+   */
+  contentParts?: ChatContentPart[] | undefined;
+  /**
+   * 会话内存里的**批注**（不发给模型）：本条 user 消息带过几张图。
+   * 落盘同行记（`StoredMessage.imageCount`），重启后历史气泡据此显示"[图片未保留 ×N]"。
+   */
+  imageCount?: number | undefined;
   /**
    * role='tool' 时必填：对应 assistant 消息里 tool_calls[].id。
    * 协议硬约束（卡片 011）：带 tool_calls 的 assistant 消息后必须跟齐对应的 tool 消息，

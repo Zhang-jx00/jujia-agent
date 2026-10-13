@@ -23,13 +23,15 @@ import {
   type PermissionRule,
   type ToolRegistry,
   type GateAuditInfo,
+  decodeBase64,
+  prepareImage,
 } from '@jujia/agent-core';
 import { TOOL_OUTPUT_FLUSH_CHARS, TOOL_OUTPUT_QUIET_MS, TOOL_OUTPUT_TAIL_CHARS, type StreamEvent } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
 import { createToolOutputRelay } from './tool-output-relay';
 import { pickHistoryPage } from './history-window';
 import { getDataRoot } from './paths';
-import { buildModelHistory, mergeTurnResult } from './model-history';
+import { buildContentParts, buildModelHistory, mergeTurnResult, withContentParts } from './model-history';
 import { createPendingNotes, shouldAskAgain, type PendingNotes } from './pending-notes';
 import { createSessionJournal } from './session-journal';
 import { needsEviction, pickEvictionCandidate } from './session-lru';
@@ -112,10 +114,12 @@ function persistable(s: Session): Session['messages'] {
 
 function metaOf(s: Session, messageCount: number): SessionMeta {
   const firstUser = persistable(s).find((m) => m.role === 'user');
+  // M11：纯图消息的 content 是空串 —— 直接取会给会话列表留一个空标题（看起来像坏了）
+  const firstText = (firstUser?.content ?? '').trim();
   return {
     id: s.id,
     connectionId: s.connectionId,
-    title: (firstUser?.content ?? '（无标题）').slice(0, 40),
+    title: firstText !== '' ? firstText.slice(0, 40) : '（无标题）',
     createdAt: s.createdAt,
     lastUsedAt: new Date(s.lastUsedAt).toISOString(),
     messageCount,
@@ -139,6 +143,8 @@ function toStored(m: ChatMessage): StoredMessage {
     ...(m.toolCalls !== undefined
       ? { toolCalls: m.toolCalls.map((c) => ({ id: c.id, name: c.name, argumentsText: c.argumentsText })) }
       : {}),
+    // M11：图片**字节不落盘**，只记张数（重启后界面据此说"[图片未保留 ×N]"）
+    ...(m.imageCount !== undefined ? { imageCount: m.imageCount } : {}),
   });
 }
 
@@ -251,6 +257,8 @@ export async function hydrateSession(sessionId: string, connectionId: string): P
       ...(m.toolCalls !== undefined
         ? { toolCalls: m.toolCalls.map((c) => ({ id: c.id, name: c.name, argumentsText: c.argumentsText })) }
         : {}),
+      // M11：只把"带过几张图"带回来（字节本来就没存）；界面据此显示"[图片未保留 ×N]"
+      ...(m.imageCount !== undefined ? { imageCount: m.imageCount } : {}),
     });
   }
   evictOldSessions();
@@ -275,7 +283,13 @@ export async function historyPage(
   const resident = sessions.get(sessionId);
   const all = resident
     ? resident.messages
-    : (await store().load(sessionId)).messages.map((m) => ({ role: m.role, content: m.content }));
+    : (await store().load(sessionId)).messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        // 盘上留着的图片计数要带到界面 —— 少带一格，重启后带图的消息
+        // 会和纯文字消息长得一模一样（静默丢信息的一种）
+        ...(m.imageCount !== undefined ? { imageCount: m.imageCount } : {}),
+      }));
   return pickHistoryPage(all, opts);
 }
 
@@ -312,7 +326,13 @@ export interface ChatDeps {
  * 立即返回 sessionId/messageId，随后通过 emit 持续推送 StreamEvent。
  */
 export function sendMessage(
-  params: { connectionId: string; text: string; sessionId?: string },
+  params: {
+    connectionId: string;
+    text: string;
+    sessionId?: string;
+    /** M11 批一：随本条消息发出的图片（已过主进程准入；发信侧还会**再跑一遍**） */
+    images?: Array<{ name: string; dataBase64: string }>;
+  },
   emit: StreamEmitter,
   deps: ChatDeps,
 ): { sessionId: string; messageId: string } {
@@ -328,8 +348,28 @@ export function sendMessage(
     throw new Error('该会话正在生成中，请先停止或等待完成');
   }
 
+  /**
+   * M11 批一：图片在**发信的这侧再跑一遍准入**（渲染层给的字节永远不被信任）——
+   * 魔数 / 5MB / 剥离元数据只有一份实现（agent-core 的 image-prep），这里只负责"必须过它"。
+   * 不过就整个拒绝（抛给 IPC 边界）：不静默丢图、也不把未剥干净的字节发出去。
+   */
+  const images: Array<{ mimeType: string; dataBase64: string }> = [];
+  for (const raw of params.images ?? []) {
+    const bytes = decodeBase64(raw.dataBase64);
+    const prepared = bytes === null ? null : prepareImage({ name: raw.name, bytes });
+    if (prepared === null || !prepared.ok) {
+      throw new Error(prepared === null ? `「${raw.name}」的 base64 数据不合法` : prepared.error);
+    }
+    images.push({ mimeType: prepared.image.mimeType, dataBase64: prepared.image.dataBase64 });
+  }
+
   const messageId = randomUUID();
-  session.messages.push({ role: 'user', content: text });
+  session.messages.push({
+    role: 'user',
+    content: text,
+    // 字节不落盘：内存与磁盘上只留"这条带过几张图"
+    ...(images.length > 0 ? { imageCount: images.length } : {}),
+  });
   session.running = true;
   const controller = new AbortController();
   session.controller = controller;
@@ -448,7 +488,11 @@ export function sendMessage(
       }
 
       // 发给模型的只是**窗口**：内存与磁盘上的完整记录一条都不动（见 model-history.ts 的注释）
-      const outbound = buildModelHistory(session.messages, effectiveThrough);
+      // M11：parts 只挂在**出站副本**的最后一条 user 上（会话内存与磁盘保持纯文本）
+      const outbound = withContentParts(
+        buildModelHistory(session.messages, effectiveThrough),
+        buildContentParts(text, images),
+      );
       const result = await runAgentTurn(
         {
           connection: { baseUrl: record.baseUrl, apiKey, model: record.model },

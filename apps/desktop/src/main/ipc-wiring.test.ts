@@ -311,6 +311,12 @@ describe('T30：CHAT_SEND 的入参必须有契约（上限与文案都收在 sh
   });
 
   it('全空白仍然算空（zod 的 min(1) 只看长度，挡不住三个空格）', () => {
-    expect(chatIpc).toContain("text.trim() === ''");
+    // R14：这条判据随图片输入从 handler 搬进了契约的 refine（唯一一处判定）——
+    // 锁的对象不变（"全空白算空"），锚点跟到判据真正所在的地方；
+    // 顺带把"带图时文字可以为空"钉住：空判据必须是"文字与图都空"。
+    const contracts = read('../../../../packages/shared-ipc/src/contracts.ts');
+    expect(contracts).toContain("v.text.trim() !== ''");
+    expect(contracts).toContain('(v.images?.length ?? 0) > 0');
+    expect(chatIpc).not.toContain('text.trim() ==='); // 手写那套不许回头
   });
 });
