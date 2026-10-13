@@ -26,6 +26,14 @@ import sys
 import time
 from pathlib import Path
 
+# 中文 Windows 的默认控制台是 GBK：✓/✅ 这类符号编不出来会直接崩栈（T35：在"项目已干净"
+# 这条最常见成功路径上实测崩过）。不换编码（强制 UTF-8 会把中文在旧控制台里弄花），
+# 只把"编不出来的字符"降级成 ?，让检查本身不死。
+try:
+    sys.stdout.reconfigure(errors="replace")
+except Exception:
+    pass
+
 PROJECT = Path(__file__).resolve().parent.parent
 TRASH = PROJECT / ".trash"
 TRASH_KEEP_DAYS = 30

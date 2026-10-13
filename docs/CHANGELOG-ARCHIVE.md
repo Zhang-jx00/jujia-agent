@@ -4511,3 +4511,72 @@ typecheck / lint / test / check:docs / selftest / e2e / smoke / perf 退出码**
 
 
 ---
+
+## [v0.64.0-加固11 · provider 批 T25–T28：静默的四种形状一次收掉] — 2026-10-09 16:40
+
+**轨道**：**轨道加固计划 11 · "把'没有'说成'有'"**（一句话：这一批四条缺陷没有一条会报错 ——
+它们共同的表现是**上游异常时界面仍然显示成功**。编号说明：加固 9 = R6c、10 = R6d，本轮开 11）。
+依据：`review/TRACK-SWEEP-4.md` §三（对 provider 层的主动普查，四条都能指到代码位置）。
+**开工前逐条复看**：用 `git show 901b157:` 读**已提交内容**（当时全量变异正在改写工作区文件），
+四条全部成立并定位到行 —— 附带那一条**不成立**，见下。
+
+**做了什么（T25 · 空流不再记成成功）**
+- 新增 `StreamLedger`（`deltas` / `garbage` / `answered` / `usage` 四格分开）与
+  `assertProduced(ledger, toolCalls)`：**[DONE] 那条收尾路径与"没 [DONE] 直接断流"那条路径调同一个函数**。
+  修之前的形状是"垃圾负载兜底"只写在断流路径上，于是"两个垃圾帧 + [DONE]"被记成一次成功的空回答。
+- 两种情况两种说法（"收到 N 个无法解析的负载"与"上游结束但没给出任何内容"），
+  工具调用轮（只有 `tool_calls` 没有正文）与只有 usage 的轮**明确放行**，兜底不许误伤。
+
+**做了什么（T26 · 截断是一个独立事实）**
+- `FinishReason = 'stop' | 'length' | 'content_filter'`（厂商自造的未知值仍按 stop，不替它编意思）。
+- `LoopResult` 新增 `truncated: TruncationReason | null`（`TruncationReason = Exclude<FinishReason,'stop'>`，
+  由 provider 那一格推出来，将来加第三种截断原因不会出现"provider 认得了、界面还在说 stop"）。
+  **不塞进 `reason`**：`reason` 说"循环为什么结束"，`truncated` 说"这段文本不完整"，两件事挤一个枚举必撒谎。
+- `StreamEvent.done.reason` 加 `content_filter`；`chat-service` 原来那句
+  `resolved = result.branch === 'handoff' ? 'stop' : 'stop'`（两个分支同值 = 一处假判断）换成读 `result.truncated`。
+- 界面 `done-notice.ts`：两条不同的话（长度上限 / 内容过滤），挂在气泡上（`b.notice` 而不是 `b.error` ——
+  "不完整"显示成"失败"是另一种误导）。
+
+**做了什么（T27 · 同帧的 usage 不再被吞）**：`mapPayload` 从"返回一个事件"改成"返回一组事件"。
+原先正文分支提前 return，末帧"正文 + usage"一起给的厂商 token 全丢在这里、整轮累计偏小。
+**附带（TextDecoder 末次冲刷）—— 报告这条不成立**：尾部只剩半个字符时**本来就组不出字**，
+末次 `decode()` 只会补出一个 U+FFFD 垃圾字符。已按实测写成一条锁（断流尾部不许把替换字符当正文吐出来），
+不改代码。报告失实累计**七处**。
+
+**做了什么（T28 · 省略 index 的网关）**：`push` 用**帧内位置**归位（原先恒归 slot 0，
+同一帧两个调用的 name/arguments 会串成一个）。单调用省略 index 的行为不变；
+`ToolCallDelta.index` 类型改成可选 —— 协议上必填、现实里网关会省，类型要说实话。
+
+**这一轮被门禁抓住的一次（如实，含证据）**：`openai-compat.test.ts` 那条
+`请求体包含必要字段且 stream=true` 在 T25 之后**直接红了** —— 它的夹具就是"只回一个 [DONE]"，
+也就是说**这条既有测试一直踩在那个缺陷上才能跑绿**。处置是补一段真内容（不改任何断言），
+并把"它依赖过缺陷"这件事写在夹具旁边，免得后来人以为是测试写坏了。
+
+**流程违例一条（照实记，不含糊）**：这批用例是**先写完实现才跑**的，
+没有按 TDD 要求"先看着它红"。替代证据是变异：M141–M148 每条都恰好摘掉一处本次修复，
+8 条子集校准全部转红（等价于"摘掉就失败"的证明），但这**不等于**跑过 RED —— 已记进复核 060。
+
+**范围**：`providers/types.ts` · `providers/openai-compat.ts` · `providers/tool-call-accumulator.ts` ·
+`loop/agent-loop.ts` · `shared-ipc/contracts.ts` · `chat-service.ts` · `ChatPanel.tsx` ·
+`done-notice.ts`（新）+ `truncation-wiring.test.ts`（新）· e2e **49 → 50 步**（第 50 步：两条截断各有说法、
+垃圾流报错而不是画一条空回答）· 变异 **M141–M148**（累计 **148**）。
+
+**三条判断**
+
+1. **判"有没有产出"只写一处**：两条收尾路径调同一个函数 —— 各写一份就是 T25 能存在的理由。
+2. **"不完整"与"失败"与"正常写完"是三种事实**：挤进一个枚举就得有两件事撒谎，所以另开一格、另一套文案。
+3. **契约扩了一格但不碰权限面**：`ProviderEvent` / `StreamEvent` 加的是**原因**，
+   权限档位、审批入口、`bypassable`、fail-closed 一字未动（属可自行裁量，不需要停牌）。
+
+**验证方式**（版本号 **先**改 0.64.0 再跑图形类门禁；一律重定向 + 退出码，禁管道）：
+typecheck / lint / test / check:docs / selftest / e2e / smoke / perf **退出码全部 0** ——
+单测 **1459 通过 / 1 跳过**（90 个文件）· `check:docs` **28 项** · 注入自检 **19/19** ·
+e2e **50/50**（新加的第 50 步就是本轮的界面级证据）· smoke OK · perf 首帧 **331ms**。
+**全量变异 148/148 全拦**（0 逃逸 / 0 注入失败 / 0 无法运行，基线 `5dea28d`，跑完工作区干净），见复核 060。
+
+**回退点**：`v0.64.0-加固11`；上一版 `v0.63.0-加固10`。
+
+---
+
+
+---

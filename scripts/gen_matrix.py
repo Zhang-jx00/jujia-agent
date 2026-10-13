@@ -11,8 +11,16 @@
 import glob
 import os
 import re
+import sys
 from collections import OrderedDict
 from pathlib import Path
+
+# 中文 Windows 的默认控制台是 GBK：✅/❌ 这类符号编不出来会直接崩栈（T35 同族）。
+# 不换编码（强制 UTF-8 会把中文在旧控制台里弄花），只把"编不出来的字符"降级成 ?。
+try:
+    sys.stdout.reconfigure(errors="replace")
+except Exception:
+    pass
 
 # **按脚本自身位置解析仓库根**，不写死本机绝对路径 —— 别人 clone 下来要能直接跑
 # （对外开源的工程底线；同 `docs/HANDOVER.md` §5.6 第 7 条对脚本的要求）。
