@@ -75,7 +75,7 @@ export function LogCard(): ReactElement {
         日志只写在本机的这一个文件里 —— 应用不会把它发到任何地方；里面的密钥类内容在落盘之前就已剔除。
       </p>
 
-      <div className="jj-log-meta">
+      <div className="jj-card-actions">
         <select
           aria-label="日志级别过滤"
           className="jj-transition"

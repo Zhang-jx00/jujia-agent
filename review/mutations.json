@@ -1784,6 +1784,38 @@
       "find": "      await logs.append(createLogRecord({ level: 'error', scope: 'app', msg: `启动失败：${message}` }, () => new Date()));",
       "replace": "      void logs.append(createLogRecord({ level: 'error', scope: 'app', msg: `启动失败：${message}` }, () => new Date()));",
       "test": "apps/desktop/src/main/log-wiring.test.ts"
+    },
+    {
+      "id": "M224",
+      "desc": "版本比较的方向被反转（更新的说成更旧）—— \"要不要提示有新版本\"的判据整个翻过来",
+      "file": "packages/agent-core/src/update/version.ts",
+      "find": "    if (x !== y) return x - y;",
+      "replace": "    if (x !== y) return y - x;",
+      "test": "packages/agent-core/src/update/version.test.ts"
+    },
+    {
+      "id": "M225",
+      "desc": "404 查不到被粉饰成\"成功且没有新版本\"（静默失败：用户看到\"已是最新\"，其实什么都没查到）",
+      "file": "apps/desktop/src/main/update-service.ts",
+      "find": "        if (!res.ok) {\n          return fail(\n            res.status === 404\n              ? '查不到最新发布（HTTP 404 —— 仓库可能尚未公开、或还没有发布过）'\n              : `查询失败（HTTP ${String(res.status)}）`,\n          );\n        }",
+      "replace": "        if (!res.ok) {\n          return {\n            ok: true,\n            current: opts.currentVersion,\n            latest: '',\n            hasUpdate: false,\n            url: '',\n            error: '',\n          };\n        }",
+      "test": "apps/desktop/src/main/update-service.test.ts"
+    },
+    {
+      "id": "M226",
+      "desc": "预发布比正式小这条被反转（1.0.0 反被说成比 1.0.0-beta 旧）",
+      "file": "packages/agent-core/src/update/version.ts",
+      "find": "  if (pa.prerelease === null && pb.prerelease !== null) return 1;",
+      "replace": "  if (pa.prerelease === null && pb.prerelease !== null) return -1;",
+      "test": "packages/agent-core/src/update/version.test.ts"
+    },
+    {
+      "id": "M227",
+      "desc": "更新卡把\"查不到\"也画成\"已是最新\"（三种结局塌成两种——静默失败长在界面上）",
+      "file": "apps/desktop/src/renderer/src/features/update/UpdateCard.tsx",
+      "find": "            : result.ok\n              ? `已是最新（${result.latest}）`",
+      "replace": "            : true\n              ? `已是最新（${result.latest}）`",
+      "test": "apps/desktop/src/renderer/src/features/update/UpdateCard.test.tsx"
     }
   ]
 }

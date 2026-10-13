@@ -8,6 +8,7 @@ import {
   logPageViewSchema,
   logReportResultSchema,
   logRevealResultSchema,
+  updateCheckResultSchema,
   chatSendResultSchema,
   compactApplySchema,
   compactApplyResultSchema,
@@ -69,6 +70,7 @@ import {
   type LogReportInput,
   type LogReportResult,
   type LogRevealResult,
+  type UpdateCheckResultView,
   type McpApprovalChoice,
   type McpApprovalPlan,
   type McpApproveResult,
@@ -449,6 +451,10 @@ const api = {
 
   async logsReport(input: LogReportInput): Promise<LogReportResult> {
     return logReportResultSchema.parse(await ipcRenderer.invoke(IPC.LOGS_REPORT, input));
+  },
+
+  async updateCheck(): Promise<UpdateCheckResultView> {
+    return updateCheckResultSchema.parse(await ipcRenderer.invoke(IPC.APP_UPDATE_CHECK));
   },
 
   async permissionRulesList(): Promise<PermissionRuleView[]> {

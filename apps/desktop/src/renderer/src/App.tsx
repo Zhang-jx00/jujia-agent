@@ -9,6 +9,7 @@ import type { AppInfo, ConfigSnapshot, ConnectionView } from '@jujia/shared-ipc'
 import type { ThemePack } from '@jujia/ui-tokens';
 import { WorkspaceCard } from './features/workspace/WorkspaceCard';
 import { LogCard } from './features/logs/LogCard';
+import { UpdateCard } from './features/update/UpdateCard';
 import { PermissionDialog } from './features/permission/PermissionDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { KeepAlive } from './KeepAlive';
@@ -370,6 +371,7 @@ function Overview({ info, config }: { info: AppInfo; config: ConfigSnapshot }): 
       </section>
 
       <LogCard />
+      <UpdateCard currentVersion={info.version} />
     </div>
   );
 }

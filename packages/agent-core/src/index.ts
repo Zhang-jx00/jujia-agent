@@ -38,3 +38,4 @@ export * from './tools/output-pump';
 export * from './schedule/rrule';
 export * from './schedule/catchup';
 export * from './log/log-record';
+export * from './update/version';

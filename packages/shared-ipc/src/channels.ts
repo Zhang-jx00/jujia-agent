@@ -265,6 +265,15 @@ export const IPC = {
    * 再过一遍与主进程同源的剔密 —— 它是一份**上报**，不是一支能随便写账的笔。
    */
   LOGS_REPORT: 'logs:report',
+
+  /* ---------------------------- 自动更新（M12 批二 · R11） ---------------------------- */
+
+  /**
+   * 检查有没有新版本（**用户点一次、发一次**）。
+   * 无依赖最小形态：只 GET 一次发布信息并回报 —— 不下载、不执行、不改任何东西；
+   * 没有后台轮询（轮询=第二个定时器，且会在没人要求时出站）。
+   */
+  APP_UPDATE_CHECK: 'app:update-check',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

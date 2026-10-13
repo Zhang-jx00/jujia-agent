@@ -14,6 +14,7 @@ import { registerPdfIpc } from './ipc/pdf';
 import { registerCanvasIpc } from './ipc/canvas';
 import { registerScheduleIpc } from './ipc/schedule';
 import { registerLogsIpc } from './ipc/logs';
+import { registerUpdateIpc } from './ipc/update';
 
 export type { IpcDeps };
 
@@ -52,4 +53,5 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerCanvasIpc(ctx);
   registerScheduleIpc(ctx);
   registerLogsIpc(ctx);
+  registerUpdateIpc(ctx);
 }

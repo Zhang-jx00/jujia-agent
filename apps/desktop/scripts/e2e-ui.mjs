@@ -265,6 +265,26 @@ await new Promise((resolve) => echoServer.listen(0, '127.0.0.1', resolve));
 const echoPort = echoServer.address().port;
 
 /**
+ * 本地"发布页"（R11 更新检查）：`JUJIA_UPDATE_API` 指向它 —— 只换"问谁"，不换"问什么"。
+ * `updateHits` 是计数器：**点之前它必须是 0**（证明没有自动检查在出站），点了之后恰好 1。
+ */
+let updateHits = 0;
+const updateServer = createServer((_req, res) => {
+  updateHits += 1;
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(
+    JSON.stringify({
+      // 99.9.9：**开发态 `app.getVersion()` 会回落到 Electron 版本**（44.x），
+      // 假发布版本必须压过它，才能在任何运行形态下都是"有新版本"
+      tag_name: 'v99.9.9',
+      html_url: `http://127.0.0.1:${String(updateServer.address().port)}/releases/tag/v99.9.9`,
+    }),
+  );
+});
+await new Promise((resolve) => updateServer.listen(0, '127.0.0.1', resolve));
+const updatePort = updateServer.address().port;
+
+/**
  * 预置"上一个进程留下的东西"（6a 会话持久化的被测前提）：
  * 一条连接 + 一个已经写了几轮对话的会话目录。
  * 会话 id 用符合白名单的 uuid 形态；文件按真实格式写（JsonStore 的信封 + JSONL 一行一条），
@@ -403,6 +423,8 @@ writeFileSync(
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE; // 不清掉它 Electron 会退化成纯 Node
 env.JUJIA_DATA_BASE_DIR = dataDir;
+// R11：更新检查指向本地"发布页"（默认是 api.github.com；这里只换问谁）
+env.JUJIA_UPDATE_API = `http://127.0.0.1:${String(updatePort)}/releases/latest`;
 
 log(`数据目录（临时）：${dataDir}`);
 log(`工作区（临时）：${wsDir}`);
@@ -3173,6 +3195,35 @@ try {
     `日志真在隔离目录里落盘了（${String(logNames[0])}：启动记录 level=info、带数据根与配置来源四条），界面上看到的是同一份`,
   );
 
+  step('更新检查：点一次查一次（本地假发布页），"有新版本"说得出来、别的时候一声不吭');
+  await win3.locator('nav.app-tabs button', { hasText: '概览' }).first().click();
+  const updateCard = win3.locator('[data-update-card]');
+  await updateCard.waitFor({ state: 'visible', timeout: 8_000 });
+  if (updateHits !== 0) {
+    fail(`还没点"检查更新"，本地发布页就收到了 ${String(updateHits)} 次请求（有自动检查在出站？）`);
+  }
+  await updateCard.locator('button', { hasText: '检查更新' }).click();
+  let updateText = '';
+  // 轮询横跨服务侧的 8 秒超时：万一请求真卡住，等到的是"查询超时"这句人话，而不是一句空白的"检查中…"
+  for (let i = 0; i < 90; i += 1) {
+    updateText = await updateCard.innerText();
+    if (!updateText.includes('检查中')) break;
+    await win3.waitForTimeout(150);
+  }
+  if (!updateText.includes('有新版本 v99.9.9')) {
+    fail(
+      `查到新版本却没显示出来（或显示了别的结局）（updateHits=${String(updateHits)}）`,
+      updateText.slice(0, 300),
+    );
+  }
+  if (!updateText.includes('打开发布页')) {
+    fail('有新版本时没有给"打开发布页"的入口', updateText.slice(0, 300));
+  }
+  if (updateHits !== 1) {
+    fail(`点一次应当只出站一次（实际 ${String(updateHits)} 次）—— 自动重试/轮询都不该有`);
+  }
+  ok('查一次说一句：新版本 v99.9.9 显示出来、发布页入口在；点击前 0 次出站、点击后恰好 1 次');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -3182,6 +3233,7 @@ try {
 } finally {
   streamServer.close();
   echoServer.close();
+  updateServer.close();
   if (app !== undefined) await app.close().catch(() => undefined);
   try {
     rmSync(TMP_ROOT, { recursive: true, force: true });
@@ -3192,5 +3244,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 主题包背景类型真的落在画面上（渐变 / 毛玻璃）→ 运行日志真在隔离目录里落盘（概览页看得见同一份）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 主题包背景类型真的落在画面上（渐变 / 毛玻璃）→ 运行日志真在隔离目录里落盘（概览页看得见同一份）→ 更新检查点一次查一次（有新版本说得出来）→ 干净退出');
 process.exit(0);

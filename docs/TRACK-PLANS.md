@@ -151,6 +151,10 @@
 | 铺设14 | `apps/desktop/src/main/{log-store,logger}.ts` · `apps/desktop/src/main/ipc/logs.ts` | 日志的**落盘与读出**（M12 批一）：按天 JSONL + 当日上限 + 轮转保留（删了谁说谁）· 启动/崩溃/失败三类写入（失败那条等写完再退）· IPC 三条（读尾部 / 定位文件 / 受限上报） |
 | 铺设14 | `packages/shared-ipc/src/contracts-log.ts` | 日志的 IPC 契约（6 个 schema；自 `contracts.ts` 拆出 —— 那份贴着 lint 行数上限，日志这一族形状自洽） |
 | 铺设14 | `apps/desktop/src/renderer/src/features/logs/`（`LogCard.tsx`） | 概览页"运行日志"卡（M12 批一）：文件路径 / 今日条数 / 异常话 / 级别过滤 / 在文件夹中显示 · **"不出本机"写在卡上** |
+| 铺设15 | `packages/agent-core/src/update/`（`version.ts`） | 更新判断的**纯规则层**（M12 批二）：版本号解析与比较；**解析不动一律 null —— 不猜**；预发布比正式小 |
+| 铺设15 | `apps/desktop/src/main/update-service.ts` · `apps/desktop/src/main/ipc/update.ts` | 更新检查（M12 批二）：**只读的一次查询**（不下载 / 不执行 / 不改任何东西 —— 锁扫源码）· 8 秒超时 · 四种结局四种话 |
+| 铺设15 | `packages/shared-ipc/src/contracts-update.ts` | 更新检查的 IPC 契约：有无新版本与"查不到"必须是两种显示 |
+| 铺设15 | `apps/desktop/src/renderer/src/features/update/`（`UpdateCard.tsx`） | 概览页"更新"卡：**点一次查一次**（没有 useEffect）· 有新版本给发布页入口（走外部打开三档，硬 ask 照旧） |
 
 ## 三、记录规则（今后一律遵守）
 

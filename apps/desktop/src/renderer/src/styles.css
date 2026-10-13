@@ -1880,7 +1880,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 }
 
 /* ---- 运行日志卡（M12 批一 · R10）---- */
-.jj-log-meta {
+.jj-card-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
