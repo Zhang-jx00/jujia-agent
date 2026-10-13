@@ -11,6 +11,7 @@ import {
   projectContextHints,
 } from './memory';
 import { buildSummarySection } from '../context/compaction';
+import { buildTaskResumeSection } from '../context/task-resume';
 
 /**
  * W8 记忆模块的验收重点：
@@ -192,6 +193,33 @@ describe('assembleSystemPrompt：记忆 ≠ 指令 与摘要段（6b）', () => 
   it('摘要是空白时不注入这一段（空摘要等于宣称"早先什么都没发生"）', () => {
     const out = assembleSystemPrompt({ base: 'base', sessionSummary: '  \n ' });
     expect(out).toBe('base');
+  });
+});
+
+/**
+ * M17 批一（R15）的续跑段：排在摘要段**之后**（它说的是"刚刚断掉的那一轮"，
+ * 离对话现场最近），且空白不注入 —— 没被打断的轮次不许出现"被中断的任务"这种话。
+ */
+describe('assembleSystemPrompt：续跑段（M17 批一）', () => {
+  it('续跑段排在摘要段之后，且内容原样带到', () => {
+    const summary = buildSummarySection({ summary: '决定：用 A 方案', through: 48, sessionId: 'abc' });
+    const taskResume = buildTaskResumeSection({
+      sessionId: 'abc',
+      instruction: '把报告写出来',
+      stepsDone: 1,
+      recentSteps: [{ name: 'read_file', ok: true }],
+      runningStep: null,
+    });
+    const out = assembleSystemPrompt({ base: 'base', sessionSummary: summary, taskResume });
+    expect(out.indexOf('会话早先内容的要点摘要')).toBeLessThan(out.indexOf('被中断的任务'));
+    expect(out).toContain('非用户此刻的话');
+    expect(out).toContain('「把报告写出来」');
+  });
+
+  it('没有续跑段时不出现"被中断的任务"（普通轮次不许被这句话污染）', () => {
+    const out = assembleSystemPrompt({ base: 'base', taskResume: '  ' });
+    expect(out).toBe('base');
+    expect(out).not.toContain('被中断的任务');
   });
 });
 

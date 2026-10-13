@@ -29,6 +29,11 @@ export interface TurnInput {
    * 发信侧（chat-service）还会再跑一遍准入 —— 这里是透传，不是信任。
    */
   images?: Array<{ name: string; dataBase64: string }>;
+  /**
+   * M17 批一：续跑一个被打断的任务（taskId）。只由「续跑」按钮那条路带 ——
+   * 它走的仍是本函数这**唯一入口**（重放到高副作用动作照样重新问，见 `docs/DESIGN-M17.md` §五）。
+   */
+  resumeTaskId?: string;
 }
 
 export interface TurnOutcome {
@@ -56,7 +61,7 @@ export interface TurnTriggerSource {
 export function createTurnTrigger(source: TurnTriggerSource): TurnTrigger {
   const { deps, fetchImpl, mcpDebug, plugins, skills, registry, hookRunner, loadPolicy, audit } = source;
 
-  return async ({ connectionId, text, sessionId, images }) => {
+  return async ({ connectionId, text, sessionId, images, resumeTaskId }) => {
     // 工作区决定了工具是否可用；未选择时仍可对话，但工具会被路径校验拒绝
     const ws = await getWorkspaceInfo();
     const policy = await loadPolicy();
@@ -87,6 +92,7 @@ export function createTurnTrigger(source: TurnTriggerSource): TurnTrigger {
         text,
         ...(sid !== null ? { sessionId: sid } : {}),
         ...(images !== undefined && images.length > 0 ? { images } : {}),
+        ...(resumeTaskId !== undefined ? { resumeTaskId } : {}),
       },
       deps.emitStream,
       {

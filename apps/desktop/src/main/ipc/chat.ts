@@ -164,6 +164,9 @@ export function registerChatIpc(ctx: IpcContext): void {
     return imageIntakeResultSchema.parse(prepareByteImages(parsed.data));
   });
 
+  /* 断点续跑的三条通道（M17 批一）在 `ipc/chat-task.ts` —— 本文件贴着 300 行上限，按
+   * "同一能力的通道归一个模块"拆出去；装配根 `ipc.ts` 里两行相邻，读起来是一起的。 */
+
   /** 会话清单（磁盘事实）：界面用它列出可继续的历史会话，与内存驻留与否无关 */
   handle(IPC.CHAT_LIST, async () => listSessions());
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
+import { RESUME_USER_TEXT } from '@jujia/shared-ipc';
 import type {
   ChatSessionMeta,
   CompactStatusView,
@@ -12,8 +13,10 @@ import { ChatComposer } from './ChatComposer';
 import { olderPageNotice, toHistoryBubbles } from './history-bubbles';
 import { truncationNotice } from './done-notice';
 import { belongsToSession } from './stream-routing';
+import { TaskCard } from './TaskCard';
 import { ToolCard } from './ToolCard';
 import { useAttachments } from './use-attachments';
+import { useTaskCard } from './use-task-card';
 import { IconPencil, IconTriangleAlert, IconX } from '../../ui/icons';
 
 interface Bubble {
@@ -116,6 +119,24 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
    * 按"自己一段完整生命周期"切出去的那一块）—— 这里只消费它。
    */
   const tray = useAttachments();
+
+  /**
+   * 被打断的任务卡片（M17 批一）。取数与续跑会话在 `useTaskCard`；
+   * 续跑成功之后界面做的事与 `send()` 同形（用户气泡 + 等待流式回答）——
+   * 文案常量来自契约（单一出处），这里不自己拼句子。
+   */
+  const task = useTaskCard(sessionId, sending, (r) => {
+    setBubbles((prev) => [
+      ...prev,
+      { id: `u-${Date.now()}`, role: 'user', content: RESUME_USER_TEXT },
+      { id: r.messageId ?? `a-${Date.now()}`, role: 'assistant', content: '', streaming: true },
+    ]);
+    if (r.sessionId !== null) selectSession(r.sessionId);
+    setHistoryHint(r.warning);
+    setSending(true);
+    setUsage(null);
+    setToolLines([]);
+  });
 
   /**
    * 6b 的界面态。
@@ -824,6 +845,22 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
       {pendingHint !== null && (
         <p className={pendingHint.kind === 'ok' ? 'jj-ok' : 'p0-err'} role="status">
           {pendingHint.text}
+        </p>
+      )}
+
+      {/* M17 批一：被打断的任务（主进程读时判定的产物；界面只显示它给的实话） */}
+      {task.card !== null && (
+        <TaskCard
+          card={task.card}
+          busy={task.busy}
+          sending={sending}
+          onResume={() => void task.resume()}
+          onDismiss={() => void task.dismiss()}
+        />
+      )}
+      {task.hint !== null && (
+        <p className={task.hint.kind === 'ok' ? 'jj-ok' : 'p0-err'} role="status">
+          {task.hint.text}
         </p>
       )}
 

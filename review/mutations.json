@@ -1920,6 +1920,70 @@
       "find": "      ...(m.imageCount !== undefined && m.imageCount > 0 ? { imageCount: m.imageCount } : {}),\n",
       "replace": "",
       "test": "apps/desktop/src/renderer/src/features/chat/history-bubbles.test.ts"
+    },
+    {
+      "id": "M241",
+      "desc": "读时判定失效：崩溃后重开会话，状态还停在 running —— 卡片永不出现、'断在哪'永远没人说",
+      "file": "apps/desktop/src/main/task-state.ts",
+      "find": "  if (rec.status !== 'running') return { record: rec, changed: false };\n  return {\n    record: { ...rec, status: 'interrupted', interruptedAt: iso(now), updatedAt: iso(now) },\n    changed: true,\n  };",
+      "replace": "  return { record: rec, changed: false };",
+      "test": "apps/desktop/src/main/task-state.test.ts"
+    },
+    {
+      "id": "M242",
+      "desc": "完成的一步不计数：断点信息记成'还没做任何事'（续跑时模型会重做已完成步骤）",
+      "file": "apps/desktop/src/main/task-state.ts",
+      "find": "    stepsDone: rec.stepsDone + 1,",
+      "replace": "    stepsDone: rec.stepsDone,",
+      "test": "apps/desktop/src/main/task-state.test.ts"
+    },
+    {
+      "id": "M243",
+      "desc": "续跑注入段丢掉'已完成的步骤不要重做'：模型对已做过的副作用动作再来一遍",
+      "file": "packages/agent-core/src/context/task-resume.ts",
+      "find": "    `请从中断处继续完成这个任务；**已完成的步骤不要重做**；有副作用的动作会再次向用户确认。\\n` +",
+      "replace": "    `请从中断处继续完成这个任务；有副作用的动作会再次向用户确认。\\n` +",
+      "test": "packages/agent-core/src/context/task-resume.test.ts"
+    },
+    {
+      "id": "M244",
+      "desc": "续跑注入段丢掉原始要求：模型不知道要续的是哪件事（只剩一句'继续'）",
+      "file": "packages/agent-core/src/context/task-resume.ts",
+      "find": "  const instruction = input.instruction.trim() === '' ? '（没有文字内容）' : input.instruction.trim();",
+      "replace": "  const instruction = '（略）';",
+      "test": "packages/agent-core/src/context/task-resume.test.ts"
+    },
+    {
+      "id": "M245",
+      "desc": "可续判定被放宽：已结束（done）的任务也放行续跑 —— '没有要续的部分'这句话没了",
+      "file": "apps/desktop/src/main/task-state.ts",
+      "find": "    case 'interrupted':\n      return null;",
+      "replace": "    case 'interrupted':\n    case 'done':\n      return null;",
+      "test": "apps/desktop/src/main/task-state.test.ts"
+    },
+    {
+      "id": "M246",
+      "desc": "续跑不带 resumeTaskId 进唯一入口：静默变成一条普通新轮（断点语境整段丢失）",
+      "file": "apps/desktop/src/main/ipc/chat-task.ts",
+      "find": "        resumeTaskId: taskId,",
+      "replace": "        resumeTaskId: undefined,",
+      "test": "apps/desktop/src/main/task-wiring.test.ts"
+    },
+    {
+      "id": "M247",
+      "desc": "任务记录掉原子写（裸 writeFile）：崩溃时机不巧就留一条半截记录（且绕过 .bak 恢复）",
+      "file": "apps/desktop/src/main/task-store.ts",
+      "find": "      await storeFor(id).write(record);",
+      "replace": "      await writeFile(taskFile(sessionsRoot, id), JSON.stringify(record), 'utf8');",
+      "test": "apps/desktop/src/main/task-wiring.test.ts"
+    },
+    {
+      "id": "M248",
+      "desc": "系统提示忽略续跑层：段拼好了但没人注入（模型侧永远收不到断点信息）",
+      "file": "packages/agent-core/src/memory/memory.ts",
+      "find": "  if (layers.taskResume && layers.taskResume.trim() !== '') {\n    parts.push(layers.taskResume.trim());\n  }",
+      "replace": "  void layers.taskResume;",
+      "test": "packages/agent-core/src/memory/memory.test.ts"
     }
   ]
 }

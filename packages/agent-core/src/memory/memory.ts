@@ -199,6 +199,11 @@ export interface MemoryLayers {
    * 它紧挨着"摘要之后的原始对话"，中间再插一层长期记忆会让"以原文为准"那句指代不清。
    */
   sessionSummary?: string | undefined;
+  /**
+   * 被中断任务的续跑段（M17 批一）。排在摘要段**之后**——它说的是"刚刚断掉的那一轮"，
+   * 离对话现场最近；只在带 `resumeTaskId` 的那一轮由调用方传入（一次性），别的轮次不出现。
+   */
+  taskResume?: string | undefined;
 }
 
 export function assembleSystemPrompt(layers: MemoryLayers): string {
@@ -217,6 +222,9 @@ export function assembleSystemPrompt(layers: MemoryLayers): string {
   }
   if (layers.sessionSummary && layers.sessionSummary.trim() !== '') {
     parts.push(layers.sessionSummary.trim());
+  }
+  if (layers.taskResume && layers.taskResume.trim() !== '') {
+    parts.push(layers.taskResume.trim());
   }
   return parts.join('\n\n');
 }

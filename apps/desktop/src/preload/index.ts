@@ -7,6 +7,9 @@ import {
   auditPageSchema,
   chatImageBytesSchema,
   chatPickImagesResultSchema,
+  chatTaskViewSchema,
+  chatTaskResumeResultSchema,
+  chatTaskDismissResultSchema,
   imageIntakeResultSchema,
   logPageViewSchema,
   logReportResultSchema,
@@ -76,6 +79,9 @@ import {
   type ChatImageInput,
   type ChatImageBytes,
   type ChatPickImagesResult,
+  type ChatTaskView,
+  type ChatTaskResumeResult,
+  type ChatTaskDismissResult,
   type ImageIntakeResultView,
   type UpdateCheckResultView,
   type McpApprovalChoice,
@@ -473,6 +479,26 @@ const api = {
   async chatImagesPrepare(images: ChatImageBytes[]): Promise<ImageIntakeResultView> {
     return imageIntakeResultSchema.parse(
       await ipcRenderer.invoke(IPC.CHAT_IMAGES_PREPARE, z.array(chatImageBytesSchema).max(8).parse(images)),
+    );
+  },
+
+  /**
+   * 断点续跑（M17 批一）：读任务记录（主进程做**读时判定**：running → interrupted）、
+   * 续跑（走唯一入口起一轮）、不再提示。三者都过契约，形状不对在 preload 就炸。
+   */
+  async chatTaskGet(sessionId: string): Promise<ChatTaskView | null> {
+    return chatTaskViewSchema.nullable().parse(await ipcRenderer.invoke(IPC.CHAT_TASK_GET, sessionId));
+  },
+
+  async chatTaskResume(sessionId: string, taskId: string): Promise<ChatTaskResumeResult> {
+    return chatTaskResumeResultSchema.parse(
+      await ipcRenderer.invoke(IPC.CHAT_TASK_RESUME, { sessionId, taskId }),
+    );
+  },
+
+  async chatTaskDismiss(sessionId: string): Promise<ChatTaskDismissResult> {
+    return chatTaskDismissResultSchema.parse(
+      await ipcRenderer.invoke(IPC.CHAT_TASK_DISMISS, sessionId),
     );
   },
 

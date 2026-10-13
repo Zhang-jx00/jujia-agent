@@ -223,6 +223,18 @@ export function createSessionStore(sessionsRoot: string): SessionStore {
       const { data, source } = await index.read();
       const known = data.sessions.filter((s) => SESSION_ID.test(s.id));
       if (source !== 'default' && known.length > 0) {
+        /**
+         * 从 `.bak` 恢复出来的**也要把主文件写回**（M17 批一顺手修的潜伏缺陷）：
+         * 主文件被删 = "要重建缓存"，只读备份等于让缓存永久住在 `.bak` 里 ——
+         * 下一次删主文件照样"删不掉"（T6③ 防的就是"缓存名存实亡"）。
+         * 写回不扫目录（known 就是备份内容），幂等；e2e 第 [23] 步把它放大成必现：
+         * R15 起轮会多写一次元信息，`.bak` 必然存在，删主文件后旧的"只读"路径就露出来了。
+         */
+        if (source === 'backup') {
+          await onIndexChain(() => index.write({ sessions: known })).catch((err: unknown) => {
+            console.warn('[sessions] 备份恢复后写回主清单失败（下一次列会话仍能从备份读出）：', err);
+          });
+        }
         return known.sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
       }
       /**

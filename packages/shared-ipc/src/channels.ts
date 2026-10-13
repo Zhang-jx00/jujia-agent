@@ -278,6 +278,15 @@ export const IPC = {
   /** 拖动/粘贴那条路：渲染层给 base64，主进程走**同一个准入内核**（不比选择器少一道） */
   CHAT_IMAGES_PREPARE: 'chat:images-prepare',
 
+  /* ---------------------------- 断点续跑（M17 批一 · R15） ---------------------------- */
+
+  /** 读某个会话的任务记录（**读时判定**：还是 running 的记录会在这条通道里被标成 interrupted） */
+  CHAT_TASK_GET: 'chat:task-get',
+  /** 点「续跑」：从**唯一入口** `startTurn` 起一轮（多带 resumeTaskId）—— 重放到高副作用动作照样重新问 */
+  CHAT_TASK_RESUME: 'chat:task-resume',
+  /** 点「不再提示」：把这条 interrupted 记录标 dismissed，从此不再弹卡 */
+  CHAT_TASK_DISMISS: 'chat:task-dismiss',
+
   /**
    * 检查有没有新版本（**用户点一次、发一次**）。
    * 无依赖最小形态：只 GET 一次发布信息并回报 —— 不下载、不执行、不改任何东西；

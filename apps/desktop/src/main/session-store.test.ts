@@ -1,4 +1,5 @@
 import { mkdtemp, rm, writeFile, readFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -190,6 +191,25 @@ describe('清单只是缓存', () => {
     expect(JSON.parse(await readFile(join(root, 'index.json'), 'utf8'))).toMatchObject({
       data: { sessions: [{ id: ID }] },
     });
+  });
+
+  /**
+   * M17 批一顺手修（e2e 第 [23] 步放大成必现）：主文件被删、`.bak` 还在时，
+   * `list()` 从备份读出 known 就当作"缓存有效"直接返回 —— **不把主文件写回**。
+   * 后果：删 `index.json` 这件事被永久无视，缓存从此住在 `.bak` 里
+   * （"删掉缓存"永远删不掉）——正是 T6③ 要防的那种"缓存名存实亡"。
+   */
+  it('主文件被删但 .bak 还在：从备份恢复也要把主文件写回（删 index.json = "要重建缓存"）', async () => {
+    const store = createSessionStore(root);
+    await record(store, meta(ID), [toStoredMessage('user', '留着')]);
+    // 第二次写入产生 .bak（原子写的备份机制）——模拟"用得久了之后的盘上形态"
+    await record(store, meta(ID, { lastUsedAt: '2026-09-26T11:00:00.000Z' }), [toStoredMessage('user', '再聊一句')]);
+    expect(existsSync(join(root, 'index.json.bak'))).toBe(true);
+    await rm(join(root, 'index.json'), { force: true });
+    const listed = await store.list();
+    expect(listed.map((m) => m.id)).toEqual([ID]);
+    expect(existsSync(join(root, 'index.json'))).toBe(true);
+    expect(await readFile(join(root, 'index.json'), 'utf8')).toContain(ID);
   });
 
   it('清单还没成型时先落一个新会话：盘上已有的会话不许被这一笔挤掉（R9 e2e 抓到的真缺陷）', async () => {

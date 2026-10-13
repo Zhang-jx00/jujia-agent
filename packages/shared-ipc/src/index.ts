@@ -7,3 +7,4 @@ export * from './contracts';
 export * from './contracts-log';
 export * from './contracts-update';
 export * from './contracts-media';
+export * from './contracts-task';

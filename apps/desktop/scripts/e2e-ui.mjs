@@ -245,6 +245,70 @@ const echoServer = createServer((req, res) => {
         content = `ECHOIMG parts=${String(parts.length)} images=${String(imgParts.length)} mime=${mime} meta=${String(meta)} head=${head}`;
       } else {
         const last = String(lastMsg?.content ?? '');
+        const systemText = msgs
+          .filter((m) => m && m.role === 'system')
+          .map((m) => String(m.content ?? ''))
+          .join('\n');
+        const hasToolReply = msgs.some((m) => m && m.role === 'tool');
+        /**
+         * M17 批一（R15）：续跑那一轮 —— 系统提示里带"被中断的任务"段（含原始要求原文）。
+         * 服务端据此**重发同一个 run_command**：证明"模型继续任务＝重新过审批门"，
+         * 而不是应用在回放动作；收尾那轮带回 RESUME=1，证明续跑段真的到了模型这一侧。
+         */
+        const resumeCmd = /被中断的任务[\s\S]*?E2E_CMD ([A-Z0-9_-]+)/.exec(systemText)?.[1] ?? '';
+        if (resumeCmd !== '' && !hasToolReply) {
+          const command =
+            process.platform === 'win32'
+              ? `echo ${resumeCmd}-EARLY & ping -n 4 127.0.0.1 >nul & echo ${resumeCmd}-LATE`
+              : `echo ${resumeCmd}-EARLY; sleep 3; echo ${resumeCmd}-LATE`;
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          res.write(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { tool_calls: [{ index: 0, id: 'e2e-task-resume-1', function: { name: 'run_command', arguments: JSON.stringify({ command }) } }] } }],
+            })}\n\n`,
+          );
+          res.write('data: [DONE]\n\n');
+          res.end();
+          return;
+        }
+        if (resumeCmd !== '' && hasToolReply) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          res.write(
+            `data: ${JSON.stringify({ choices: [{ delta: { content: 'E2E-CMD-FINAL RESUME=1' } }] })}\n\n`,
+          );
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`);
+          res.write('data: [DONE]\n\n');
+          res.end();
+          return;
+        }
+        /**
+         * 普通 E2E_CMD 触发（与流式服务同一套形状；M17 那步用它起"慢命令轮"的第一跳）。
+         * 与流式服务的区别只有 callId —— 两个服务各自独立，不互相污染。
+         */
+        const cmdMarker = /E2E_CMD ([A-Z0-9_-]+)/.exec(last)?.[1] ?? '';
+        if (cmdMarker !== '' && !hasToolReply) {
+          const command =
+            process.platform === 'win32'
+              ? `echo ${cmdMarker}-EARLY & ping -n 4 127.0.0.1 >nul & echo ${cmdMarker}-LATE`
+              : `echo ${cmdMarker}-EARLY; sleep 3; echo ${cmdMarker}-LATE`;
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          res.write(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { tool_calls: [{ index: 0, id: 'e2e-task-call-1', function: { name: 'run_command', arguments: JSON.stringify({ command }) } }] } }],
+            })}\n\n`,
+          );
+          res.write('data: [DONE]\n\n');
+          res.end();
+          return;
+        }
+        if (cmdMarker !== '' && hasToolReply) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'E2E-CMD-FINAL' } }] })}\n\n`);
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`);
+          res.write('data: [DONE]\n\n');
+          res.end();
+          return;
+        }
         if (last.includes('上下文压缩')) content = SUMMARY_6B;
         else if (last.includes('压成**一条**记忆')) content = NOTE_6B;
         else if (last.includes('E2E_TRUNC_LEN')) {
@@ -256,10 +320,6 @@ const echoServer = createServer((req, res) => {
         } else if (last.includes('E2E_GARBAGE')) {
           mode = 'garbage';
         } else {
-          const systemText = msgs
-            .filter((m) => m && m.role === 'system')
-            .map((m) => String(m.content ?? ''))
-            .join('\n');
           const rest = msgs.filter((m) => m && m.role !== 'system');
           const head = `${String(rest[0]?.content ?? '').slice(0, 14).replace(/\s+/g, ' ')}`;
           content = `ECHO n=${String(rest.length)} sum=${systemText.includes('E2E6B摘要') ? 1 : 0} head=${head}`;
@@ -3412,6 +3472,131 @@ try {
     fail('图片字节（或其元数据）出现在磁盘上了 —— "不保留副本"被破坏', imgLine.slice(0, 300));
   }
   ok('图片以 parts 形态到达模型（2 parts · 1 图 · png · 元数据哨兵已剥）；气泡写「图片未保留 ×1」，磁盘只有一行 imageCount、零字节副本');
+
+  /* ---------------- M17 批一（R15）：长任务断点续跑 ----------------
+   *
+   * 真值三层：① **崩溃现场**（慢命令跑到一半关掉应用，盘上 task.json 停在 running）；
+   * ② **重启后的读时判定**（卡片如实说"断在第几步"、盘上状态被读时标成 interrupted）；
+   * ③ **硬约束的正面证据**（点续跑 → 审批弹窗**再次出现** —— 模型继续任务重发的命令照样重新问，
+   *    而不是应用在回放动作）。
+   */
+  step('M17 断点续跑：跑到一半崩溃 → 重启如实说"断在哪" → 续跑重新过审批门 → 完成');
+  const taskCmd =
+    process.platform === 'win32'
+      ? 'echo TASKR1-EARLY & ping -n 4 127.0.0.1 >nul & echo TASKR1-LATE'
+      : 'echo TASKR1-EARLY; sleep 3; echo TASKR1-LATE';
+  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await win3.locator('select').first().selectOption(seededEchoConnId);
+  const newChatTask = win3.locator('button', { hasText: '新会话' });
+  for (let i = 0; i < 20 && (await newChatTask.count()) === 0; i += 1) await win3.waitForTimeout(150);
+  if ((await newChatTask.count()) > 0) await newChatTask.first().click();
+  await win3.locator('textarea[placeholder^="输入消息"]').fill('E2E_CMD TASKR1 请跑一条慢命令');
+  await win3.locator('button', { hasText: '发送' }).first().click();
+  if ((await waitText3(`需要你确认：run_command · 执行命令：${taskCmd}`, 15_000)) !== true) {
+    fail('慢命令轮没有等到审批弹窗（模型没发起 run_command？）', (await body3()).slice(-700));
+  }
+  await win3.locator('button', { hasText: '允许一次' }).first().click();
+  // EARLY 行出现 = 命令真的在跑（此刻盘上的 runningStep 才是 run_command）
+  if ((await waitText3('TASKR1-EARLY', 15_000)) !== true) {
+    fail('批准后命令没有跑起来（EARLY 行没出现）', (await body3()).slice(-700));
+  }
+  const taskSid = await win3.evaluate(async () => {
+    const list = await window.jujia.chatList();
+    return list[0]?.id ?? '';
+  });
+  if (taskSid === '') fail('刚建的会话没有出现在会话清单里（起轮时该补写一次元信息）');
+  // **崩溃现场**：立刻走"用户真的会用的那条"关闭路径，不让命令跑完
+  const closedByCrash = app.waitForEvent('close', { timeout: 20_000 }).catch(() => undefined);
+  await win3.evaluate(() => window.close()).catch(() => undefined);
+  await closedByCrash;
+  app = undefined;
+  const taskJsonlFile = join(dataDir, 'sessions', taskSid, 'task.json');
+  const crashedTask = JSON.parse(readFileSync(taskJsonlFile, 'utf8')).data;
+  if (crashedTask.status !== 'running') {
+    fail(`崩溃现场的任务记录应当停在 running，实际 ${String(crashedTask.status)}`, JSON.stringify(crashedTask).slice(0, 300));
+  }
+  if (crashedTask.runningStep !== 'run_command') {
+    fail(`崩溃时正在跑的工具没记下来（runningStep=${String(crashedTask.runningStep)}）`, JSON.stringify(crashedTask).slice(0, 300));
+  }
+  ok('崩溃现场：盘上 task.json 停在 running 且 runningStep=run_command（"断在哪"的一手证据）');
+
+  // 重启（与 win3 那次同一套：同 profile、同数据目录）
+  app = await electron.launch({
+    executablePath: electronPath,
+    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`],
+    env,
+  });
+  const win4 = await app.firstWindow();
+  await win4.waitForSelector('body', { timeout: 15_000 });
+  const body4 = async () => (await win4.evaluate(() => document.body.innerText)).slice(0, 3_000);
+  const waitText4 = async (needle, ms = 10_000) => {
+    try {
+      await win4.waitForFunction((n) => document.body.innerText.includes(n), needle, { timeout: ms });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  await win4.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await win4.locator('select').first().selectOption(seededEchoConnId);
+  await win4.locator('select[aria-label="继续会话"]').selectOption(taskSid);
+  await win4.locator('button', { hasText: '继续' }).first().click();
+  let cardSeen = false;
+  for (let i = 0; i < 60 && !cardSeen; i += 1) {
+    cardSeen = (await win4.locator('[data-task-card="interrupted"]').count()) > 0;
+    if (!cardSeen) await win4.waitForTimeout(150);
+  }
+  if (!cardSeen) fail('重启后没有出现"被打断的任务"卡片', (await body4()).slice(-900));
+  const taskCardText = await win4.locator('[data-task-card="interrupted"]').innerText();
+  for (const needle of [
+    '上一轮任务在应用退出/崩溃时中断',
+    '还没有完成任何步骤',
+    '正在运行 run_command（结果未落盘）',
+    '原始要求：E2E_CMD TASKR1 请跑一条慢命令',
+  ]) {
+    if (!taskCardText.includes(needle)) fail(`卡片少了一句实话：「${needle}」`, taskCardText.slice(0, 400));
+  }
+  // 盘上真值②：被读一次之后标成 interrupted 并写回（读时判定；判定只发生在主进程）
+  const markedTask = JSON.parse(readFileSync(taskJsonlFile, 'utf8')).data;
+  if (markedTask.status !== 'interrupted' || typeof markedTask.interruptedAt !== 'string') {
+    fail('读过之后任务记录没有被标成 interrupted（读时判定没生效？）', JSON.stringify(markedTask).slice(0, 300));
+  }
+  ok('重启后卡片如实说"断在哪"；盘上记录被读时判定为 interrupted（含 interruptedAt）');
+
+  // 「续跑」→ **审批弹窗必须再次出现**（硬约束的正面证据）
+  await win4.locator('button', { hasText: '续跑' }).first().click();
+  if ((await waitText4(`需要你确认：run_command · 执行命令：${taskCmd}`, 20_000)) !== true) {
+    fail('续跑时没有重新弹审批 —— 高副作用动作被静默重放，违反硬约束', (await body4()).slice(-900));
+  }
+  if ((await win4.locator('button', { hasText: '本次会话总是允许' }).count()) > 0) {
+    fail('续跑的弹窗上出现了「本次会话总是允许」—— 执行类是硬 ask');
+  }
+  await win4.locator('button', { hasText: '允许一次' }).first().click();
+  // 跑到收尾：RESUME=1 是服务端确认"系统提示里真的带了续跑段"（原始要求 + 断点信息过了线）
+  if ((await waitText4('E2E-CMD-FINAL RESUME=1', 30_000)) !== true) {
+    fail('续跑轮没有正常收尾（或服务端没在系统提示里看到续跑段）', (await body4()).slice(-900));
+  }
+  if ((await win4.locator('.w2-bubble-user', { hasText: '继续上一条被中断的任务' }).count()) === 0) {
+    fail('界面上没有那条可见的续跑用户消息（文案应与契约常量同源）');
+  }
+  let cardGone = false;
+  for (let i = 0; i < 40 && !cardGone; i += 1) {
+    cardGone = (await win4.locator('[data-task-card]').count()) === 0;
+    if (!cardGone) await win4.waitForTimeout(150);
+  }
+  if (!cardGone) fail('续跑完成之后卡片还挂着（状态没被收口）', (await body4()).slice(-600));
+  // 盘上真值③：记录收口 done、resumeCount=1、步数已计
+  const finishedTask = JSON.parse(readFileSync(taskJsonlFile, 'utf8')).data;
+  if (finishedTask.status !== 'done') {
+    fail(`续跑完成后记录应当 done，实际 ${String(finishedTask.status)}`, JSON.stringify(finishedTask).slice(0, 300));
+  }
+  if (finishedTask.resumeCount !== 1) {
+    fail(`resumeCount 应当是 1，实际 ${String(finishedTask.resumeCount)}`, JSON.stringify(finishedTask).slice(0, 300));
+  }
+  if (finishedTask.stepsDone < 1) {
+    fail('续跑完成的 run_command 没有计步', JSON.stringify(finishedTask).slice(0, 300));
+  }
+  ok('续跑：审批门重新问过（弹窗再次出现）→ 跑完 → 记录 done/resumeCount=1/stepsDone≥1，卡片自动退场');
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();

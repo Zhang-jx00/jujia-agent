@@ -6,6 +6,7 @@ import {
   buildCompactPrompt,
   buildNotePrompt,
   buildSummarySection,
+  buildTaskResumeSection,
   capSummary,
   createDefaultRegistry,
   decideCompactPrompt,
@@ -26,7 +27,13 @@ import {
   decodeBase64,
   prepareImage,
 } from '@jujia/agent-core';
-import { TOOL_OUTPUT_FLUSH_CHARS, TOOL_OUTPUT_QUIET_MS, TOOL_OUTPUT_TAIL_CHARS, type StreamEvent } from '@jujia/shared-ipc';
+import {
+  TOOL_OUTPUT_FLUSH_CHARS,
+  TOOL_OUTPUT_QUIET_MS,
+  TOOL_OUTPUT_TAIL_CHARS,
+  type ChatTaskView,
+  type StreamEvent,
+} from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
 import { createToolOutputRelay } from './tool-output-relay';
 import { pickHistoryPage } from './history-window';
@@ -35,6 +42,19 @@ import { buildContentParts, buildModelHistory, mergeTurnResult, withContentParts
 import { createPendingNotes, shouldAskAgain, type PendingNotes } from './pending-notes';
 import { createSessionJournal } from './session-journal';
 import { needsEviction, pickEvictionCandidate } from './session-lru';
+import { taskStore } from './task-store';
+import {
+  createTask,
+  describeInterruption,
+  finishTask,
+  interruptIfRunning,
+  markDismissed,
+  markResumed,
+  resumeBlockReason,
+  stepFinished,
+  stepStarted,
+  type TaskRecord,
+} from './task-state';
 import {
   createFileSessionStore,
   toStoredMessage,
@@ -167,6 +187,18 @@ async function flushSession(s: Session): Promise<void> {
     }
   } catch (err) {
     console.warn(`[chat] 会话 ${s.id.slice(0, 8)} 的历史没写进去：`, err);
+  }
+}
+
+/**
+ * 任务记录落盘（M17 批一）。**写失败不抛穿业务**（一条恢复记录坏了，不该让一次正常对话跟着死），
+ * 但如实报出来 —— 丢的是"崩溃恢复"这条线，不是这次对话本身。
+ */
+async function persistTask(id: string, rec: TaskRecord): Promise<void> {
+  try {
+    await taskStore().write(id, rec);
+  } catch (err) {
+    console.warn(`[task] 会话 ${id.slice(0, 8)} 的任务记录没写进去（崩溃恢复这条线会缺一段）：`, err);
   }
 }
 
@@ -332,6 +364,12 @@ export function sendMessage(
     sessionId?: string;
     /** M11 批一：随本条消息发出的图片（已过主进程准入；发信侧还会**再跑一遍**） */
     images?: Array<{ name: string; dataBase64: string }>;
+    /**
+     * M17 批一：续跑一个被打断的任务（taskId）。带上它 = 这一轮是"接着上次做"，
+     * 会注入一次性的续跑段并继续同一条任务记录；校验（存在 / 可续 / id 相符）主要在前置的
+     * `resumeReadiness` 里做，这里再读一次是防竞态 —— 坏掉如实报错，**绝不静默换成新轮**。
+     */
+    resumeTaskId?: string;
   },
   emit: StreamEmitter,
   deps: ChatDeps,
@@ -379,6 +417,11 @@ export function sendMessage(
     let seq = 0;
     let resolved: 'stop' | 'length' | 'content_filter' | 'aborted' | 'error' | 'tool_calls' = 'stop';
     /**
+     * M17 批一：本轮的**任务记录**（在内存里随步进更新，落盘由 persistTask 负责）。
+     * 置 null 的两种时序：起轮前就抛（校验没过）→ finally 里跳过收口，不写一条假记录。
+     */
+    let taskRec: TaskRecord | null = null;
+    /**
      * 实时输出的中转（R8.7）：**每一轮一份**，按 callId 分线。
      * 交给界面的是"截至此刻的尾部快照"；主进程负责攒批（别一条一事件刷爆 IPC）与保留上限
      * （别把一次刷屏留在内存里）。声明在 `try` 外面，`finally` 才收尾得到它。
@@ -393,6 +436,39 @@ export function sendMessage(
     });
 
     try {
+      /**
+       * M17 批一：起轮就落一条任务记录（**在模型被调用之前**）—— 第一轮就在等模型时崩溃也能恢复。
+       * 续跑那条路继续同一个 taskId（resumeCount+1）；记录在这之间被换掉（刚发过新消息）就如实报错。
+       */
+      if (params.resumeTaskId !== undefined) {
+        const prev = await taskStore().read(session.id).catch(() => null);
+        if (prev === null || prev.taskId !== params.resumeTaskId) {
+          throw new Error('要续跑的任务记录已经不在了（可能刚发过新消息）—— 请从卡片重新操作');
+        }
+        const blocked = resumeBlockReason(prev);
+        if (blocked !== null) throw new Error(blocked);
+        taskRec = markResumed(prev, new Date());
+      } else {
+        taskRec = createTask({
+          taskId: randomUUID(),
+          sessionId: session.id,
+          instruction: text,
+          now: new Date(),
+        });
+      }
+      await persistTask(session.id, taskRec);
+
+      /**
+       * M17 批一：起轮也把**会话元信息**写一份 —— 半途崩溃的那一轮走不到轮末的 flushSession，
+       * 没有这一步，会话目录里只有 task.json、清单里没有它（重启后连恢复卡片都找不到）。
+       * 与轮末那次同源同形状（metaOf）；条数取 journal 的已记账数（新会话是 0，如实）。
+       */
+      try {
+        await store().saveMeta(metaOf(session, journal.persistedCount(session.id)));
+      } catch (err) {
+        console.warn('[task] 起轮时会话元信息没写进去（崩溃后这张恢复卡片可能找不到）：', err);
+      }
+
       const { record, apiKey } = await resolveConnection(connectionId);
 
       /**
@@ -421,6 +497,21 @@ export function sendMessage(
           : '';
       const effectiveThrough = summarySection === '' ? 0 : session.compactedThrough;
 
+      /**
+       * M17 批一：续跑段（**一次性**——只在带 resumeTaskId 的这一轮注入；系统提示每轮重装配，
+       * 下一轮自然消失）。字段取自任务记录本身：错一格就是"断在第几步"说错话。
+       */
+      const taskResumeSection =
+        taskRec !== null && params.resumeTaskId !== undefined
+          ? buildTaskResumeSection({
+              sessionId: session.id,
+              instruction: taskRec.instruction,
+              stepsDone: taskRec.stepsDone,
+              recentSteps: taskRec.recentSteps,
+              runningStep: taskRec.runningStep,
+            })
+          : '';
+
       // W8：按工作区动态装配系统提示（项目指令 → 长期记忆 → 会话摘要）
       // 每一层都标注来源，便于用户核查「模型为什么这么说」。
       if (deps.workspaceRoot !== null) {
@@ -436,6 +527,7 @@ export function sendMessage(
             // ②"有出处"：段头要写明条数，用户数得出来才算数
             notesCount: notes.lines,
             sessionSummary: summarySection,
+            taskResume: taskResumeSection,
           });
           const first = session.messages[0];
           if (first && first.role === 'system') {
@@ -456,11 +548,12 @@ export function sendMessage(
           role: 'system',
           content: '当前尚未选择工作区，所有文件类工具都不可用。若用户要求读写文件，请提示其先在「概览」页选择工作区。',
         });
-        // 没工作区也要能压缩：这一支不经过 assembleSystemPrompt，摘要补在这里。
+        // 没工作区也要能压缩与续跑：这一支不经过 assembleSystemPrompt，两段补在这里。
         // 从常量重拼而不是往末尾追加 —— 每轮追加一次会把系统提示越攒越长。
         const firstSystem = session.messages[0];
-        if (firstSystem?.role === 'system' && summarySection !== '') {
-          firstSystem.content = `${BASE_PROMPT}\n\n${summarySection}`;
+        const headParts = [BASE_PROMPT, summarySection, taskResumeSection].filter((s) => s !== '');
+        if (firstSystem?.role === 'system' && headParts.length > 1) {
+          firstSystem.content = headParts.join('\n\n');
         }
       }
 
@@ -525,6 +618,12 @@ export function sendMessage(
                 name: ev.name,
                 argumentsText: ev.argumentsText,
               });
+              // M17 批一：任务记录跟着步子走（**不落盘就永远说不出"断在哪"**）。
+              // 写是异步的、失败只告警（persistTask）—— 记恢复用的账不该拖慢正在跑的对话。
+              if (taskRec !== null) {
+                taskRec = stepStarted(taskRec, ev.name, new Date());
+                void persistTask(session.id, taskRec);
+              }
             } else if (ev.type === 'tool_output') {
               outputStreams.onChunk(ev.callId, ev.name, ev.chunk);
             } else if (ev.type === 'tool_end') {
@@ -540,6 +639,11 @@ export function sendMessage(
                 summary: ev.summary,
                 durationMs: ev.durationMs,
               });
+              // 失败的一步也计数（做过就是做过，成败记在 recentSteps[].ok）
+              if (taskRec !== null) {
+                taskRec = stepFinished(taskRec, ev.name, ev.ok, new Date());
+                void persistTask(session.id, taskRec);
+              }
             }
             // turn_end 仅供调试，不推给渲染层
           },
@@ -606,6 +710,13 @@ export function sendMessage(
       // **落盘点在轮次结束处**，不是每条 token：中途写会把半截回答留在盘上，
       // 也让一次长回答产生成百上千次 IO
       await flushSession(session);
+      // M17 批一：任务记录收口（aborted / error 各有各的结局；其余 —— 正常答完 / 被截断 /
+      // 停在工具处 —— 都记 done：精确"为什么停"由 done 事件与截断提示在界面上说清，这里只记任务层终态）
+      if (taskRec !== null) {
+        const outcome = resolved === 'aborted' ? 'aborted' : resolved === 'error' ? 'failed' : 'done';
+        taskRec = finishTask(taskRec, outcome, new Date());
+        await persistTask(session.id, taskRec);
+      }
       emit({ type: 'done', sessionId: session.id, reason: resolved });
     }
   })();
@@ -618,6 +729,70 @@ export function stopMessage(sessionId: string): boolean {
   if (!session?.controller) return false;
   session.controller.abort();
   return true;
+}
+
+/* ======================= M17 批一：断点续跑（任务记录） ======================= *
+ *
+ * 口径见 `docs/DESIGN-M17.md`：记录与消息分家（task.json vs messages.jsonl）；
+ * 「被读到时还是 running」= 上次进程没走完 —— 这里做**读时判定**并写回（幂等）。
+ */
+
+/**
+ * 读某会话的任务记录（供界面卡片）。**读时判定**：还是 `running` 的 = 上次进程被崩溃/强退带走，
+ * 这里就地标 `interrupted` 并写回；读不出来（无记录/坏文件）= null。
+ */
+export async function taskStatusFor(sessionId: string): Promise<ChatTaskView | null> {
+  const rec = await taskStore().read(sessionId).catch(() => null);
+  if (rec === null) return null;
+  const { record, changed } = interruptIfRunning(rec, new Date());
+  if (changed) await persistTask(sessionId, record);
+  return {
+    sessionId,
+    taskId: record.taskId,
+    status: record.status,
+    stepsDone: record.stepsDone,
+    runningStep: record.runningStep,
+    instructionPreview: record.instruction.slice(0, 80),
+    text: describeInterruption(record),
+    resumeCount: record.resumeCount,
+  };
+}
+
+/**
+ * 点「续跑」前的**前置校验**（在 IPC 层调用 —— 失败以 IPC 结果返回，界面才显示得出原因，
+ * 而不是把错误掉进聊天流的 catch 里）。传了 taskId：记录被换掉（刚发过新消息）也算失败。
+ */
+export async function resumeReadiness(
+  sessionId: string,
+  taskId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const rec = await taskStore().read(sessionId).catch(() => null);
+  if (rec === null) return { ok: false, error: '这个会话没有任务记录' };
+  const marked = interruptIfRunning(rec, new Date());
+  if (marked.changed) await persistTask(sessionId, marked.record);
+  if (marked.record.taskId !== taskId) {
+    return { ok: false, error: '任务记录已经变了（可能刚发过新消息）—— 请从卡片重新操作' };
+  }
+  const blocked = resumeBlockReason(marked.record);
+  if (blocked !== null) return { ok: false, error: blocked };
+  return { ok: true };
+}
+
+/** 会话归属的连接 id（驻留内存优先，否则读盘清单；与补问预览同一口径） */
+export async function connectionForSession(sessionId: string): Promise<string | null> {
+  const resident = sessions.get(sessionId)?.connectionId;
+  if (resident !== undefined && resident !== '') return resident;
+  const metas = await store().list().catch(() => []);
+  return metas.find((m) => m.id === sessionId)?.connectionId ?? null;
+}
+
+/** 点「不再提示」：只把记录标掉（interrupted → dismissed），不动消息、不调模型 */
+export async function taskDismiss(sessionId: string): Promise<{ ok: boolean; error?: string }> {
+  const rec = await taskStore().read(sessionId).catch(() => null);
+  if (rec === null) return { ok: false, error: '这个会话没有任务记录' };
+  const marked = interruptIfRunning(rec, new Date()).record;
+  await persistTask(sessionId, markDismissed(marked, new Date()));
+  return { ok: true };
 }
 
 /* ======================= 6b：会话压缩与「结束记要点」 ======================= *

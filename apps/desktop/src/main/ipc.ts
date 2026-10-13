@@ -2,6 +2,7 @@ import type { IpcDeps } from './ipc/context';
 import { createIpcContext } from './ipc/context';
 import { registerCoreIpc } from './ipc/core';
 import { registerChatIpc } from './ipc/chat';
+import { registerChatTaskIpc } from './ipc/chat-task';
 import { registerToolIpc } from './ipc/tools';
 import { registerTerminalIpc } from './ipc/terminal';
 import { registerBrowserIpc } from './ipc/browser';
@@ -41,6 +42,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
 
   registerCoreIpc(ctx);
   registerChatIpc(ctx);
+  registerChatTaskIpc(ctx);
   registerToolIpc(ctx);
   registerTerminalIpc(ctx);
   registerBrowserIpc(ctx);
