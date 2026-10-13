@@ -72,6 +72,7 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 | 测试临时文件落在哪（不占系统盘） | [docs/TEST-POLICY.md](docs/TEST-POLICY.md) |
 | 安全边界与风险声明 | [SECURITY.md](SECURITY.md) |
 | 做了什么、还差什么 | [docs/PROGRESS.md](docs/PROGRESS.md) · [CHANGELOG.md](CHANGELOG.md) |
+| **总览清单**（已完成 ✅ / 待做 ⏳，一张总表） | [docs/CHECKLIST.md](docs/CHECKLIST.md) |
 | 每轮复核记录（含未通过项） | [review/REVIEW-LOG.md](review/REVIEW-LOG.md) |
 | 工作怎么分类与记录（轨道计划） | [docs/TRACK-PLANS.md](docs/TRACK-PLANS.md) |
 | **设计基调**（颜色/字级/间距/动效令牌与展开-收起规则；前端打磨的判据） | [docs/DESIGN-BASELINE.md](docs/DESIGN-BASELINE.md) |
