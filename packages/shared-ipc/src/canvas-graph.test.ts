@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CANVAS_GRAPH_VERSION,
   CANVAS_MAX_CONFIG_BYTES,
+  CANVAS_MAX_LOOP_ROUNDS,
   CANVAS_MAX_NODES,
   canvasGraphSchema,
   downstreamClosure,
@@ -371,5 +372,45 @@ describe('B3：条件节点的契约与校验', () => {
     });
     const problems = validateGraph(emptyKeyword as CanvasGraph);
     expect(problems.some((p) => p.message.includes('不能为空'))).toBe(true);
+  });
+});
+
+/**
+ * B3b：循环节点 —— **它不是环**（图照旧是 DAG）。
+ *
+ * 循环体现为"一个节点内部的有限轮次"，而不是把边连回去：环会同时动摇
+ * `findCycle` / `topoOrder` / 下游闭包 / 活路传播**四套既有不变量**，
+ * 而"重复执行"的收益由"被双重上界钉住的单节点循环"同样拿得到 ——
+ * 代价是循环体只有一段提示词（如实写进文档，不假装支持子图循环）。
+ * 校验与条件节点同理：缺什么、空什么、越什么界，**保存前就拒**。
+ */
+describe('B3b：循环节点的配置校验', () => {
+  const loop = (config: Record<string, unknown>) => ({ id: 'L', kind: 'loop' as const, x: 0, y: 0, config });
+
+  it('合法的循环节点（prompt + 非空终止词 + 1..上限的整数轮数）没有问题', () => {
+    const g = graph({ nodes: [loop({ prompt: '继续', stopKeyword: '完成', maxRounds: 3 })], edges: [] });
+    expect(validateGraph(g as CanvasGraph)).toEqual([]);
+  });
+
+  it('缺 prompt 被点名', () => {
+    const g = graph({ nodes: [loop({ stopKeyword: '完成', maxRounds: 3 })], edges: [] });
+    expect(validateGraph(g as CanvasGraph).some((p) => p.message.includes('prompt'))).toBe(true);
+  });
+
+  it('缺终止词 / 空终止词都被点名（空词 = 每轮都"命中"的静默假行为）', () => {
+    const noKeyword = graph({ nodes: [loop({ prompt: '继续', maxRounds: 3 })], edges: [] });
+    expect(validateGraph(noKeyword as CanvasGraph).some((p) => p.message.includes('终止'))).toBe(true);
+
+    const empty = graph({ nodes: [loop({ prompt: '继续', stopKeyword: '', maxRounds: 3 })], edges: [] });
+    expect(validateGraph(empty as CanvasGraph).some((p) => p.message.includes('不能为空'))).toBe(true);
+  });
+
+  it('轮数不是 1..上限的整数（0 / 超上限 / 小数 / 非数）都被点名', () => {
+    const bad: unknown[] = [0, CANVAS_MAX_LOOP_ROUNDS + 1, 2.5, Number.NaN, '3'];
+    for (const rounds of bad) {
+      const g = graph({ nodes: [loop({ prompt: '继续', stopKeyword: '完成', maxRounds: rounds })], edges: [] });
+      const hits = validateGraph(g as CanvasGraph).filter((p) => p.message.includes('轮'));
+      expect(hits.length, `轮数 ${String(rounds)} 应当被拒`).toBeGreaterThan(0);
+    }
   });
 });

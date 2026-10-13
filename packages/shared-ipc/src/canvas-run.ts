@@ -1,4 +1,11 @@
-import { downstreamClosure, topoOrder, type CanvasGraph, type CanvasNode } from './canvas-graph';
+import {
+  CANVAS_LOOP_TIME_LIMIT_MS,
+  CANVAS_MAX_LOOP_ROUNDS,
+  downstreamClosure,
+  topoOrder,
+  type CanvasGraph,
+  type CanvasNode,
+} from './canvas-graph';
 
 /**
  * 画布执行器的**编排层**（M9a）
@@ -61,6 +68,11 @@ export interface RunOptions {
    * 指向不存在的节点 = **整体拒绝**（绝不"那就跑整图"）。
    */
   startFrom?: string;
+  /**
+   * 时钟（B3b：循环的时间上界要可测）。缺省 `Date.now`。
+   * 注入的是**单调用途**（只做差值比较），调用方不需要提供真的单调钟。
+   */
+  now?: () => number;
 }
 
 /**
@@ -139,6 +151,7 @@ export async function runGraph(graph: CanvasGraph, options: RunOptions): Promise
   }
 
   let step = 0;
+  const now = options.now ?? Date.now;
   for (const id of runList) {
     // 取消优先于跳过：abort 之后剩下的节点是 cancelled，不按"分支没走"处理
     if (isAborted(options.signal)) {
@@ -170,10 +183,87 @@ export async function runGraph(graph: CanvasGraph, options: RunOptions): Promise
       emit(id, 'failed', step, '条件节点没有可用的判定关键词（保存前本会拦；这是兜底，绝不默认走真口）');
       return { states, steps, reason: 'failed' };
     }
+    // 兜底（B3b）：循环配置不完整就**停下** —— 绝不默认跑某一轮数、也绝不把空终止词当"每轮都停"
+    if (node.kind === 'loop') {
+      const kw = node.config['stopKeyword'];
+      const rounds = node.config['maxRounds'];
+      const okKeyword = typeof kw === 'string' && kw !== '';
+      const okRounds =
+        typeof rounds === 'number' &&
+        Number.isInteger(rounds) &&
+        rounds >= 1 &&
+        rounds <= CANVAS_MAX_LOOP_ROUNDS;
+      if (!okKeyword || !okRounds) {
+        emit(id, 'failed', step, '循环节点配置不完整（保存前本会拦；这是兜底，绝不默认跑某一轮数）');
+        return { states, steps, reason: 'failed' };
+      }
+    }
 
     emit(id, 'running', step, '开始执行');
     try {
-      const result = await options.execute(node, options.signal ?? new AbortController().signal);
+      const signal = options.signal ?? new AbortController().signal;
+
+      /**
+       * B3b：循环节点 —— **每一轮都还是那一次 `execute`**（执行器对 loop 零特判；
+       * 主进程侧就是与对话同一个 provider 流层）。三条口径：命中终止词提前停；
+       * 轮数 / 时间任一上界到了就**失败**（不是成功、不是静默截断）；每一轮发进度事件。
+       */
+      if (node.kind === 'loop') {
+        const stopKeyword = String(node.config['stopKeyword']);
+        const maxRounds = Number(node.config['maxRounds']);
+        const startedAt = now();
+        let completed = 0;
+        let met = false;
+        for (let round = 1; round <= maxRounds; round += 1) {
+          // 取消优先：轮与轮之间收到 abort，剩下的按 cancelled 收尾（与节点间口径一致）
+          if (isAborted(options.signal)) {
+            emit(id, 'cancelled', step, '已取消');
+            return { states, steps, reason: 'cancelled' };
+          }
+          if (now() - startedAt >= CANVAS_LOOP_TIME_LIMIT_MS) {
+            emit(
+              id,
+              'failed',
+              step,
+              `已到时间上界（${String(Math.round(CANVAS_LOOP_TIME_LIMIT_MS / 1000))} 秒）—— 第 ${String(completed)} 轮跑完后停下，仍未命中「${stopKeyword}」`,
+            );
+            return { states, steps, reason: 'failed' };
+          }
+          emit(id, 'running', step, `第 ${String(round)}/${String(maxRounds)} 轮`);
+          const roundResult = await options.execute(node, signal);
+          if (roundResult.denied === true) {
+            emit(id, 'denied', step, roundResult.error === '' ? '用户拒绝了这一步' : roundResult.error);
+            return { states, steps, reason: 'failed' };
+          }
+          if (!roundResult.ok) {
+            emit(
+              id,
+              'failed',
+              step,
+              `第 ${String(round)} 轮：${roundResult.error === '' ? '执行失败（没说原因）' : roundResult.error}`,
+            );
+            return { states, steps, reason: 'failed' };
+          }
+          completed = round;
+          if (roundResult.output.includes(stopKeyword)) {
+            met = true;
+            emit(id, 'ok', step, `第 ${String(round)} 轮命中「${stopKeyword}」→ 循环结束（共 ${String(round)} 轮）`);
+            break;
+          }
+        }
+        if (!met) {
+          emit(
+            id,
+            'failed',
+            step,
+            `已到轮次上限（${String(maxRounds)} 轮）仍未命中「${stopKeyword}」—— 循环停止（这是到界，不是执行出错）`,
+          );
+          return { states, steps, reason: 'failed' };
+        }
+        continue;
+      }
+
+      const result = await options.execute(node, signal);
       if (result.denied === true) {
         emit(id, 'denied', step, result.error === '' ? '用户拒绝了这一步' : result.error);
         return { states, steps, reason: 'failed' };

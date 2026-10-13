@@ -18,6 +18,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
+  CANVAS_MAX_LOOP_ROUNDS,
   canvasGraphSchema,
   downstreamClosure,
   findCycle,
@@ -73,8 +74,10 @@ const rectOf = (n: FlowNode): Rect => ({
  * 所以这一笔在 B3 一并补上（纯界面，零执行语义）。
  */
 function CanvasNodeCard({ data }: { data: CanvasNodeData }): ReactElement {
-  const kindLabel = data.kind === 'prompt' ? '提示词' : data.kind === 'tool' ? '工具' : '条件';
+  const kindLabel =
+    data.kind === 'prompt' ? '提示词' : data.kind === 'tool' ? '工具' : data.kind === 'condition' ? '条件' : '循环';
   const keyword = String(data.keywordText ?? '');
+  const rounds = String(data.roundsText ?? '');
   return (
     <div className={`jj-canvas-node jj-canvas-node-${data.status}`} data-node-status={data.status}>
       <Handle type="target" position={Position.Left} />
@@ -85,7 +88,16 @@ function CanvasNodeCard({ data }: { data: CanvasNodeData }): ReactElement {
           {keyword === '' ? '还没填判定关键词' : `含「${keyword}」走真口`}
         </div>
       )}
+      {data.kind === 'loop' && (
+        <div className="jj-canvas-node-keyword">
+          {keyword === '' ? '还没填终止关键词' : `含「${keyword}」停 · 最多 ${rounds} 轮`}
+        </div>
+      )}
       <div className="jj-canvas-node-status">{data.status}</div>
+      {/* B3b：最新一句运行说明（含"第几轮"）—— 事件里带过来的，卡片只负责显示 */}
+      {typeof data.note === 'string' && data.note !== '' && (
+        <div className="jj-canvas-node-note">{data.note}</div>
+      )}
       {/* B2：局部重跑的"重跑段"小标（随下一次整图运行 / 重开图清掉） */}
       {data.rerun === true && (
         <div className="jj-canvas-node-rerun" data-rerun="1">
@@ -162,7 +174,9 @@ export function CanvasPanel(): ReactElement {
       if (event.graphId !== graphId) return;
       setNodes((prev) =>
         prev.map((n) =>
-          n.id === event.nodeId ? { ...n, data: { ...n.data, status: event.status } } : n,
+          n.id === event.nodeId
+            ? { ...n, data: { ...n.data, status: event.status, note: event.note } }
+            : n,
         ),
       );
       setRunState(`第 ${String(event.step)} 步：${event.nodeId} ${event.status}${event.note === '' ? '' : ` —— ${event.note}`}`);
@@ -203,14 +217,16 @@ export function CanvasPanel(): ReactElement {
     [nodes, edges, connectionId],
   );
 
-  const addNodeAt = (kind: 'prompt' | 'tool' | 'condition', at?: { x: number; y: number }): void => {
+  const addNodeAt = (kind: 'prompt' | 'tool' | 'condition' | 'loop', at?: { x: number; y: number }): void => {
     const id = NODE_ID();
     const data: CanvasNodeData =
       kind === 'prompt'
         ? { kind, configText: '把下面这段压成三条要点', status: 'pending' }
         : kind === 'tool'
           ? { kind, configText: 'list_dir', status: 'pending' }
-          : { kind, configText: '判断一下', keywordText: '', status: 'pending' };
+          : kind === 'loop'
+            ? { kind, configText: '继续完善这段文字', keywordText: '完成', roundsText: '3', status: 'pending' }
+            : { kind, configText: '判断一下', keywordText: '', status: 'pending' };
     setNodes((prev) => [
       ...prev,
       {
@@ -220,7 +236,7 @@ export function CanvasPanel(): ReactElement {
       },
     ]);
   };
-  const addNode = (kind: 'prompt' | 'tool' | 'condition'): void => addNodeAt(kind);
+  const addNode = (kind: 'prompt' | 'tool' | 'condition' | 'loop'): void => addNodeAt(kind);
 
   /**
    * B1：拖动位置 = **先网格、后对齐**（判定与吸附全在纯函数里）。
@@ -273,7 +289,7 @@ export function CanvasPanel(): ReactElement {
     setMenu({ x: e.clientX, y: e.clientY });
   };
 
-  const createFromMenu = (kind: 'prompt' | 'tool' | 'condition'): void => {
+  const createFromMenu = (kind: 'prompt' | 'tool' | 'condition' | 'loop'): void => {
     if (menu === null) return;
     const at = rfRef.current?.screenToFlowPosition({ x: menu.x, y: menu.y });
     setMenu(null);
@@ -414,6 +430,7 @@ export function CanvasPanel(): ReactElement {
     { id: 'add-prompt', label: '添加提示词节点', run: () => addNode('prompt') },
     { id: 'add-tool', label: '添加工具节点', run: () => addNode('tool') },
     { id: 'add-condition', label: '添加条件节点', run: () => addNode('condition') },
+    { id: 'add-loop', label: '添加循环节点', run: () => addNode('loop') },
     { id: 'save', label: '保存这张图', run: () => void save() },
     { id: 'run', label: '运行这张图', run: () => void run() },
     { id: 'stop', label: '停止', run: () => void stop() },
@@ -434,6 +451,9 @@ export function CanvasPanel(): ReactElement {
           </button>
           <button type="button" className="w2-btn" onClick={() => addNode('condition')}>
             + 条件节点
+          </button>
+          <button type="button" className="w2-btn" onClick={() => addNode('loop')}>
+            + 循环节点
           </button>
           <button type="button" className="w2-btn" onClick={() => setPaletteOpen(true)}>
             命令面板（Ctrl+K）
@@ -492,7 +512,9 @@ export function CanvasPanel(): ReactElement {
                   ? '提示词'
                   : selectedNode.data.kind === 'tool'
                     ? '工具名（如 list_dir）'
-                    : '提示词（拿去问模型，回答里找关键词）'
+                    : selectedNode.data.kind === 'loop'
+                      ? '每轮要问模型的提示词（重复直到命中终止词）'
+                      : '提示词（拿去问模型，回答里找关键词）'
               }
             />
             {selectedNode.data.kind === 'tool' && (
@@ -510,6 +532,22 @@ export function CanvasPanel(): ReactElement {
                 onChange={(e) => patchSelected({ keywordText: e.target.value } as Partial<CanvasNodeData>)}
                 placeholder="回答里含这个词就走 true 口"
               />
+            )}
+            {selectedNode.data.kind === 'loop' && (
+              <>
+                <input
+                  aria-label="终止关键词"
+                  value={String(selectedNode.data['keywordText'] ?? '')}
+                  onChange={(e) => patchSelected({ keywordText: e.target.value } as Partial<CanvasNodeData>)}
+                  placeholder="回答里含这个词就结束循环"
+                />
+                <input
+                  aria-label="轮数上限"
+                  value={String(selectedNode.data['roundsText'] ?? '')}
+                  onChange={(e) => patchSelected({ roundsText: e.target.value } as Partial<CanvasNodeData>)}
+                  placeholder={`1..${String(CANVAS_MAX_LOOP_ROUNDS)} 的整数（每轮都是一次真实调用）`}
+                />
+              </>
             )}
             {/* B2：局部重跑入口 —— 走的是与「运行这张图」同一个 canvasRun（多带一个起点） */}
             <button

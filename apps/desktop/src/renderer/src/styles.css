@@ -1758,6 +1758,18 @@ html[data-jj-bg-kind='glass'] .app-root {
   font-size: 11px;
 }
 
+/* B3b：节点卡片上最新一句运行说明（含"第几轮"）—— 最多两行，别把卡片撑爆 */
+.jj-canvas-node-note {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
 /* "被跳过"是正常的"没走这条"：虚线加淡，一眼和失败 / 取消分开 */
 .jj-canvas-node-skipped {
   border-style: dashed;

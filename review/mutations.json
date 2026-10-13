@@ -1816,6 +1816,62 @@
       "find": "            : result.ok\n              ? `已是最新（${result.latest}）`",
       "replace": "            : true\n              ? `已是最新（${result.latest}）`",
       "test": "apps/desktop/src/renderer/src/features/update/UpdateCard.test.tsx"
+    },
+    {
+      "id": "M228",
+      "desc": "终止词判定失效：永远不提前停（一直问到轮数上界）—— 循环的\"钱包闸\"没了",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "          if (roundResult.output.includes(stopKeyword)) {",
+      "replace": "          if (roundResult.output.includes('绝不出现__mut228__')) {",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M229",
+      "desc": "配置的轮数被无视（循环条件钉成 1 轮）—— maxRounds 成了摆设",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "        for (let round = 1; round <= maxRounds; round += 1) {",
+      "replace": "        for (let round = 1; round <= 1; round += 1) {",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M230",
+      "desc": "时间上界检查被摘：只有轮数上界兜底，长跑的循环不再受时间约束",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "          if (now() - startedAt >= CANVAS_LOOP_TIME_LIMIT_MS) {",
+      "replace": "          if (false) {",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M231",
+      "desc": "循环配置的兜底守卫被摘：空终止词直接开跑（includes(\"\") 第一轮就\"命中\"——静默假行为）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "      if (!okKeyword || !okRounds) {",
+      "replace": "      if (false) {",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M232",
+      "desc": "\"到界\"不再说话：没命中也当没跑过（节点停在 running，既不是成功也不是失败）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "        if (!met) {",
+      "replace": "        if (false) {",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M233",
+      "desc": "运行说明不上卡片：第几轮/到界原因都看不见（事件到了，界面没接）",
+      "file": "apps/desktop/src/renderer/src/features/canvas/CanvasPanel.tsx",
+      "find": "            ? { ...n, data: { ...n.data, status: event.status, note: event.note } }",
+      "replace": "            ? { ...n, data: { ...n.data, status: event.status } }",
+      "test": "apps/desktop/src/main/canvas-wiring.test.ts"
+    },
+    {
+      "id": "M234",
+      "desc": "循环的进度事件失去\"第几轮\"（长循环跑起来只有一句\"开始执行\"）",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "          emit(id, 'running', step, `第 ${String(round)}/${String(maxRounds)} 轮`);",
+      "replace": "          emit(id, 'running', step, '继续');",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
     }
   ]
 }

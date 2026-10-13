@@ -75,7 +75,7 @@
 > 1. **按目录 / 模块归类**，覆盖 `apps/` 与 `packages/` 下全部源文件，一个不漏；
 > 2. 判据取「**这个文件是干什么的**」，不取「它当年是在哪一轮诞生的」；
 > 3. **测试文件跟随被测对象所在轨道，不单独列**（避免双计）；一个模块沾两条轨道时写「主轨 + 次轨」；
->    根配置（`package.json` / `tsconfig*.json` / `eslint.config.js` / `vitest.config.ts` / `electron.vite.config.ts` 等）统一归**规整**。
+>    根配置（`package.json` / `tsconfig*.json` / `eslint.config.js` / `vitest.config.ts` / `vitest.global-setup.ts` / `electron.vite.config.ts` 等）统一归**规整**。
 >
 > **现扫对账（2026-10-08，`check:docs` 的护栏①机器盯目录级覆盖）**：`apps/` + `packages/` 下代码文件
 > （`.ts/.tsx/.js/.mjs/.cjs`，剥 `node_modules`/`out`/`dist`/`release`/`.tmp`/`.trash`）= **216 个**，

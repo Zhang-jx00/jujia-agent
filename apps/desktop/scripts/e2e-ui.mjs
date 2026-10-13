@@ -2213,8 +2213,7 @@ try {
    * B3 的条件分支图也**和上面几张一起写**：画布侧栏的图列表只在面板首次挂载时拉一次
    * （B3 步骤跑到时面板早挂着了）—— 写晚了它不会出现在列表里，点都点不到。
    */
-  const branchId = 'e2e-canvas-branch-0001';
-  writeGraph(branchId, {
+  const branchId = 'e2e-canvas-branch-0001';  writeGraph(branchId, {
     version: 1,
     connectionId: seededEchoConnId,
     nodes: [
@@ -2233,6 +2232,34 @@ try {
       { id: 'be4', from: 'c2', to: 't2', fromPort: 'true' },
       { id: 'be5', from: 'c2', to: 'f2', fromPort: 'false' },
     ],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  });
+
+  /**
+   * B3b 的两张循环图也一起写（理由同上：图列表只在面板首次挂载时拉一次）。
+   * 场景①：终止词 ECHO —— 回显服务的回答里必然带"ECHO"，第 1 轮就命中；
+   * 场景②：终止词永不出现 + 只剩 2 轮 —— 跑满轮数上界，必须"到界=失败且说明白"。
+   */
+  const loopHitId = 'e2e-canvas-loop-hit-0001';
+  writeGraph(loopHitId, {
+    version: 1,
+    connectionId: seededEchoConnId,
+    nodes: [
+      { id: 'L', kind: 'loop', x: 40, y: 40, config: { prompt: 'E2E_LOOP 继续写', stopKeyword: 'ECHO', maxRounds: 3 } },
+      { id: 'tail', kind: 'prompt', x: 300, y: 40, config: { prompt: '收尾说一句' } },
+    ],
+    edges: [{ id: 'le1', from: 'L', to: 'tail' }],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  });
+  const loopBoundId = 'e2e-canvas-loop-bound-0001';
+  writeGraph(loopBoundId, {
+    version: 1,
+    connectionId: seededEchoConnId,
+    nodes: [
+      { id: 'L', kind: 'loop', x: 40, y: 40, config: { prompt: 'E2E_LOOP 继续改', stopKeyword: '绝不出现E2E_ZZZ', maxRounds: 2 } },
+      { id: 'tail', kind: 'prompt', x: 300, y: 40, config: { prompt: '收尾说一句' } },
+    ],
+    edges: [{ id: 'le2', from: 'L', to: 'tail' }],
     viewport: { x: 0, y: 0, zoom: 1 },
   });
 
@@ -3224,6 +3251,44 @@ try {
   }
   ok('查一次说一句：新版本 v99.9.9 显示出来、发布页入口在；点击前 0 次出站、点击后恰好 1 次');
 
+  step('B3b 画布：有界循环 —— 命中终止词提前停；没命中就停在轮次上限并把"到界"说出来');
+  await win3.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  // 场景一：第 1 轮就命中（回显服务的回答里带 ECHO）→ 循环提前结束，下游照常执行
+  await win3.locator(`button[data-graph-id="${loopHitId}"]`).first().click();
+  if ((await waitText3(`已打开 ${loopHitId}`, 10_000)) !== true) {
+    fail('打开循环命中图失败', (await body3()).slice(0, 700));
+  }
+  if ((await win3.locator('.jj-canvas-node', { hasText: '含「ECHO」停 · 最多 3 轮' }).count()) !== 1) {
+    fail('循环卡片没有显示"终止词与轮数"（加载时 stopKeyword / maxRounds 没带进卡片？）');
+  }
+  await win3.locator('button', { hasText: '运行这张图' }).first().click();
+  if ((await waitText3('跑完了（2 个节点）', 30_000)) !== true) {
+    fail('循环（命中就停）那张图没有跑完', (await body3()).slice(0, 900));
+  }
+  const loopStatus = async (i) =>
+    win3.locator('.react-flow__node').nth(i).locator('.jj-canvas-node').getAttribute('data-node-status');
+  if ((await loopStatus(0)) !== 'ok') fail('命中终止词的循环节点应当是 ok');
+  if ((await loopStatus(1)) !== 'ok') fail('循环结束之后下游应当照常执行');
+  if ((await win3.locator('.jj-canvas-node', { hasText: '第 1 轮命中' }).count()) !== 1) {
+    fail('循环节点卡片上没写出"第几轮命中"（事件里的 note 没上卡片？）');
+  }
+  // 场景二：终止词永不出现 + 只剩 2 轮 → 跑满上界，失败并说明"到界"，下游留在 pending
+  await win3.locator(`button[data-graph-id="${loopBoundId}"]`).first().click();
+  if ((await waitText3(`已打开 ${loopBoundId}`, 10_000)) !== true) {
+    fail('打开循环到界图失败', (await body3()).slice(0, 700));
+  }
+  await win3.locator('button', { hasText: '运行这张图' }).first().click();
+  if ((await waitText3('轮次上限', 30_000)) !== true) {
+    fail('循环跑满轮数后没有把"到界"说出来', (await body3()).slice(0, 900));
+  }
+  if ((await loopStatus(0)) !== 'failed') fail('到界的循环节点应当是 failed（不是 ok，也不是静默截断）');
+  if ((await loopStatus(1)) !== 'pending') fail('循环失败后下游不该执行（应当停在 pending）');
+  const savedLoop = readFileSync(join(canvasDir, `${loopHitId}.json`), 'utf8');
+  if (!savedLoop.includes('"stopKeyword": "ECHO"') || !savedLoop.includes('"maxRounds": 3')) {
+    fail('存下的图里终止词 / 轮数没保住（界面往返把它丢了？）', savedLoop.slice(0, 600));
+  }
+  ok('有界循环：命中即停（第 1 轮）且下游照跑；到界=失败并写出"轮次上限"，下游留在 pending；stopKeyword/maxRounds 落盘');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -3244,5 +3309,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 主题包背景类型真的落在画面上（渐变 / 毛玻璃）→ 运行日志真在隔离目录里落盘（概览页看得见同一份）→ 更新检查点一次查一次（有新版本说得出来）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ B3b 画布（有界循环：命中即停 / 到界失败并说明白）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 主题包背景类型真的落在画面上（渐变 / 毛玻璃）→ 运行日志真在隔离目录里落盘（概览页看得见同一份）→ 更新检查点一次查一次（有新版本说得出来）→ 干净退出');
 process.exit(0);

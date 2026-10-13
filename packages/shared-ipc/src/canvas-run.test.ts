@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { CANVAS_GRAPH_VERSION, type CanvasEdge, type CanvasGraph, type CanvasNode } from './canvas-graph';
+import {
+  CANVAS_GRAPH_VERSION,
+  CANVAS_LOOP_TIME_LIMIT_MS,
+  type CanvasEdge,
+  type CanvasGraph,
+  type CanvasNode,
+} from './canvas-graph';
 import { runGraph, summarizeRun, type NodeResult, type RunEvent } from './canvas-run';
 
 /**
@@ -365,5 +371,126 @@ describe('runGraph：B3 条件分支', () => {
     expect(calls).toEqual(['f', 'f2']);
     expect(outcome.reason).toBe('done');
     expect(outcome.states).toEqual({ f: 'ok', f2: 'ok' });
+  });
+});
+
+/**
+ * B3b：有界循环（终止词 + 轮数上界 + 时间上界）。
+ *
+ * 与 B3 同处一个层级：**判定与上界全在纯层**，执行器对 loop 零特判 ——
+ * 每一轮都还是那一次 `execute(node)`（主进程侧 = 与对话同一个 provider 流层）。
+ * 三条口径（都是"错了会静默出事"的类型）：
+ * ① 命中终止词 = 立刻停（把"永远再问一轮"的钱包风险关掉）；
+ * ② 没命中也要停：轮数 / 时间任一上界到了就**失败**（不是成功、也不是静默截断 ——
+ *    循环的目的没达成，下游不该拿它当"完成"）；
+ * ③ 每一轮都发进度事件（界面把"第几轮"标在节点上）。
+ */
+describe('B3b：有界循环', () => {
+  const loopNode = (config: Record<string, unknown> = {}) => ({
+    id: 'L',
+    kind: 'loop' as const,
+    x: 0,
+    y: 0,
+    config: { prompt: '继续写', stopKeyword: '完成', maxRounds: 3, ...config },
+  });
+
+  it('第 k 轮命中终止词就停：共 k 次执行、节点 ok、"第几轮"写在事件里', async () => {
+    let round = 0;
+    const execute = async (): Promise<NodeResult> => {
+      round += 1;
+      return { ok: true, output: round >= 2 ? '好，完成了' : '还没写好', error: '' };
+    };
+    const events: RunEvent[] = [];
+    const outcome = await runGraph(graph([loopNode()], []), {
+      maxSteps: 50,
+      execute,
+      onEvent: (e) => events.push(e),
+    });
+    expect(round).toBe(2);
+    expect(outcome.reason).toBe('done');
+    expect(outcome.states['L']).toBe('ok');
+    expect(events.find((e) => e.nodeId === 'L' && e.status === 'ok')?.note).toContain('第 2 轮');
+    expect(events.some((e) => e.nodeId === 'L' && e.status === 'running' && e.note.includes('第 1'))).toBe(true);
+  });
+
+  it('一直没命中：跑满轮数上界后**失败并说明"到上界"**，下游不跑', async () => {
+    let n = 0;
+    const execute = async (): Promise<NodeResult> => {
+      n += 1;
+      return { ok: true, output: '继续改，还差点意思', error: '' };
+    };
+    const g = graph([loopNode(), node('tail')], [edge('L', 'tail')]);
+    const outcome = await runGraph(g, { maxSteps: 50, execute });
+    expect(n).toBe(3);
+    expect(outcome.states['L']).toBe('failed');
+    expect(outcome.states['tail']).toBe('pending');
+    const note = outcome.steps.find((s) => s.nodeId === 'L' && s.status === 'failed')?.note ?? '';
+    expect(note).toContain('轮次上限');
+    expect(note).toContain('未命中');
+  });
+
+  it('时间上界：到点就不再开新一轮（轮与轮之间停，说得出来）', async () => {
+    const times = [0, 0, CANVAS_LOOP_TIME_LIMIT_MS + 1];
+    let i = 0;
+    const now = (): number => {
+      const v = times[Math.min(i, times.length - 1)] ?? 0;
+      i += 1;
+      return v;
+    };
+    let n = 0;
+    const execute = async (): Promise<NodeResult> => {
+      n += 1;
+      return { ok: true, output: '继续改，还差点意思', error: '' };
+    };
+    const outcome = await runGraph(graph([loopNode()], []), { maxSteps: 50, execute, now });
+    expect(n).toBe(1);
+    expect(outcome.states['L']).toBe('failed');
+    const note = outcome.steps.find((s) => s.nodeId === 'L' && s.status === 'failed')?.note ?? '';
+    expect(note).toContain('时间上界');
+    expect(note).toContain('未命中');
+  });
+
+  it('某一轮失败照旧即停（那一轮的说明带出来）', async () => {
+    let n = 0;
+    const execute = async (): Promise<NodeResult> => {
+      n += 1;
+      return n === 2
+        ? { ok: false, output: '', error: '额度不够了' }
+        : { ok: true, output: '继续改，还差点意思', error: '' };
+    };
+    const outcome = await runGraph(graph([loopNode()], []), { maxSteps: 50, execute });
+    expect(n).toBe(2);
+    expect(outcome.states['L']).toBe('failed');
+    expect(outcome.steps.at(-1)?.note).toContain('额度不够了');
+  });
+
+  it('轮与轮之间被取消：节点是 cancelled（不是失败，也不把半截当完成）', async () => {
+    const controller = new AbortController();
+    let n = 0;
+    const execute = async (): Promise<NodeResult> => {
+      n += 1;
+      controller.abort();
+      return { ok: true, output: '继续改，还差点意思', error: '' };
+    };
+    const outcome = await runGraph(graph([loopNode()], []), {
+      maxSteps: 50,
+      execute,
+      signal: controller.signal,
+    });
+    expect(n).toBe(1);
+    expect(outcome.reason).toBe('cancelled');
+    expect(outcome.states['L']).toBe('cancelled');
+  });
+
+  it('兜底：空终止词就算绕过保存直接开跑也**一轮都不跑**（显式失败，不默认跑满）', async () => {
+    let n = 0;
+    const execute = async (): Promise<NodeResult> => {
+      n += 1;
+      return { ok: true, output: 'x', error: '' };
+    };
+    const outcome = await runGraph(graph([loopNode({ stopKeyword: '' })], []), { maxSteps: 50, execute });
+    expect(n).toBe(0);
+    expect(outcome.states['L']).toBe('failed');
+    expect(outcome.steps.at(-1)?.note).toContain('兜底');
   });
 });

@@ -150,3 +150,22 @@ describe('B3：条件分支（判定在纯层、执行路径不分裂）', () =>
     expect(runner).not.toContain("emit(id, 'skipped'");
   });
 });
+
+describe('B3b：有界循环的判定与上界都在纯层（执行器零特判）', () => {
+  it('终止词判定在编排层；执行器里没有循环的特判（每一轮都还是那一次 execute）', () => {
+    expect(orchestrator).toContain('includes(stopKeyword)');
+    expect(orchestrator).toContain('CANVAS_LOOP_TIME_LIMIT_MS');
+    expect(runner).not.toContain('loop');
+    expect(runner).not.toContain('maxRounds');
+    expect(runner).not.toContain('stopKeyword');
+  });
+
+  it('"第几轮"要上卡片：运行事件把 note 写进节点数据，卡片有专门的显示位', () => {
+    expect(panel).toContain('note: event.note');
+    expect(panel).toContain('jj-canvas-node-note');
+  });
+
+  it('轮数上界只有一份（卡片提示与校验共用契约层的常量，不各自写数）', () => {
+    expect(panel).toContain('CANVAS_MAX_LOOP_ROUNDS');
+  });
+});

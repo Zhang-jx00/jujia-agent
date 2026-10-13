@@ -10,13 +10,17 @@ import { CANVAS_GRAPH_VERSION, type CanvasEdge, type CanvasGraph, type CanvasNod
  */
 
 export interface CanvasNodeData extends Record<string, unknown> {
-  kind: 'prompt' | 'tool' | 'condition';
-  /** 提示词 / 条件节点的 prompt、工具节点的 toolName */
+  kind: 'prompt' | 'tool' | 'condition' | 'loop';
+  /** 提示词 / 条件 / 循环节点的 prompt、工具节点的 toolName */
   configText: string;
-  /** 工具节点的参数（JSON 文本）；提示词 / 条件节点不用 */
+  /** 工具节点的参数（JSON 文本）；提示词 / 条件 / 循环节点不用 */
   argsText?: string;
-  /** B3：条件节点的判定关键词；其余节点不用 */
+  /** B3：条件节点的判定关键词 / **B3b：循环节点的终止关键词**；其余节点不用 */
   keywordText?: string;
+  /** B3b：循环节点的轮数上限（文本态，保存时转整数 —— 不转成功就是"先修好再跑"那一档） */
+  roundsText?: string;
+  /** B3b：节点卡片上显示的最新一句运行说明（含"第几轮"）—— 从运行事件里来 */
+  note?: string;
   status: string;
   /** B2：本节点在**最近一次局部重跑**的范围里（卡片上打「重跑」标；整图跑/重开图时清掉） */
   rerun?: boolean;
@@ -34,6 +38,10 @@ export function toFlowNode(n: CanvasNode): FlowNode {
       ...(n.kind === 'tool' ? { argsText: String(n.config['argsText'] ?? '{}') } : {}),
       // B3：条件节点的关键词同理 —— 少了它，判定永远判不出（空串在保存前会被拦）
       ...(n.kind === 'condition' ? { keywordText: String(n.config['keyword'] ?? '') } : {}),
+      // B3b：循环节点的终止词与轮数同理（少轮数 = Number(undefined) = NaN，保存前被拦）
+      ...(n.kind === 'loop'
+        ? { keywordText: String(n.config['stopKeyword'] ?? ''), roundsText: String(n.config['maxRounds'] ?? '') }
+        : {}),
       status: 'pending',
     },
   };
@@ -72,7 +80,14 @@ export function toGraph(
           ? { prompt: n.data.configText }
           : n.data.kind === 'tool'
             ? { toolName: n.data.configText, argsText: String(n.data.argsText ?? '{}') }
-            : { prompt: n.data.configText, keyword: String(n.data.keywordText ?? '') },
+            : n.data.kind === 'loop'
+              ? {
+                  prompt: n.data.configText,
+                  stopKeyword: String(n.data.keywordText ?? ''),
+                  // 文本转整数：转不成（空串 / 小数 / 文字）就是 NaN → 校验层拒（"先修好再跑"）
+                  maxRounds: Number(n.data.roundsText),
+                }
+              : { prompt: n.data.configText, keyword: String(n.data.keywordText ?? '') },
     })),
     edges: edges.map((e) => {
       const port = portOf(e.sourceHandle);

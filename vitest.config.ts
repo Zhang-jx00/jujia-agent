@@ -28,6 +28,12 @@ export default defineConfig({
     reporters: ['default'],
 
     /**
+     * 全局 setup（2026-10-13 补）：保证 `.tmp/` 存在 —— 测试的 mkdtemp 不会建父目录，
+     * 而 cleanup 每轮把 `.tmp` 整只收走（当天第二次咬到集体假红，详见该文件注释）。
+     */
+    globalSetup: ['vitest.global-setup.ts'],
+
+    /**
      * 并发上限（2026-09-23 加，轨道回归计划 1 · 优化）。
      *
      * 为什么加：本机 spawn 子进程很慢、且资源紧张时会出现**加载超时**——

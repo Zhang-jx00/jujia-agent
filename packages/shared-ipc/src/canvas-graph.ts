@@ -23,11 +23,22 @@ export const CANVAS_MAX_CONFIG_BYTES = 8 * 1024;
 export const CANVAS_MAX_FILE_BYTES = 2 * 1024 * 1024;
 /** 单次执行的节点数上限（防"图里放了长链"把界面拖住） */
 export const CANVAS_MAX_RUN_STEPS = 50;
+/**
+ * B3b：循环节点的**轮数上界**（每轮 = 一次单轮补全，也就是一次真实计费调用）。
+ * 上界收在常量里而不是让节点随便填：它是"钱包与时长"的硬闸，改它要走门禁。
+ */
+export const CANVAS_MAX_LOOP_ROUNDS = 10;
+/**
+ * B3b：循环节点的**时间上界**（毫秒）。检查发生在**轮与轮之间**（单轮自身有既有的读超时兜底）：
+ * 到点就不再开新一轮 —— 所以语义是"总时长不会明显超过此值 + 单轮读超时"，
+ * 如实写在这里，不假装能掐断进行中的那一轮。
+ */
+export const CANVAS_LOOP_TIME_LIMIT_MS = 180_000;
 
 /** 当前图格式版本（迁移骨架见 `migrateGraph`） */
 export const CANVAS_GRAPH_VERSION = 1;
 
-export const canvasNodeKindSchema = z.enum(['prompt', 'tool', 'condition']);
+export const canvasNodeKindSchema = z.enum(['prompt', 'tool', 'condition', 'loop']);
 
 export const canvasNodeSchema = z
   .object({
@@ -40,6 +51,9 @@ export const canvasNodeSchema = z
      * - `tool`：`{ toolName, argsText }`（argsText 是 JSON 文本，跑之前由工具自己的 parse 校验）
      * - `condition`（B3）：`{ prompt, keyword }`（同样先跑一次单轮补全，再看回答含不含 keyword ——
      *   判定本身在编排层，见 `canvas-run.ts`；keyword 必须非空，"空关键词永远命中"是静默的假分支）
+     * - `loop`（B3b）：`{ prompt, stopKeyword, maxRounds }` —— **循环不是环**：图照旧是 DAG，
+     *   循环体现为这个节点内部的有限轮次（每轮一次单轮补全，命中 stopKeyword 提前停，
+     *   否则跑到 maxRounds 或时间上界为止 —— 到界是失败不是成功，见 `canvas-run.ts`）
      */
     config: z.record(z.string(), z.unknown()),
   })
@@ -199,6 +213,30 @@ export function validateGraph(graph: CanvasGraph): GraphProblem[] {
     // 空关键词的 `includes('')` 永远为真 —— 那不是"永远走真口"的功能，是静默的假分支，必须拒
     if (n.kind === 'condition' && n.config['keyword'] === '') {
       problems.push({ message: `条件节点「${n.id}」的判定关键词不能为空（空关键词永远命中）`, nodeIds: [n.id] });
+    }
+    if (n.kind === 'loop' && typeof n.config['prompt'] !== 'string') {
+      problems.push({ message: `循环节点「${n.id}」缺少 prompt`, nodeIds: [n.id] });
+    }
+    if (n.kind === 'loop' && typeof n.config['stopKeyword'] !== 'string') {
+      problems.push({ message: `循环节点「${n.id}」缺少终止关键词 stopKeyword`, nodeIds: [n.id] });
+    }
+    // 同条件节点：空终止词的 includes('') 每轮都真 —— 循环第一轮就"命中"是静默假行为
+    if (n.kind === 'loop' && n.config['stopKeyword'] === '') {
+      problems.push({ message: `循环节点「${n.id}」的终止关键词不能为空（空词每轮都"命中"）`, nodeIds: [n.id] });
+    }
+    if (n.kind === 'loop') {
+      const rounds = n.config['maxRounds'];
+      if (
+        typeof rounds !== 'number' ||
+        !Number.isInteger(rounds) ||
+        rounds < 1 ||
+        rounds > CANVAS_MAX_LOOP_ROUNDS
+      ) {
+        problems.push({
+          message: `循环节点「${n.id}」的轮数要是 1..${String(CANVAS_MAX_LOOP_ROUNDS)} 的整数（现在是 ${JSON.stringify(rounds ?? null)}）`,
+          nodeIds: [n.id],
+        });
+      }
     }
     const forbidden = findForbiddenKeys(n.config);
     if (forbidden.length > 0) {
