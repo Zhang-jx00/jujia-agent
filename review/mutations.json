@@ -1659,10 +1659,10 @@
     },
     {
       "id": "M208",
-      "desc": "箭头回到\"换一个字符\"表示状态（两次布局 + 一次跳动，正是要消灭的形状）",
+      "desc": "箭头回到\"换一个字符\"表示状态（两次布局 + 一次跳动，正是要消灭的形状）—— R19 把字符换成内联图标之后，这条变异改成\"把图标换回两个字符\"（意图一字未改）",
       "file": "apps/desktop/src/renderer/src/features/chat/ToolCard.tsx",
-      "find": "          ⌄\n        </span>",
-      "replace": "          {level === 'L0' ? '›' : '⌄'}\n        </span>",
+      "find": "          <IconChevronDown />",
+      "replace": "          {level === 'L0' ? '›' : '⌄'}",
       "test": "apps/desktop/src/renderer/src/features/chat/tool-card.test.tsx"
     },
     {
