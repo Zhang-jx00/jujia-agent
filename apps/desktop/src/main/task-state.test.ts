@@ -107,6 +107,21 @@ describe('结局与判定', () => {
     expect(again.record.updatedAt).toBe(rec.updatedAt);
   });
 
+  it('会话还活着（进程内有一轮正在跑）时不许判：running 保持 running —— 定时轮次不该被读成"被打断"', () => {
+    const rec = stepStarted(fresh(), 'run_command', T1);
+    const { record, changed } = interruptIfRunning(rec, T2, true);
+    expect(changed).toBe(false);
+    expect(record.status).toBe('running');
+    expect(record.interruptedAt).toBeNull();
+  });
+
+  it('"活着"只对 running 有影响：已 interrupted 的仍幂等不动（复活不回去）', () => {
+    const interrupted = interruptIfRunning(fresh(), T1).record;
+    const again = interruptIfRunning(interrupted, T2, true);
+    expect(again.changed).toBe(false);
+    expect(again.record.status).toBe('interrupted');
+  });
+
   it('已结束的任务不会被读时判定碰（done 就是 done）', () => {
     const done = finishTask(fresh(), 'done', T1);
     expect(interruptIfRunning(done, T2)).toEqual({ record: done, changed: false });

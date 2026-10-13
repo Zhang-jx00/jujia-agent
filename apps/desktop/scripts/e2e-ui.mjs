@@ -3579,14 +3579,16 @@ try {
   if ((await win4.locator('.w2-bubble-user', { hasText: '继续上一条被中断的任务' }).count()) === 0) {
     fail('界面上没有那条可见的续跑用户消息（文案应与契约常量同源）');
   }
-  let cardGone = false;
-  for (let i = 0; i < 40 && !cardGone; i += 1) {
-    cardGone = (await win4.locator('[data-task-card]').count()) === 0;
-    if (!cardGone) await win4.waitForTimeout(150);
+  /**
+   * 盘上真值③：**轮询取真值** —— 文本先到、收口写入在 done 事件之前，断言不能抢跑
+   * （首跑就是在这一步读到 running 而红的：updatedAt 停在最后一步 tool_end 的时刻；
+   * 卡片在点「续跑」时就已被清掉，所以"等卡片消失"是空转，判据必须落在记录本身）。
+   */
+  let finishedTask = JSON.parse(readFileSync(taskJsonlFile, 'utf8')).data;
+  for (let i = 0; i < 80 && finishedTask.status !== 'done'; i += 1) {
+    await win4.waitForTimeout(150);
+    finishedTask = JSON.parse(readFileSync(taskJsonlFile, 'utf8')).data;
   }
-  if (!cardGone) fail('续跑完成之后卡片还挂着（状态没被收口）', (await body4()).slice(-600));
-  // 盘上真值③：记录收口 done、resumeCount=1、步数已计
-  const finishedTask = JSON.parse(readFileSync(taskJsonlFile, 'utf8')).data;
   if (finishedTask.status !== 'done') {
     fail(`续跑完成后记录应当 done，实际 ${String(finishedTask.status)}`, JSON.stringify(finishedTask).slice(0, 300));
   }
@@ -3596,7 +3598,12 @@ try {
   if (finishedTask.stepsDone < 1) {
     fail('续跑完成的 run_command 没有计步', JSON.stringify(finishedTask).slice(0, 300));
   }
-  ok('续跑：审批门重新问过（弹窗再次出现）→ 跑完 → 记录 done/resumeCount=1/stepsDone≥1，卡片自动退场');
+  // 收口之后主进程也不再把这条当"被打断"（卡片不会回来）
+  const afterView = await win4.evaluate(async (sid) => await window.jujia.chatTaskGet(sid), taskSid);
+  if (afterView !== null && afterView.status === 'interrupted') {
+    fail('续跑完成后这条记录仍被当成"被打断"（状态没收口）', JSON.stringify(afterView).slice(0, 300));
+  }
+  ok('续跑：审批门重新问过（弹窗再次出现）→ 跑完 → 记录 done/resumeCount=1/stepsDone≥1，卡片不会回来');
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();

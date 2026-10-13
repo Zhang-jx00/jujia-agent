@@ -70,6 +70,12 @@ describe('任务记录先于模型调用落盘', () => {
     expect(taskStoreSrc).not.toContain('interruptIfRunning');
     expect(taskStateSrc.match(/interruptIfRunning/g)).toHaveLength(1); // 只有定义本身
   });
+
+  it('读时判定先问"这一轮还活着吗"：活着的轮次不许被读成"被打断"（定时轮次也适用）', () => {
+    expect([...cs.matchAll(/interruptIfRunning\(rec, new Date\(\), sessionTurnAlive\(sessionId\)\)/g)]).toHaveLength(3);
+    expect(cs).toContain('function sessionTurnAlive(sessionId: string): boolean {');
+    expect(cs).toContain('return sessions.get(sessionId)?.running === true;');
+  });
 });
 
 describe('存储纪律与权限边界', () => {

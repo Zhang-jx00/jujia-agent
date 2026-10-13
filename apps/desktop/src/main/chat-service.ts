@@ -740,11 +740,13 @@ export function stopMessage(sessionId: string): boolean {
 /**
  * 读某会话的任务记录（供界面卡片）。**读时判定**：还是 `running` 的 = 上次进程被崩溃/强退带走，
  * 这里就地标 `interrupted` 并写回；读不出来（无记录/坏文件）= null。
+ * **先问"这一轮还活着吗"**：进程内有正在跑的轮次（如定时任务到点）时不判 ——
+ * 活着的轮次不是"被打断"（第二遍复核抓到的形态，见 `interruptIfRunning` 的 `sessionAlive`）。
  */
 export async function taskStatusFor(sessionId: string): Promise<ChatTaskView | null> {
   const rec = await taskStore().read(sessionId).catch(() => null);
   if (rec === null) return null;
-  const { record, changed } = interruptIfRunning(rec, new Date());
+  const { record, changed } = interruptIfRunning(rec, new Date(), sessionTurnAlive(sessionId));
   if (changed) await persistTask(sessionId, record);
   return {
     sessionId,
@@ -758,6 +760,11 @@ export async function taskStatusFor(sessionId: string): Promise<ChatTaskView | n
   };
 }
 
+/** 进程内这个会话是否有正在跑的一轮（读时判定与续跑校验的前置：活着的轮次不许被判、不许被续） */
+function sessionTurnAlive(sessionId: string): boolean {
+  return sessions.get(sessionId)?.running === true;
+}
+
 /**
  * 点「续跑」前的**前置校验**（在 IPC 层调用 —— 失败以 IPC 结果返回，界面才显示得出原因，
  * 而不是把错误掉进聊天流的 catch 里）。传了 taskId：记录被换掉（刚发过新消息）也算失败。
@@ -768,7 +775,7 @@ export async function resumeReadiness(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const rec = await taskStore().read(sessionId).catch(() => null);
   if (rec === null) return { ok: false, error: '这个会话没有任务记录' };
-  const marked = interruptIfRunning(rec, new Date());
+  const marked = interruptIfRunning(rec, new Date(), sessionTurnAlive(sessionId));
   if (marked.changed) await persistTask(sessionId, marked.record);
   if (marked.record.taskId !== taskId) {
     return { ok: false, error: '任务记录已经变了（可能刚发过新消息）—— 请从卡片重新操作' };
@@ -790,7 +797,11 @@ export async function connectionForSession(sessionId: string): Promise<string | 
 export async function taskDismiss(sessionId: string): Promise<{ ok: boolean; error?: string }> {
   const rec = await taskStore().read(sessionId).catch(() => null);
   if (rec === null) return { ok: false, error: '这个会话没有任务记录' };
-  const marked = interruptIfRunning(rec, new Date()).record;
+  const marked = interruptIfRunning(rec, new Date(), sessionTurnAlive(sessionId)).record;
+  // 只有"被打断"的记录可以被关掉：还在跑的（sessionAlive）、已收口的都不该被这一下改状态
+  if (marked.status !== 'interrupted') {
+    return { ok: false, error: '这条任务当前不在「被打断」状态，不需要关掉' };
+  }
   await persistTask(sessionId, markDismissed(marked, new Date()));
   return { ok: true };
 }

@@ -102,11 +102,18 @@ export function finishTask(
  * 读时判定：唯一能把 `running` 翻成 `interrupted` 的地方。
  * 幂等是硬要求：这个函数会被"每次打开会话"调用，重写一次就要多一次磁盘写、
  * 还会把 `updatedAt` 变成"最后一次打开的时间"（那就不再是任务的真实时间线）。
+ *
+ * **`sessionAlive` 是"这一轮还活着吗"的开关**（进程内该会话有正在跑的轮次）：活着 = 没被打断，
+ * 一律不判 —— 否则定时任务正跑着、用户点开这个会话，卡片会把**活的一轮**误报成"被打断"
+ * （第二遍复核抓到的形态；调用方传 `sessions.get(id)?.running`）。
  */
 export function interruptIfRunning(
   rec: TaskRecord,
   now: Date,
+  /** 这个会话此刻是否活着（进程内有一轮正在跑）。默认 false = 进程刚起来、没有活轮次 */
+  sessionAlive = false,
 ): { record: TaskRecord; changed: boolean } {
+  if (sessionAlive) return { record: rec, changed: false };
   if (rec.status !== 'running') return { record: rec, changed: false };
   return {
     record: { ...rec, status: 'interrupted', interruptedAt: iso(now), updatedAt: iso(now) },
