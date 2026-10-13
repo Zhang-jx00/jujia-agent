@@ -1011,10 +1011,10 @@
     },
     {
       "id": "M127",
-      "desc": "CHAT_SEND 的文本上限被摘掉（T30 的原样）：一次超长粘贴原样过 IPC、原样送去 provider",
+      "desc": "CHAT_SEND 的文本上限被摘掉（T30 的原样）：一次超长粘贴原样过 IPC、原样送去 provider（锚点随 R14 契约改造跟改：min(1) 并入 refine 后原行不存在；意图与判据一字未改）",
       "file": "packages/shared-ipc/src/contracts.ts",
-      "find": "  text: z.string().min(1, '消息不能为空').max(200_000, '消息过长（上限 20 万字符；更长的内容请放进文件，用文件工具读）'),",
-      "replace": "  text: z.string().min(1, '消息不能为空'),",
+      "find": "    text: z.string().max(200_000, '消息过长（上限 20 万字符；更长的内容请放进文件，用文件工具读）'),",
+      "replace": "    text: z.string(),",
       "test": "packages/shared-ipc/src/chat-send.test.ts"
     },
     {
@@ -1099,10 +1099,10 @@
     },
     {
       "id": "M138",
-      "desc": "历史气泡的 key 丢掉页偏移（回到页内下标）：前插的第二页与第一页撞同一批 key，React 复用错节点（T34）",
+      "desc": "历史气泡的 key 丢掉页偏移（回到页内下标）：前插的第二页与第一页撞同一批 key，React 复用错节点（T34）（锚点随 R14 气泡改造跟改：单行 push 展开为多行；意图与判据一字未改）",
       "file": "apps/desktop/src/renderer/src/features/chat/history-bubbles.ts",
-      "find": "    out.push({ id: `h-${String(offset + i)}-${m.role}`, role: m.role, content: m.content });",
-      "replace": "    out.push({ id: `h-${String(i)}-${m.role}`, role: m.role, content: m.content });",
+      "find": "    out.push({\n      id: `h-${String(offset + i)}-${m.role}`,\n      role: m.role,\n      content: m.content,\n      ...(m.imageCount !== undefined && m.imageCount > 0 ? { imageCount: m.imageCount } : {}),\n    });",
+      "replace": "    out.push({\n      id: `h-${String(i)}-${m.role}`,\n      role: m.role,\n      content: m.content,\n      ...(m.imageCount !== undefined && m.imageCount > 0 ? { imageCount: m.imageCount } : {}),\n    });",
       "test": "apps/desktop/src/renderer/src/features/chat/history-bubbles.test.ts"
     },
     {
