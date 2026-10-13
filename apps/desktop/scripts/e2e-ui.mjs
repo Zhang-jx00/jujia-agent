@@ -3119,6 +3119,60 @@ try {
     }）—— 此前规则指向一个不存在的类名，静默失效；现在由属性门控锁 + 本步一起看着`,
   );
 
+  step('运行日志：概览页看得见今天的记录，磁盘上真有那一本（数据没出隔离目录）');
+  await win3.locator('nav.app-tabs button', { hasText: '概览' }).first().click();
+  const logCard = win3.locator('[data-logs-card]');
+  await logCard.waitFor({ state: 'visible', timeout: 8_000 });
+  let logCardText = '';
+  for (let i = 0; i < 30; i += 1) {
+    logCardText = await logCard.innerText();
+    if (logCardText.includes('.jsonl') && logCardText.includes('启动')) break;
+    await win3.waitForTimeout(100);
+  }
+  if (!logCardText.includes('.jsonl')) {
+    fail('日志卡没给出文件路径（"去哪儿看"是第一件事）', logCardText.slice(0, 300));
+  }
+  if (!logCardText.includes('启动')) {
+    fail('日志卡上没看见启动记录（启动那条没落盘？）', logCardText.slice(0, 300));
+  }
+  // 磁盘真值：隔离数据目录的 logs/ 底下真有今天的账，首条启动记录形状完整
+  const logsDir = join(dataDir, 'logs');
+  const logNames = existsSync(logsDir)
+    ? readdirSync(logsDir).filter((n) => n.startsWith('app-') && n.endsWith('.jsonl'))
+    : [];
+  if (logNames.length === 0) fail(`隔离数据目录里没有日志文件：${logsDir}`);
+  if (!logCardText.includes(logNames[0])) {
+    fail('日志卡显示的文件名与磁盘上的对不上', `${String(logNames[0])}\n${logCardText.slice(0, 300)}`);
+  }
+  const logsDirShown = join(dataDir, 'logs');
+  if (
+    !logCardText.includes(logsDirShown) &&
+    !logCardText.includes(logsDirShown.replace(/\\/g, '/'))
+  ) {
+    fail('日志卡上的路径不指向隔离数据目录 —— 日志可能写去了真实用户目录', logCardText.slice(0, 300));
+  }
+  const logFile = join(logsDir, logNames[0]);
+  const logLines = readFileSync(logFile, 'utf8').split('\n').filter((l) => l.trim() !== '');
+  let bootRecord = null;
+  for (const line of logLines) {
+    try {
+      const r = JSON.parse(line);
+      if (r !== null && typeof r === 'object' && r.scope === 'app' && typeof r.msg === 'string' && r.msg === '启动') {
+        bootRecord = r;
+        break;
+      }
+    } catch {
+      // 坏行由单测面兜；这里只要找到启动那一条
+    }
+  }
+  if (bootRecord === null) fail(`磁盘上的日志里没有启动记录：${logFile}`);
+  if (typeof bootRecord.ts !== 'string' || typeof bootRecord.level !== 'string' || bootRecord.level !== 'info') {
+    fail('启动记录的形状不对（ts/level/info 缺一）', JSON.stringify(bootRecord).slice(0, 200));
+  }
+  ok(
+    `日志真在隔离目录里落盘了（${String(logNames[0])}：启动记录 level=info、带数据根与配置来源四条），界面上看到的是同一份`,
+  );
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -3138,5 +3192,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 主题包背景类型真的落在画面上（渐变 / 毛玻璃）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 主题包背景类型真的落在画面上（渐变 / 毛玻璃）→ 运行日志真在隔离目录里落盘（概览页看得见同一份）→ 干净退出');
 process.exit(0);

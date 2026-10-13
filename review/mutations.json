@@ -1728,6 +1728,62 @@
       "find": "html[data-jj-bg-kind='gradient'] .app-root {",
       "replace": "html[data-jj-bg-kind='gradient'] .app-shell {",
       "test": "apps/desktop/src/renderer/src/styles-wiring.test.ts"
+    },
+    {
+      "id": "M217",
+      "desc": "键名像密钥的字段不再剔（data 里的 token/apikey 原样落盘）—— 剔密被摘一半",
+      "file": "packages/agent-core/src/log/log-record.ts",
+      "find": "      out[key] = isSensitiveEnvName(key) ? '***' : sanitizeValue(v, depth + 1, seen);",
+      "replace": "      out[key] = sanitizeValue(v, depth + 1, seen);",
+      "test": "packages/agent-core/src/log/log-record.test.ts"
+    },
+    {
+      "id": "M218",
+      "desc": "正文不过 maskSecrets（Bearer 令牌随 msg 原样落盘）—— 剔密被摘另一半",
+      "file": "packages/agent-core/src/log/log-record.ts",
+      "find": "    msg: capText(maskSecrets(input.msg).text, MSG_MAX),",
+      "replace": "    msg: capText(input.msg, MSG_MAX),",
+      "test": "packages/agent-core/src/log/log-record.test.ts"
+    },
+    {
+      "id": "M219",
+      "desc": "级别门槛失效：debug 也写（分级拦在落盘之前这条不成立）",
+      "file": "apps/desktop/src/main/logger.ts",
+      "find": "    if (!shouldLog(level, min)) return;",
+      "replace": "    if (level === '__never__') return;",
+      "test": "apps/desktop/src/main/logger.test.ts"
+    },
+    {
+      "id": "M220",
+      "desc": "轮转不再删旧文件（保留 7 天失效，只留不删）",
+      "file": "apps/desktop/src/main/log-store.ts",
+      "find": "        if (allowed.has(key)) continue;",
+      "replace": "        if (key !== '') continue;",
+      "test": "apps/desktop/src/main/log-store.test.ts"
+    },
+    {
+      "id": "M221",
+      "desc": "当日上限失效（写满不停：计数与\"未记\"那句话都成了摆设）",
+      "file": "apps/desktop/src/main/log-store.ts",
+      "find": "      if (existing >= maxLines) {",
+      "replace": "      if (existing >= Number.MAX_SAFE_INTEGER) {",
+      "test": "apps/desktop/src/main/log-store.test.ts"
+    },
+    {
+      "id": "M222",
+      "desc": "preload 不再过契约（读尾部的结果裸着进渲染层）—— \"跨进程一律过 zod\"的边界被破",
+      "file": "apps/desktop/src/preload/index.ts",
+      "find": "    return logPageViewSchema.parse(\n      await ipcRenderer.invoke(IPC.LOGS_TAIL, minLevel === undefined ? { limit } : { limit, minLevel }),\n    );",
+      "replace": "    return (await ipcRenderer.invoke(IPC.LOGS_TAIL, minLevel === undefined ? { limit } : { limit, minLevel })) as LogPageView;",
+      "test": "apps/desktop/src/main/log-wiring.test.ts"
+    },
+    {
+      "id": "M223",
+      "desc": "启动失败改成\"发射后不管\"：app.exit 不等异步写 —— 那条最该被看到的记录又到不了盘",
+      "file": "apps/desktop/src/main/index.ts",
+      "find": "      await logs.append(createLogRecord({ level: 'error', scope: 'app', msg: `启动失败：${message}` }, () => new Date()));",
+      "replace": "      void logs.append(createLogRecord({ level: 'error', scope: 'app', msg: `启动失败：${message}` }, () => new Date()));",
+      "test": "apps/desktop/src/main/log-wiring.test.ts"
     }
   ]
 }

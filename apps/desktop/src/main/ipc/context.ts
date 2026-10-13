@@ -1,4 +1,5 @@
 import { app } from 'electron';
+import { join } from 'node:path';
 import { IPC, type PermissionMode, type StreamEvent } from '@jujia/shared-ipc';
 import {
   createDefaultRegistry,
@@ -16,6 +17,8 @@ import {
   type PermissionRulesStore,
 } from '../permission-rules-store';
 import { createAuditService, type AuditService, type PolicyHealth } from '../audit-service';
+import { createLogStore, type LogStore } from '../log-store';
+import { getDataRoot } from '../paths';
 import { getWorkspaceInfo } from '../workspace';
 import { createPluginsService, type PluginsService } from '../plugins';
 import { createSkillsService, userSkillsDir, workspaceSkillsDir, type SkillsService } from '../skills';
@@ -37,6 +40,12 @@ export interface IpcDeps {
   registry?: ToolRegistry;
   /** 测试用：覆盖 fetch */
   fetcher?: typeof fetch;
+  /**
+   * 结构化日志的落盘（M12 批一 · R10）。**由 `main/index.ts` 建、经这里传下来** ——
+   * 启动线（index.ts）与界面读尾部（ipc/logs.ts）必须落在同一本文件、
+   * 共享同一份"本次运行的丢计与写失败"，各建各的实例会各写各的账。
+   */
+  logs?: LogStore;
 }
 
 /** 每次现读的权限上下文（缓存会让用户以为删掉的规则还在拦截） */
@@ -72,6 +81,7 @@ export interface IpcContext {
   hookRunner: HookRunner;
   permissionRules: PermissionRulesStore;
   audit: AuditService;
+  logs: LogStore;
   loadPolicy: () => Promise<IpcPolicy>;
   fetchImpl: typeof fetch;
   /** 起一轮对话的唯一入口（M7 · R9）。用户敲字与定时到点共用它，见 `ipc/turn-trigger.ts` */
@@ -149,6 +159,15 @@ export function createIpcContext(deps: IpcDeps): IpcContext {
     workspaceRoot: () => lastWorkspaceRoot,
   });
 
+  /**
+   * 结构化日志（M12 批一 · R10）。与审计同理放在上下文里：
+   * 启动线（index.ts）、渲染层上报、界面读尾部必须落在**同一本文件**，
+   * 也共享同一份"本次运行的丢计与写失败"计数 —— 各建各的实例会各写各的账。
+   * `index.ts` 正常路径会显式传入它建好的那份；这里兜底只为测试。
+   */
+  const logs: LogStore =
+    deps.logs ?? createLogStore({ dir: join(getDataRoot(), 'logs'), clock: () => new Date() });
+
   /** 每次现读的权限上下文（缓存会让用户以为删掉的规则还在拦截） */
   const loadPolicy = async (): Promise<IpcPolicy> => {
     const snapshot = await readConfigSnapshot();
@@ -200,6 +219,7 @@ export function createIpcContext(deps: IpcDeps): IpcContext {
     hookRunner,
     permissionRules,
     audit,
+    logs,
     fetchImpl,
     startTurn,
     loadPolicy,

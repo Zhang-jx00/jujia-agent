@@ -5,6 +5,9 @@ import {
   appInfoSchema,
   auditExportResultSchema,
   auditPageSchema,
+  logPageViewSchema,
+  logReportResultSchema,
+  logRevealResultSchema,
   chatSendResultSchema,
   compactApplySchema,
   compactApplyResultSchema,
@@ -61,6 +64,11 @@ import {
   type ConfigSnapshot,
   type ConnectionInput,
   type ConnectionView,
+  type LogLevelView,
+  type LogPageView,
+  type LogReportInput,
+  type LogReportResult,
+  type LogRevealResult,
   type McpApprovalChoice,
   type McpApprovalPlan,
   type McpApproveResult,
@@ -427,6 +435,20 @@ const api = {
 
   async auditExport(): Promise<AuditExportResult> {
     return auditExportResultSchema.parse(await ipcRenderer.invoke(IPC.AUDIT_EXPORT));
+  },
+
+  async logsTail(limit: number, minLevel?: LogLevelView): Promise<LogPageView> {
+    return logPageViewSchema.parse(
+      await ipcRenderer.invoke(IPC.LOGS_TAIL, minLevel === undefined ? { limit } : { limit, minLevel }),
+    );
+  },
+
+  async logsReveal(): Promise<LogRevealResult> {
+    return logRevealResultSchema.parse(await ipcRenderer.invoke(IPC.LOGS_REVEAL));
+  },
+
+  async logsReport(input: LogReportInput): Promise<LogReportResult> {
+    return logReportResultSchema.parse(await ipcRenderer.invoke(IPC.LOGS_REPORT, input));
   },
 
   async permissionRulesList(): Promise<PermissionRuleView[]> {

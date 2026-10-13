@@ -1237,7 +1237,6 @@ export const scheduleEventSchema = z
   .strict();
 export type ScheduleEventPayload = z.infer<typeof scheduleEventSchema>;
 
-
 /* ------------------------------------------------------------------ *
  * M19：轻量 IDE 的 PDF 打开（只读）
  *

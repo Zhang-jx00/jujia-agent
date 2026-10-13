@@ -147,6 +147,10 @@
 | 铺设7 | `apps/desktop/src/renderer/src/features/schedule/` | 定时任务页（M7）：清单只搬运主进程算好的"下一次"，规则子集与"定时≠免审批"写在屏幕上 |
 | 优化6 | `apps/desktop/src/renderer/src/ui/`（`icons.tsx`） | 内联图标集（R19）：Lucide · ISC · 零运行时依赖；`aria-hidden` 的 `svg[data-icon]` + `stroke=currentColor` 统一契约 |
 | 铺设10 | `packages/agent-core/src/tools/builtin/note-tool.ts` | 记忆写入 `append_note` 工具本体（与 `main/pending-notes.ts` 同批） |
+| 铺设14 | `packages/agent-core/src/log/`（`log-record.ts`） | 结构化日志的**纯规则层**（M12 批一）：分级判定 · **构造即剔密**（判据共用终端/审计那两张表）· 行格式与解析（深度/数组/长度的收敛全部写明原因） |
+| 铺设14 | `apps/desktop/src/main/{log-store,logger}.ts` · `apps/desktop/src/main/ipc/logs.ts` | 日志的**落盘与读出**（M12 批一）：按天 JSONL + 当日上限 + 轮转保留（删了谁说谁）· 启动/崩溃/失败三类写入（失败那条等写完再退）· IPC 三条（读尾部 / 定位文件 / 受限上报） |
+| 铺设14 | `packages/shared-ipc/src/contracts-log.ts` | 日志的 IPC 契约（6 个 schema；自 `contracts.ts` 拆出 —— 那份贴着 lint 行数上限，日志这一族形状自洽） |
+| 铺设14 | `apps/desktop/src/renderer/src/features/logs/`（`LogCard.tsx`） | 概览页"运行日志"卡（M12 批一）：文件路径 / 今日条数 / 异常话 / 级别过滤 / 在文件夹中显示 · **"不出本机"写在卡上** |
 
 ## 三、记录规则（今后一律遵守）
 

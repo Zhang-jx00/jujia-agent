@@ -1,9 +1,12 @@
 import { join } from 'node:path';
 import { app, BrowserWindow, ipcMain } from 'electron';
+import { createLogRecord } from '@jujia/agent-core';
 import { IPC, type StreamEvent } from '@jujia/shared-ipc';
 import { registerIpcHandlers } from './ipc';
 import { ensureConfigFile } from './config-store';
 import { getDataRoot } from './paths';
+import { createLogStore } from './log-store';
+import { createLogger, resolveDefaultMinLevel } from './logger';
 import {
   applySecurityBaseline,
   assertSecureWebPreferences,
@@ -22,6 +25,17 @@ const permissionBridge = new PermissionBridge({
 
 // 固定应用名：让 userData 路径可预期（%APPDATA%\JujiaAgent），避免随包名变化漂移
 app.setName('JujiaAgent');
+
+/**
+ * 结构化日志（M12 批一 · R10）。
+ *
+ * 这一本文件的读者是"出了事之后的自己"：启动线（数据根 / 配置来源 / 恢复）、
+ * 渲染进程崩溃、启动失败、渲染层兜底上报全部落这里。
+ * **构造即剔密**（`createLogRecord` 是唯一入口），**写坏不抛穿**（失败在 status 里数得出），
+ * **不出本机**（只有文件这一条路，没有任何网络路径）。
+ */
+const logs = createLogStore({ dir: join(getDataRoot(), 'logs'), clock: () => new Date() });
+const logger = createLogger(logs, { minLevel: resolveDefaultMinLevel(process.env) });
 
 const isSmoke = process.argv.includes('--smoke');
 /** 启动性能实测模式（M18）：打印启动时间线后退出，用于建立可回归的性能预算 */
@@ -88,6 +102,8 @@ function createMainWindow(): BrowserWindow {
 
   win.webContents.on('render-process-gone', (_e, details) => {
     console.error('[main] 渲染进程异常退出:', details.reason);
+    // 落一本日志：这条以前只进控制台（打包之后谁都看不见），而"界面崩了"正是最需要事后查的事
+    logger.error('app', '渲染进程异常退出', { reason: details.reason });
     /**
      * T38：崩溃也要收尾挂起的审批。
      *
@@ -217,6 +233,16 @@ if (!app.requestSingleInstanceLock()) {
         emitStream,
         permission: permissionBridge,
         getWindow: () => mainWindow,
+        logs,
+      });
+
+      // 启动时轮转：清掉保留期之外的旧日志；**删了谁要说出来**（轮转不静默）
+      void logs.prune(7).then(({ removed }) => {
+        if (removed.length > 0) {
+          logger.info('app', `日志轮转：删除 ${String(removed.length)} 个过期文件`, {
+            removed: removed.join(', '),
+          });
+        }
       });
 
       // 首次启动落盘默认配置（原子写），使「写 → 备份 → 损坏恢复」链路在运行时真实可达
@@ -227,6 +253,13 @@ if (!app.requestSingleInstanceLock()) {
             ? ` · ⚠ 本次启动已从${snapshot.recoveredFrom === 'backup' ? '备份 .bak' : '默认值'}恢复（${snapshot.recoveredAt ?? '未知时间'}）`
             : ''),
       );
+      // 启动这条记录把"这次用的是哪份数据、配置从哪儿来、有没有自愈过"钉在日志里
+      logger.info('app', '启动', {
+        dataRoot: getDataRoot(),
+        configVersion: snapshot.version,
+        source: snapshot.source,
+        recovered: snapshot.recovered,
+      });
 
       const win = createMainWindow();
 
@@ -269,9 +302,13 @@ if (!app.requestSingleInstanceLock()) {
           });
       });
     })
-    .catch((err: unknown) => {
-      // 启动阶段任何异常都必须可见并 fail fast，绝不留下无窗口的僵尸进程
-      console.error('[main] 启动失败:', err instanceof Error ? err.message : err);
+    .catch(async (err: unknown) => {
+      // 启动阶段任何异常都必须可见并 fail fast，绝不留下无窗口的僵尸进程。
+      // 日志这条**等写完再退出**：`app.exit` 不等异步写 —— 若发射后不管，
+      // 这条最该被看到的记录恰恰永远到不了盘上（与 will-quit 那次同形的坑）。
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[main] 启动失败:', message);
+      await logs.append(createLogRecord({ level: 'error', scope: 'app', msg: `启动失败：${message}` }, () => new Date()));
       if (smokeWatchdog) clearTimeout(smokeWatchdog);
       app.exit(1);
     });

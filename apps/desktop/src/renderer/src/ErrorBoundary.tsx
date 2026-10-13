@@ -39,6 +39,21 @@ export class ErrorBoundary extends Component<Props, State> {
   override componentDidCatch(err: Error, info: ErrorInfo): void {
     // 界面上是给人看的截断版，控制台留全量：少了这一份，线上问题就只能靠猜
     console.error(`[ui]「${this.props.area}」渲染失败：`, err, info.componentStack);
+    /**
+     * 再上报一条到主进程日志（M12 批一 · R10）：打包之后**控制台没人看得见**，
+     * 而"界面崩过"正是最需要事后查的事。级别与形状由主进程侧的契约钉死（只收错误）。
+     * 这一跳是**附加动作**：窗口里没有 `jujia`（比如组件测试）或上报失败时，
+     * 不许让"兜底"自己变成第二个故障 —— 吞掉自己的异常是这里唯一正确的选择。
+     */
+    try {
+      void window.jujia?.logsReport({
+        scope: this.props.area,
+        msg: err.message !== '' ? err.message : '渲染失败（无消息）',
+        detail: (info.componentStack ?? '').slice(0, 4000),
+      });
+    } catch {
+      /* 上报失败不改变界面兜底 */
+    }
     this.props.onError?.();
   }
 

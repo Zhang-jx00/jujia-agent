@@ -1878,3 +1878,63 @@ html[data-jj-bg-kind='glass'] .app-root {
 .jj-palette-empty {
   margin: 10px 2px 4px;
 }
+
+/* ---- 运行日志卡（M12 批一 · R10）---- */
+.jj-log-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.jj-log-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.jj-log {
+  display: grid;
+  grid-template-columns: auto auto minmax(72px, max-content) 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 2px;
+  border-bottom: 1px dashed var(--c-border);
+  font-size: var(--fs-small);
+}
+
+.jj-log-ts {
+  color: var(--c-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.jj-log-level {
+  color: var(--c-text-secondary);
+}
+
+.jj-log-debug .jj-log-level {
+  opacity: 0.7;
+}
+
+.jj-log-info .jj-log-level {
+  color: var(--c-text);
+}
+
+.jj-log-warn .jj-log-level {
+  color: var(--c-warning);
+}
+
+.jj-log-error .jj-log-level {
+  color: var(--c-danger);
+}
+
+.jj-log-scope {
+  color: var(--c-primary);
+}
+
+.jj-log-msg {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
