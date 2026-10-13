@@ -107,7 +107,7 @@ export interface AlignLine {
   to: number;
 }
 
-export interface AlignPlan {
+interface AlignPlan {
   /** 吸附后的落点（先网格、后对齐的最终值） */
   x: number;
   y: number;

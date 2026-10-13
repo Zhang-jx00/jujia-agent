@@ -3069,6 +3069,56 @@ try {
   }
   ok('展开用真实高度的轨道过渡（transition-property 含 grid-template-rows）；箭头同元素转 180°（矩阵为负单位阵）；收起态内容 inert');
 
+  step('主题包的背景类型真的落在画面上：选「柔和渐变」根容器上出现渐变、选「毛玻璃」出现模糊（R20 修的静默失效）');
+  await win3.locator('nav.app-tabs button', { hasText: '外观' }).first().click();
+  if ((await waitText3('样式包', 8_000)) !== true) fail('外观页没有样式包区块', await body3());
+  await win3.locator('button', { hasText: '柔和渐变' }).first().click();
+  let gradient = { kind: null, image: 'none' };
+  for (let i = 0; i < 20; i += 1) {
+    gradient = await win3.evaluate(() => ({
+      kind: document.documentElement.getAttribute('data-jj-bg-kind'),
+      image: getComputedStyle(document.querySelector('.app-root')).backgroundImage,
+    }));
+    if (String(gradient.image).includes('linear-gradient')) break;
+    await win3.waitForTimeout(100);
+  }
+  if (!String(gradient.image).includes('linear-gradient')) {
+    fail(
+      `选了「柔和渐变」，根容器上却没有渐变（kind=${String(gradient.kind)}，image=${String(gradient.image).slice(0, 80)}）—— 又是"选了不生效"`,
+    );
+  }
+  await win3.locator('button', { hasText: '毛玻璃' }).first().click();
+  let backdrop = { blur: 'none', kind: null, varBlur: null, reduced: false, background: 'none' };
+  for (let i = 0; i < 20; i += 1) {
+    backdrop = await win3.evaluate(() => {
+      const el = document.querySelector('.app-root');
+      const cs = getComputedStyle(el);
+      return {
+        blur: cs.backdropFilter || cs.webkitBackdropFilter || 'none',
+        kind: document.documentElement.getAttribute('data-jj-bg-kind'),
+        varBlur: document.documentElement.style.getPropertyValue('--jj-bg-blur') || null,
+        // 系统关了"透明效果"时，我们自己的降级规则（prefers-reduced-transparency）会把毛玻璃换成不透明底
+        reduced: window.matchMedia('(prefers-reduced-transparency: reduce)').matches,
+        background: cs.backgroundColor,
+      };
+    });
+    // 正常档：真出现 blur；降级档：换成不透明背景（两条都是"生效"，只是生效的分支不同）
+    if (String(backdrop.blur).includes('blur') || (backdrop.reduced && backdrop.background !== 'rgba(0, 0, 0, 0)')) break;
+    await win3.waitForTimeout(100);
+  }
+  const glassOk =
+    String(backdrop.blur).includes('blur') || (backdrop.reduced && backdrop.background !== 'rgba(0, 0, 0, 0)');
+  if (!glassOk) {
+    fail(`选了「毛玻璃」，根容器上既没有 blur、也没有降级后的不透明底（探针：${JSON.stringify(backdrop)}）`);
+  }
+  // 还原默认样式包，免得后面的步骤读到"被改过的主题"（体验诚实：改过的东西要改回去）
+  await win3.locator('button', { hasText: '默认暗色' }).first().click();
+  ok(
+    `渐变与毛玻璃两种背景都真的作用在根容器上（毛玻璃这一档走的分支：${
+      String(backdrop.blur).includes('blur') ? '真毛玻璃' : '系统关了透明效果 → 降级为不透明底'
+    }）—— 此前规则指向一个不存在的类名，静默失效；现在由属性门控锁 + 本步一起看着`,
+  );
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -3088,5 +3138,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 主题包背景类型真的落在画面上（渐变 / 毛玻璃）→ 干净退出');
 process.exit(0);

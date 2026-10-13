@@ -9,7 +9,7 @@
  * 为什么单独一个文件、只有这一个函数：这是"事件到视图"的唯一闸口，
  * 放在面板里就混在几十行 setState 中间，变异测试咬不到、接线锁也钉不住。
  */
-export interface SessionScoped {
+interface SessionScoped {
   /** 六类流事件（text_delta / tool_start / tool_end / usage / error / done）都带这个字段 */
   sessionId: string;
 }

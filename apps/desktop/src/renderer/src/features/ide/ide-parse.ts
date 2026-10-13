@@ -9,7 +9,7 @@ import { TREE_MAX_ENTRIES } from '@jujia/shared-ipc';
  * 而不是只活在一个没人测得到的组件里。
  */
 
-export interface TreeEntry {
+interface TreeEntry {
   name: string;
   isDir: boolean;
 }

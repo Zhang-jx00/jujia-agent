@@ -855,12 +855,16 @@ select:focus-visible {
   flex-wrap: wrap;
 }
 
-/* ---- 背景应用：由 :root 上的受控变量驱动（图片经白名单校验） ---- */
-html[data-jj-bg-kind='gradient'] .app-shell {
+/* ---- 背景应用：由 :root 上的受控变量驱动（图片经白名单校验） ----
+ * R20 修：这四条原来指向 `.app-shell` —— 而 DOM 里**没有任何元素叫这个名字**（根容器是 `.app-root`），
+ * 于是"渐变 / 图片 / 玻璃"三个选项谁都选不动画面，且所有门禁都是绿的（静默失效）。
+ * 现在指回真正的根；并由 styles-wiring 的"属性门控 → 目标类名"锁看着这一跳。
+ */
+html[data-jj-bg-kind='gradient'] .app-root {
   background: linear-gradient(180deg, var(--jj-bg-from, #141414), var(--jj-bg-to, #141414));
 }
 
-html[data-jj-bg-kind='image'] .app-shell {
+html[data-jj-bg-kind='image'] .app-root {
   background-image: var(--jj-bg-image);
   background-size: cover;
   background-position: center;
@@ -868,7 +872,7 @@ html[data-jj-bg-kind='image'] .app-shell {
 }
 
 /* 图片背景必须叠遮罩：否则文字可读性无法保证（对比度无法精确计算，见 checkContrast） */
-html[data-jj-bg-kind='image'] .app-shell::before {
+html[data-jj-bg-kind='image'] .app-root::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -876,7 +880,7 @@ html[data-jj-bg-kind='image'] .app-shell::before {
   pointer-events: none;
 }
 
-html[data-jj-bg-kind='glass'] .app-shell {
+html[data-jj-bg-kind='glass'] .app-root {
   background: color-mix(in srgb, var(--jj-bg-color, #1f1f1f) calc(var(--jj-bg-opacity, 1) * 100%), transparent);
   backdrop-filter: blur(var(--jj-bg-blur, 0px));
 }

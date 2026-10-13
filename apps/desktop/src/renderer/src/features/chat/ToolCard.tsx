@@ -17,7 +17,7 @@ import { IconCheck, IconChevronDown, IconLoaderCircle, IconX } from '../../ui/ic
  * - 入场只错峰 1 级，同屏不同时动多个元素。
  */
 
-export interface ToolCardData {
+interface ToolCardData {
   callId: string;
   name: string;
   phase: 'running' | 'done';

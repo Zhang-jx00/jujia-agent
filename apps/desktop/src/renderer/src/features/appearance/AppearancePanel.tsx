@@ -32,7 +32,7 @@ const KIND_LABEL: Record<BackgroundKind, string> = {
   glass: '毛玻璃',
 };
 
-export interface AppearancePanelProps {
+interface AppearancePanelProps {
   /** 当前保存的样式包（来自配置）；为空表示用默认 */
   pack: ThemePack;
   /** 保存回调（写入配置） */

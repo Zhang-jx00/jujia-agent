@@ -106,4 +106,19 @@ describe('样式接线锁：className 上引用的类名必须在渲染层样式
     const missing = [...tokens].filter((t) => !hasRule(t)).sort();
     expect(missing).toEqual([]);
   });
+
+  it('受属性门控的样式，必须真的有元素带那个类（R20：背景类型曾经静默不生效）', () => {
+    /**
+     * 形状：`html[data-jj-bg-kind='gradient'] .app-shell { … }` —— 属性出对了、
+     * 规则也在样式表里，**但没有任何元素叫 `.app-shell`**（根容器叫 `.app-root`）
+     * ⇒ 主题包的"渐变/图片/玻璃"三个选项谁都选不动画面，且所有门禁都是绿的。
+     * 这条锁把"属性门控 → 目标类名"这一跳也钉住：目标类必须出现在渲染层源码里。
+     */
+    const gated = [...css.matchAll(/\[data-[a-z-]+='[^']*'\]\s+\.([a-z][a-z0-9-]*)/g)].map((m) => m[1] ?? '');
+    // 防失焦：先确认真的扫到了这类规则（现在有 4 条），否则扫描写坏会空转通过
+    expect(gated.length).toBeGreaterThan(0);
+    const sourcesText = sources.join('\n');
+    const orphan = [...new Set(gated)].filter((cls) => !sourcesText.includes(cls));
+    expect(orphan).toEqual([]);
+  });
 });

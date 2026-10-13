@@ -1720,6 +1720,14 @@
       "find": "  const stateIcon =\n    state === 'running' ? <IconLoaderCircle /> : state === 'ok' ? <IconCheck /> : <IconX />;",
       "replace": "  const stateIcon = state === 'running' ? '\\u25CC' : state === 'ok' ? '\\u2713' : '\\u2717';",
       "test": "apps/desktop/src/renderer/src/ui/icons.test.tsx"
+    },
+    {
+      "id": "M216",
+      "desc": "受属性门控的背景规则又指回不存在的类名（.app-root → .app-shell）：渐变/图片/毛玻璃三档再次静默失效",
+      "file": "apps/desktop/src/renderer/src/styles.css",
+      "find": "html[data-jj-bg-kind='gradient'] .app-root {",
+      "replace": "html[data-jj-bg-kind='gradient'] .app-shell {",
+      "test": "apps/desktop/src/renderer/src/styles-wiring.test.ts"
     }
   ]
 }

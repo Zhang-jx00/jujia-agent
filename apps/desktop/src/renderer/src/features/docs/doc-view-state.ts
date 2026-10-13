@@ -16,7 +16,7 @@
  *    那是"看起来文档变短了"的静默错误。
  */
 
-export interface DocViewState {
+interface DocViewState {
   /** 相对工作区根的路径（与 `read_file` 的入参同口径） */
   path: string;
   /** 已挂载的段落数（`MarkdownView` 的 `shown`） */

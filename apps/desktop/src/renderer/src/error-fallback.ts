@@ -7,7 +7,7 @@
  * 所以这里把"能纯测的部分"（说什么、说给谁听）拿进来测，
  * "边界真的挂在路由外面"由 `error-boundary-wiring.test.ts` 的接线锁钉住。
  */
-export interface FailureView {
+interface FailureView {
   heading: string;
   /** 原始错误文本（截断：完整值在开发者控制台，界面上不该被一屏堆栈占满） */
   detail: string;

@@ -13,7 +13,7 @@ import { isSafeLink, type Block, type Inline } from './parse';
  * 非 http/https 的链接只展示文本，不产生任何可点元素。
  */
 
-export interface MarkdownViewProps {
+interface MarkdownViewProps {
   blocks: ReadonlyArray<Block>;
   /** 已显示的块数（分块挂载是"长文档不卡"的手段，不是装饰） */
   shown: number;

@@ -82,18 +82,6 @@
   }
 }
 
-/* 弹出：缩放 + 淡入（用于弹窗/气泡） */
-@keyframes jj-pop {
-  from {
-    opacity: 0;
-    transform: scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
 /* 遮罩淡入 */
 @keyframes jj-fade {
   from {
@@ -126,23 +114,8 @@
   animation: jj-enter var(--motion-duration-fast) var(--motion-ease-out) both;
 }
 
-.jj-pop {
-  animation: jj-pop var(--motion-duration-normal) var(--motion-ease-out) both;
-}
-
 .jj-fade {
   animation: jj-fade var(--motion-duration-fast) var(--motion-ease-out) both;
-}
-
-/* 错峰：同屏同时动画元素不超过 2–3 个（只提供 3 级） */
-.jj-stagger-1 {
-  animation-delay: calc(var(--motion-stagger-step) * 1);
-}
-.jj-stagger-2 {
-  animation-delay: calc(var(--motion-stagger-step) * 2);
-}
-.jj-stagger-3 {
-  animation-delay: calc(var(--motion-stagger-step) * 3);
 }
 
 /* 交互反馈：按压缩小（微交互 100ms） */
@@ -239,20 +212,15 @@ button.w2-btn-danger:active:not(:disabled),
   }
 
   /* 位移类动效改为纯淡入（避免前庭不适） */
-  .jj-enter,
-  .jj-pop {
+  .jj-enter {
     animation-name: jj-fade;
   }
 
-  /* 加载指示仍需可见，但不能旋转 → 改为透明度呼吸 */
-  .jj-spin-when-allowed {
-    animation-name: jj-shimmer;
-  }
 }
 
-/* 尊重"减少透明度"偏好：毛玻璃降级为不透明背景 */
+/* 尊重"减少透明度"偏好：主题包的玻璃背景降级为不透明（R20 修：原来指的是没人用的 .jj-glass） */
 @media (prefers-reduced-transparency: reduce) {
-  .jj-glass {
+  html[data-jj-bg-kind='glass'] .app-root {
     backdrop-filter: none !important;
     background: var(--c-bg-container) !important;
   }
