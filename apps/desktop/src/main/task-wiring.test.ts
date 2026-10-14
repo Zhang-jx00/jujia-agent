@@ -58,9 +58,16 @@ describe('任务记录先于模型调用落盘', () => {
   });
 
   it('轮末收口在 flushSession 之后、done 事件之前（界面收到 done 时记录已是终态）', () => {
-    const flush = cs.indexOf('await flushSession(session);', cs.indexOf('M17 批一：任务记录收口'));
+    // 区域起点用**代码**（outputStreams.closeAll();）而不是注释：stripped() 会把 // 注释整行抹掉，
+    // 拿注释文字当 indexOf 起点会静默退化成"从 0 找"——R25 复跑时核对过这一退化，顺手扶正。
+    const region = cs.indexOf('outputStreams.closeAll();');
+    expect(region).toBeGreaterThan(-1);
+    const flush = cs.indexOf('await flushSession(session);', region);
     const finish = cs.indexOf('taskRec = finishTask(taskRec, outcome, new Date());');
-    const done = cs.indexOf("emit({ type: 'done', sessionId: session.id, reason: resolved });");
+    // R25 换靶：done 事件带上了 notice 字段（单行变多行）——判据不放宽，反而钉死"唯一一处"。
+    expect([...cs.matchAll(/type: 'done',/g)]).toHaveLength(1);
+    const done = cs.indexOf("type: 'done',");
+    expect(flush).toBeGreaterThan(region);
     expect(finish).toBeGreaterThan(flush);
     expect(done).toBeGreaterThan(finish);
   });

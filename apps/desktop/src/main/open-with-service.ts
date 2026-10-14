@@ -71,8 +71,10 @@ export interface ExePathStore {
   write(value: string | null): Promise<void>;
 }
 
-export function createFileExePathStore(): ExePathStore {
-  const store = new JsonStore<{ path: string | null }>(join(getDataRoot(), 'browser-exe.json'), {
+export function createFileExePathStore(
+  file: string = join(getDataRoot(), 'browser-exe.json'),
+): ExePathStore {
+  const store = new JsonStore<{ path: string | null }>(file, {
     version: 1,
     defaults: () => ({ path: null }),
     validate: (input) => {
@@ -82,7 +84,14 @@ export function createFileExePathStore(): ExePathStore {
     },
   });
   return {
-    read: async () => (await store.read()).data.path,
+    read: async () => {
+      // R25：**只看主文件** —— 这个值决定"启动哪个进程"，从 `.bak` 回退等于让"已清除 / 已损坏"
+      // 被一份旧值悄悄顶掉（e2e [20]⑤ 现场形状：清除已成功、随后打开仍带着旧 exe 弹确认框；
+      // 机制 = `readJsonSafe` 的备份回退撞上原子写的换名窗口）。拿不到 = null = 让用户重选，
+      // 比"复活一个旧程序"更安全；损坏的原件仍由 json-store 在写入路径隔离（`.corrupt-*`）。
+      const s = await store.read();
+      return s.source === 'primary' ? s.data.path : null;
+    },
     write: async (value) => {
       await store.write({ path: value });
     },

@@ -178,12 +178,13 @@ function toStored(m: ChatMessage): StoredMessage {
 
 /**
  * 把本轮新增的消息追加落盘。**只追加完整行**，所以进程中途死最多丢最后一条。
- * 失败不静默：console.warn 报出来（丢历史是可感知的事实，不能假装写成功）。
+ * 失败不静默：console.warn 之外，**消息写失败的原文会返回给调用方**，
+ * 由它经 done 事件的 `notice` 递给界面（R25：丢历史是可感知的事实，界面也要看得见）。
  *
  * 两种失败要分开说（T6①）：**消息没写进去**才是"历史丢了"；
  * **元信息没写进去**只是"列表里的条数 / 标题旧了一格"，下一轮不会因此重放消息。
  */
-async function flushSession(s: Session): Promise<void> {
+async function flushSession(s: Session): Promise<string | null> {
   const all = persistable(s);
   try {
     const out = await journal.flush(s.id, all.map(toStored), (total) => metaOf(s, total));
@@ -193,8 +194,10 @@ async function flushSession(s: Session): Promise<void> {
         out.metaError,
       );
     }
+    return null;
   } catch (err) {
     console.warn(`[chat] 会话 ${s.id.slice(0, 8)} 的历史没写进去：`, err);
+    return err instanceof Error ? err.message : String(err);
   }
 }
 
@@ -715,8 +718,8 @@ export function sendMessage(
       // 用户中途停止 / 出错时也要把压着的输出交出去：已经跑出来的东西不该因为"没跑完"而消失
       outputStreams.closeAll();
       // **落盘点在轮次结束处**，不是每条 token：中途写会把半截回答留在盘上，
-      // 也让一次长回答产生成百上千次 IO
-      await flushSession(session);
+      // 也让一次长回答产生成百上千次 IO。返回值 = 消息写失败的原文（R25：要递给界面）
+      const persistError = await flushSession(session);
       // M17 批一：任务记录收口（aborted / error 各有各的结局；其余 —— 正常答完 / 被截断 /
       // 停在工具处 —— 都记 done：精确"为什么停"由 done 事件与截断提示在界面上说清，这里只记任务层终态）
       if (taskRec !== null) {
@@ -724,7 +727,16 @@ export function sendMessage(
         taskRec = finishTask(taskRec, outcome, new Date());
         await persistTask(session.id, taskRec);
       }
-      emit({ type: 'done', sessionId: session.id, reason: resolved });
+      emit({
+        type: 'done',
+        sessionId: session.id,
+        reason: resolved,
+        // R25：落盘失败要说给用户听（旧行为只进 console —— 重启后"这段怎么没了"没人解释）
+        notice:
+          persistError === null
+            ? null
+            : `这一轮没能写进磁盘历史（重启后这一段会消失）：${persistError}`,
+      });
     }
   })();
 

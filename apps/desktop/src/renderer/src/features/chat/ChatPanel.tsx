@@ -289,6 +289,11 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
           ),
         );
       }
+      if (event.notice !== null) {
+        // R25：落盘失败要说在明处（旧行为只进 main 控制台）——
+        // 这一条不是"回答有问题"，是"这段不会被记住"
+        setHistoryHint(event.notice);
+      }
     });
     return unsubscribe;
   }, []);

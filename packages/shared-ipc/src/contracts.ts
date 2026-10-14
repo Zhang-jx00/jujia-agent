@@ -207,6 +207,11 @@ export const streamEventSchema = z.discriminatedUnion('type', [
     type: z.literal('done'),
     sessionId: z.string(),
     reason: z.enum(['stop', 'length', 'content_filter', 'aborted', 'error', 'tool_calls']),
+    /**
+     * 本轮没能写进磁盘历史时的一句话（R25：flush 失败不再只进 main 控制台）——
+     * null = 一切正常；渲染层看到它就把话说出来（"重启后这一段会消失"）。
+     */
+    notice: z.string().nullable().default(null),
   }),
 ]);
 export type StreamEvent = z.infer<typeof streamEventSchema>;

@@ -1,10 +1,10 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { browserExeClearSchema } from '@jujia/shared-ipc';
 import type { PermissionDecision, PermissionMode, PermissionRequest, PermissionRule } from '@jujia/agent-core';
-import { checkExePath, createOpenWithService, type ExePathStore, type OpenWithPolicy } from './open-with-service';
+import { checkExePath, createFileExePathStore, createOpenWithService, type ExePathStore, type OpenWithPolicy } from './open-with-service';
 import type { AuditGateInput, AuditService } from './audit-service';
 
 /**
@@ -454,5 +454,21 @@ describe('打开方式门接进执行审计（R8.6）', () => {
     expect(rec.commandKey).toBe('url');
     const args = rec.args as Record<string, unknown>;
     expect(args.url).toContain('https://example.com/i');
+  });
+});
+
+describe('自选程序路径的读取：只看主文件（R25 · 安全敏感小文件不许从 .bak 复活）', () => {
+  it('主文件损坏时回 null（拿不到就重选），绝不回退 .bak 里的旧 exe', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jujia-exe-'));
+    const file = join(dir, 'browser-exe.json');
+    const store = createFileExePathStore(file);
+    await store.write('C:\\Windows\\System32\\curl.exe');
+    await store.write(null); // 第二次写：可解析的旧值转 .bak —— curl 就躺在备份里
+    expect(await store.read()).toBeNull(); // 主文件读出 null（正常的"已清除"态）
+    // 把主文件弄坏：readJsonSafe 的通用语义会去看 .bak（= 旧 exe）——
+    // 这个值决定"启动哪个进程"，复活它比拿不到更糟（e2e [20]⑤ 的现场形状）
+    await writeFile(file, '{ 这不是 JSON', 'utf8');
+    expect(await store.read()).toBeNull();
+    await rm(dir, { recursive: true, force: true });
   });
 });

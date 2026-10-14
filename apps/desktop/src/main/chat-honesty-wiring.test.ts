@@ -24,4 +24,26 @@ describe('工作区提示与淘汰话术（chat-service 源锁）', () => {
     // flush 是异步的，写失败另有单独报错 —— "已落盘"这个无条件断言不许回来
     expect(src).not.toContain('历史已落盘，重启后仍可继续');
   });
+
+  it('落盘失败经 done.notice 上界面（R25：不再只进 console）', () => {
+    expect(src).toContain('这一轮没能写进磁盘历史');
+    expect(src).toMatch(/async function flushSession\(s: Session\): Promise<string \| null>/);
+    expect(src).toMatch(/const persistError = await flushSession\(session\);/);
+    // done 事件契约里这条通道在位（渲染层才有得读）
+    const contracts = readFileSync(
+      new URL('../../../../packages/shared-ipc/src/contracts.ts', import.meta.url),
+      'utf8',
+    );
+    const doneBlock = contracts.slice(
+      contracts.indexOf("type: z.literal('done')"),
+      contracts.indexOf('export type StreamEvent'),
+    );
+    expect(doneBlock).toContain('notice: z.string().nullable().default(null)');
+    // 渲染层真的把它说出来了（不是契约里挂着一个没人读的字段）
+    const panel = readFileSync(
+      new URL('../renderer/src/features/chat/ChatPanel.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(panel).toContain('setHistoryHint(event.notice)');
+  });
 });

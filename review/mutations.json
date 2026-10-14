@@ -2080,6 +2080,22 @@
       "find": "        error:\n          `索引被锁（index.lock 还在，通常是另一个 git 进程正在操作同一仓库）——` +\n          `已等待约 ${String(waitedMs)}ms；请稍后重试。原始报错：${r.error}`,",
       "replace": "        error: r.error,",
       "test": "packages/agent-core/src/git/git.test.ts"
+    },
+    {
+      "id": "M261",
+      "desc": "落盘失败又只进 console（R25 被回退）：重启后「这段怎么没了」没人解释",
+      "file": "apps/desktop/src/main/chat-service.ts",
+      "find": "        notice:\n          persistError === null\n            ? null\n            : `这一轮没能写进磁盘历史（重启后这一段会消失）：${persistError}`,",
+      "replace": "        notice: null,",
+      "test": "apps/desktop/src/main/chat-honesty-wiring.test.ts"
+    },
+    {
+      "id": "M262",
+      "desc": "自选程序读取退回「哪个来源都行」（R25 被回退）：主文件坏了就从 .bak 复活一个旧可执行文件",
+      "file": "apps/desktop/src/main/open-with-service.ts",
+      "find": "      return s.source === 'primary' ? s.data.path : null;",
+      "replace": "      return s.data.path;",
+      "test": "apps/desktop/src/main/open-with-service.test.ts"
     }
   ]
 }

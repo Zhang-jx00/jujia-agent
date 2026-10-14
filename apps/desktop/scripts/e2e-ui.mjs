@@ -375,6 +375,49 @@ const updatePort = updateServer.address().port;
 const seededConnId = 'e2e-conn-1';
 const seededStreamConnId = 'e2e-stream-1';
 const seededEchoConnId = 'e2e-6b-1';
+/**
+ * 种子②（R25 · T33 的界面级证据）：一个 **131 条**历史的会话目录。
+ * 首屏读 120 条、剩 11 条在盘上 —— "翻得到最早一条 / 不跳条"这件事只能在界面级验。
+ * 文件按真实格式写（JsonStore 信封 + JSONL 一行一条），应用重启后从**目录**重建清单（6a 口径）。
+ */
+const seededPageSessionId = 'e2e-page-seed-0001';
+{
+  const pageDir = join(dataDir, 'sessions', seededPageSessionId);
+  mkdirSync(pageDir, { recursive: true });
+  const lines = [];
+  for (let i = 1; i <= 131; i += 1) {
+    lines.push(
+      JSON.stringify({
+        v: 1,
+        t: new Date(Date.now() - (132 - i) * 60_000).toISOString(),
+        role: 'user',
+        content:
+          i === 1
+            ? 'E2E-OLDEST-MARKER 最早的一条'
+            : `E2E-PAGE-${String(i).padStart(3, '0')} 第 ${String(i)} 条`,
+      }),
+    );
+  }
+  writeFileSync(join(pageDir, 'messages.jsonl'), `${lines.join('\n')}\n`);
+  writeFileSync(
+    join(pageDir, 'session.meta.json'),
+    JSON.stringify({
+      version: 1,
+      data: {
+        id: seededPageSessionId,
+        connectionId: seededStreamConnId,
+        title: 'E2E 翻页种子（131 条）',
+        createdAt: new Date(Date.now() - 132 * 60_000).toISOString(),
+        // lastUsedAt 保持常态：**不许抬到未来** —— [60] 用"清单第一位"定位自己刚建的会话，
+        // 种子抢榜首会让它读错目录（复跑首红即此：读 seed/task.json ENOENT）。
+        // 首次红还有另一半：历史会话下拉**按连接过滤**且只取最近 8 条 → 步骤里先选连接即可。
+        lastUsedAt: new Date().toISOString(),
+        messageCount: 131,
+        compactedThrough: 0,
+      },
+    }),
+  );
+}
 writeFileSync(
   join(dataDir, 'connections.json'),
   JSON.stringify({
@@ -3620,6 +3663,43 @@ try {
     fail('续跑完成后这条记录仍被当成"被打断"（状态没收口）', JSON.stringify(afterView).slice(0, 300));
   }
   ok('续跑：审批门重新问过（弹窗再次出现）→ 跑完 → 记录 done/resumeCount=1/stepsDone≥1，卡片不会回来');
+
+  step('T33 界面级证据：131 条种子会话翻到最早一条（按钮有反应、不跳条、计数自洽）');
+  /**
+   * T33（分页口径差 1 两处 / 续聊跳一条）修完后的**界面级证据此前缺位**（需 >120 条历史的会话）——
+   * 种子见脚本头部的 `seededPageSessionId`。判据全是真值：计数来自"共 N 条"、窗口变化来自
+   * 按钮文案（"从磁盘再读 11 条" → "显示更早的 11 条" → 消失），**最早那条的正文必须真的出现**。
+   */
+  await win4.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  // 历史会话下拉**按选中连接过滤**：种子属于流式连接，先把它选上；
+  // 选完还要点「继续」——下拉的 onChange 只记 pickId，真正 resume 的是那颗按钮（与 [60] 同形）
+  await win4.locator('select').first().selectOption(seededStreamConnId);
+  await win4.locator('select[aria-label="继续会话"]').selectOption(seededPageSessionId);
+  await win4.locator('button', { hasText: '继续' }).first().click();
+  if ((await waitText4('共 131 条')) !== true) {
+    fail('种子会话没有按"共 131 条"显示（盘上的历史没被读回来）', (await body4()).slice(0, 900));
+  }
+  const pageOlderBtn = win4.locator('button', { hasText: /从磁盘再读|显示更早的/ }).first();
+  if (!(await pageOlderBtn.innerText()).includes('从磁盘再读')) {
+    fail('首屏应当只装了最近 120 条、还有 11 条在盘上（按钮文案不对）', await pageOlderBtn.innerText());
+  }
+  await pageOlderBtn.click();
+  if ((await waitText4('显示更早的 11 条')) !== true) {
+    fail('从磁盘再读之后，按钮应变成"显示更早的 11 条"（窗口里还有 11 条没挂出来）', (await body4()).slice(0, 900));
+  }
+  await pageOlderBtn.click();
+  if ((await waitText4('E2E-OLDEST-MARKER')) !== true) {
+    fail('翻到头之后最早那条没有出现 —— T33 的"有一条历史永远看不到"回潮了', (await body4()).slice(0, 1200));
+  }
+  const pageBody = await body4();
+  const markerCount = pageBody.split('E2E-OLDEST-MARKER').length - 1;
+  if (markerCount !== 1) fail(`最早那条出现了 ${String(markerCount)} 次（重复渲染）`);
+  if (!pageBody.includes('E2E-PAGE-011')) fail('盘上那 11 条的**第一条**没挂出来（只挂了尾巴）');
+  await win4.waitForTimeout(300);
+  if ((await win4.locator('button', { hasText: /从磁盘再读|显示更早的/ }).count()) > 0) {
+    fail('全翻完之后按钮应当消失（还有什么可翻？）');
+  }
+  ok('翻页真值：120 → +11（盘）→ +11（窗口），最早一条可见且只出现一次，计数自洽');
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
