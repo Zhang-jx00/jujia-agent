@@ -205,8 +205,8 @@
       "id": "M26",
       "desc": "敏感路径判定对只读工具失效（回到 T1 那条顺序：只读先放行，读 .env 静默进上下文）",
       "file": "packages/agent-core/src/permissions/policy.ts",
-      "find": "    const why = sensitiveReason(target);",
-      "replace": "    const why = ctx.kind === 'read' ? null : sensitiveReason(target);",
+      "find": "    const why = sensitiveReason(target, ctx.workspaceRoot);",
+      "replace": "    const why = ctx.kind === 'read' ? null : sensitiveReason(target, ctx.workspaceRoot);",
       "test": "packages/agent-core/src/permissions/policy.test.ts"
     },
     {
@@ -973,7 +973,7 @@
       "id": "M122",
       "desc": "敏感判定不再调用短名兜底：判据写好了却没人用（与 R4 的「决策算了没人用」、T15 的「两份判据分叉」同一族）",
       "file": "packages/agent-core/src/permissions/policy.ts",
-      "find": "  const short = eightDot3Segment(host);",
+      "find": "  const short = eightDot3Segment(scanned);",
       "replace": "  const short = null as string | null;",
       "test": "packages/agent-core/src/permissions/policy.test.ts"
     },
