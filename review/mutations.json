@@ -2048,6 +2048,22 @@
       "find": "      requestAnimationFrame(() => rfRef.current?.setViewport(viewportRef.current));",
       "replace": "      void rfRef.current;",
       "test": "apps/desktop/src/renderer/src/wiring-r22.test.ts"
+    },
+    {
+      "id": "M257",
+      "desc": "T37 降级横幅被摘（读坏了又装没事）：读失败静默当成「没有规则」的旧病根回来",
+      "file": "apps/desktop/src/renderer/src/features/permissions/PermissionRulesPanel.tsx",
+      "find": "      {health !== null && (health.source !== 'primary' || health.recovered) && (",
+      "replace": "      {false && health !== null && (health.source !== 'primary' || health.recovered) && (",
+      "test": "apps/desktop/src/renderer/src/features/permissions/permission-rules-panel.test.tsx"
+    },
+    {
+      "id": "M258",
+      "desc": "「谁在流」退回单一布尔（T40-② 被回退）：切走再切回，在飞的那条既看不见也停不掉",
+      "file": "apps/desktop/src/renderer/src/features/chat/ChatPanel.tsx",
+      "find": "  const sending = sendArmed || (sessionId !== undefined && streamingIds.has(sessionId));",
+      "replace": "  const sending = sendArmed; void streamingIds;",
+      "test": "apps/desktop/src/renderer/src/wiring-r22.test.ts"
     }
   ]
 }

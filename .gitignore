@@ -47,4 +47,6 @@ apps/desktop/release/
 
 # 测试与临时数据（统一落项目内，不写 C 盘）
 .tmp/
+# 取证文件（T36：cleanup 不收、路径长期有效；内容仍要抄进台账）
+.evidence/
 .workbuddy-tmp-*

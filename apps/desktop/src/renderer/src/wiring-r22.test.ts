@@ -15,13 +15,25 @@ describe('界面交互群源锁（T40 · 加固15）', () => {
 
   it('send 有"流式中"守卫；翻页有在飞保护；失败都说话', () => {
     expect(chat).toMatch(/async function send[\s\S]{0,320}if \(sending\) return;/);
-    // 注："流中切会话"的正确修法（按会话的流中状态）**不在这里** —— 硬拦方案被 e2e [26]
-    // 当堂否决（切换中流是设计能力），已重排 R23；本文件只锁"不冲突"的那几条。
     expect(chat).toMatch(/if \(olderBusy\) return;/);
     expect(chat).toContain('读更早的消息失败');
     expect(chat).toContain('停止失败');
     // 翻页按钮真的被在飞状态锁住（不是只加了 state 却没人用）
     expect(chat).toMatch(/loadOlder\(\)\}\s*\n\s*disabled=\{olderBusy\}/);
+  });
+
+  it('「谁在流」按会话记账：切回可续见、可停（T40-② · R23 的正确修法）', () => {
+    // 派生式发送态（armed 或本会话在流）——不允许退回单一布尔
+    expect(chat).toContain('streamingIds.has(sessionId)');
+    expect(chat).not.toContain('setSending');
+    // done/error 的扣账必须在会话闸门**之前**（闸门会把别的会话事件丢掉，扣晚了集合永远不干净）：
+    // 用位置断言（正则会被文件里更早的 setStreamingIds 撞上）
+    const book = chat.indexOf('这是"切回能续见、能停"的记账来源');
+    expect(book).toBeGreaterThan(-1);
+    const gate = chat.indexOf('if (!belongsToSession(event, sessionIdRef.current)) return;', book);
+    expect(gate).toBeGreaterThan(book);
+    // 会话切换不再顺手清 sending（旧病根）
+    expect(chat).toMatch(/function resetView\(\): void \{[\s\S]{0,200}不再清 sending/);
   });
 
   it('审批队列按 id 移除（slice(1) 竞态不许回来）', () => {

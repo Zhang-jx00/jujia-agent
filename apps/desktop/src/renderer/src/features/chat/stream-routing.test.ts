@@ -55,13 +55,25 @@ describe('闸口真的挂在订阅回调的第一行（接线锁）', () => {
   const strip = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const panel = strip(readFileSync(join(here, 'ChatPanel.tsx'), 'utf8'));
 
-  it('onStream 回调一进来就筛会话，任何一类事件都没有旁路', () => {
+  it('onStream：闸门之前只许「谁在流」记账，视图 setter 一个都不许有旁路', () => {
     const at = panel.indexOf("window.jujia.onStream((event: StreamEvent) => {");
     expect(at).toBeGreaterThan(-1);
-    const head = panel.slice(at, at + 460);
-    const body = head.slice(head.indexOf('=> {') + 4).trimStart();
-    // 回调体里的**第一条语句**就是闸门：写成"先处理某类事件再筛"就会留下旁路
-    expect(body.startsWith('if (!belongsToSession(event, sessionIdRef.current)) return;')).toBe(true);
+    const head = panel.slice(at, at + 1400);
+    const body = head.slice(head.indexOf('=> {') + 4);
+    const gatePos = body.indexOf('if (!belongsToSession(event, sessionIdRef.current)) return;');
+    // 闸门仍在（且能在窗口里找到 —— 找不到就红，防失焦）
+    expect(gatePos).toBeGreaterThan(-1);
+    /**
+     * R23 的设计变更（T40-②）：done/error 的「流中集合」扣账必须在闸门**之前**
+     * （切走会话的 done 到不了闸门之后，扣晚了集合永远不干净）。
+     * 旧锁写的是"回调体第一条语句就是闸门"——那是单一 sending 时代的位置判据；
+     * 新判据更强也更贴意图：**闸门之前只允许记账，任何视图分支不许旁路**。
+     */
+    const prelude = body.slice(0, gatePos);
+    expect(prelude).toContain('setStreamingIds');
+    expect(prelude).not.toMatch(
+      /setBubbles|setUsage|setToolLines|setLastError|setPageHint|setHistoryHint|setNoteHint/,
+    );
   });
 
   it('筛完用的是 ref 而不是 state（订阅只建一次，闭包里的 state 会永远停在第一帧）', () => {
@@ -77,11 +89,18 @@ describe('闸口真的挂在订阅回调的第一行（接线锁）', () => {
   });
 
   /**
-   * 筛了事件之后，"上一个会话的 done 会顺手把 sending 归零"这件事就没有了 ——
-   * 换会话时必须自己清场，否则界面永远卡在"停止"按钮上（这是本次修复引入的新约束，钉住它）。
+   * R23 设计变更（T40-②）后重写的清场锁：
+   * 旧设计里"上一个会话的 done 会顺手把 sending 归零"消失了靠换会话清场兜底；现在
+   * "谁在流"按会话记账（`streamingIds`），**切走不再清发送态**（切回由集合恢复"续见/可停"）。
+   * 新不变量：resetView 只清"这一会话的视图"；发送态只能由派生式记账给出（不许退回单一布尔）。
    */
-  it('换会话的两条路径都先清场（resetView），不留上一格的 sending / usage', () => {
-    expect(panel).toContain('setSending(false);');
+  it('换会话清场只清"这一会话的视图"；发送态归按会话的记账管', () => {
+    const rvAt = panel.indexOf('function resetView()');
+    expect(rvAt).toBeGreaterThan(-1);
+    const rv = panel.slice(rvAt, rvAt + 400);
+    expect(rv).toContain('setUsage(null)');
+    expect(rv).not.toContain('setSending');
+    // 两条换会话路径仍都走 resetView（这条没变）
     const resumeAt = panel.indexOf('async function resume(');
     const newAt = panel.indexOf('              resetView();');
     expect(resumeAt).toBeGreaterThan(-1);

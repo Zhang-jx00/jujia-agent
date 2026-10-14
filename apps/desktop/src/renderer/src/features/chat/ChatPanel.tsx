@@ -92,7 +92,16 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
    * 而"翻不动"这件事一旦没话，界面上看起来就和按钮坏了相同。
    */
   const [pageHint, setPageHint] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
+  /**
+   * 「谁在流」按**会话**记账（T40-② 的正确修法 · R23）：
+   * 切走再切回要能**续见、能停** —— 旧模型是一个布尔，切会话时被 resetView 清零，
+   * 在飞的那条从此"看不见也停不掉"（R22 曾试硬拦，被 e2e [26] 否决：切换中流是设计能力）。
+   * 集合的增删**全由事件驱动**（send 起、done/error 收；任何会话的都收得到 —— 通道是全局广播），
+   * 不去问主进程；`sendArmed` 只覆盖"点击 → 主进程回 sessionId"之间那段窗口（防连点）。
+   */
+  const [streamingIds, setStreamingIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [sendArmed, setSendArmed] = useState(false);
+  const sending = sendArmed || (sessionId !== undefined && streamingIds.has(sessionId));
   /** T40：翻页在飞保护（连点会重复前插、同页重复 key） */
   const [olderBusy, setOlderBusy] = useState(false);
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
@@ -134,8 +143,18 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
       { id: r.messageId ?? `a-${Date.now()}`, role: 'assistant', content: '', streaming: true },
     ]);
     if (r.sessionId !== null) selectSession(r.sessionId);
+    // 与 send() 同形：**起流记账**（续跑同样归"按会话的流中状态"管，直到它自己的 done/error）——
+    // 旧写法直接置"发送位"（单一布尔），切走再回来就找不到这条流了
+    const sid = r.sessionId ?? sessionId;
+    if (sid !== undefined) {
+      setStreamingIds((prev) => {
+        if (prev.has(sid)) return prev;
+        const next = new Set(prev);
+        next.add(sid);
+        return next;
+      });
+    }
     setHistoryHint(r.warning);
-    setSending(true);
     setUsage(null);
     setToolLines([]);
   });
@@ -177,6 +196,19 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
     });
 
     const unsubscribe = window.jujia.onStream((event: StreamEvent) => {
+      // 先把「谁在流」扣掉（**任何会话**都扣：切走的会话在别处跑完时，我们也收得到它的 done/error）——
+      // 这是"切回能续见、能停"的记账来源；必须在会话闸门**之前**（闸门会把别人的事件丢掉）。
+      // 注：这里**只动记账集合**，一个视图 setter 都不许出现（旁路的形状 = 某类事件在闸门前改界面，
+      // stream-routing 的接线锁钉这条）；sendArmed 不在这里清 —— 它只覆盖"点击→回执"窗口，
+      // 流事件不可能早于回执到达，清它反而是跨会话的越权。
+      if (event.type === 'done' || event.type === 'error') {
+        setStreamingIds((prev) => {
+          if (!prev.has(event.sessionId)) return prev;
+          const next = new Set(prev);
+          next.delete(event.sessionId);
+          return next;
+        });
+      }
       // **先筛会话**（外部审查 T5）：这条通道是全局广播。增量因为 messageId 对不上看起来"没事"，
       // 但 done / error / usage / tool_* 这四支不需要 messageId，切了会话照样把界面改错。
       if (!belongsToSession(event, sessionIdRef.current)) return;
@@ -225,7 +257,6 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
         setBubbles((prev) =>
           prev.map((b) => (b.streaming ? { ...b, streaming: false, error: event.message } : b)),
         );
-        setSending(false);
         return;
       }
       // done
@@ -258,7 +289,6 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
           ),
         );
       }
-      setSending(false);
     });
     return unsubscribe;
   }, []);
@@ -337,7 +367,8 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
    * 所以换会话的那一刻由我们自己清：**留下的只有这个会话自己的事实**。
    */
   function resetView(): void {
-    setSending(false);
+    // 注意：**不再清 sending** —— "谁在流"按会话记在 `streamingIds` 里，切回该会话时
+    // 由它恢复"发送中/可停"（T40-② 的正确修法 · R23）。这里只清"这一会话视图专属"的状态。
     setUsage(null);
     setToolLines([]);
     setHistoryHint(null);
@@ -514,7 +545,7 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
     // 附件随发送立刻从待发清单拿掉：本地从不保留副本，失败后要重新添加 ——
     // 保留它会让"发送失败"旁边还挂着 4 张图，看起来像"这些已经发出去了"
     tray.clear();
-    setSending(true);
+    setSendArmed(true);
     setUsage(null);
     setToolLines([]);
 
@@ -529,13 +560,21 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
           : {}),
       });
       selectSession(res.sessionId);
+      // 起流记账：本会话进 `streamingIds`（解 armed 之后由它维持"发送中"），直到它的 done/error
+      setStreamingIds((prev) => {
+        if (prev.has(res.sessionId)) return prev;
+        const next = new Set(prev);
+        next.add(res.sessionId);
+        return next;
+      });
+      setSendArmed(false);
       setHistoryHint(res.warning);
       setBubbles((prev) => [
         ...prev,
         { id: res.messageId, role: 'assistant', content: '', streaming: true },
       ]);
     } catch (err) {
-      setSending(false);
+      setSendArmed(false);
       const message = err instanceof Error ? err.message : String(err);
       // 发送失败：空态时用整页错误态（带重试指引），非空态时贴在气泡上
       setLastError(message);

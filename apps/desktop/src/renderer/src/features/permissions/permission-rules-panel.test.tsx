@@ -30,6 +30,7 @@ const add = vi.fn();
 const list = vi.fn();
 const auditTail = vi.fn();
 const auditExport = vi.fn();
+const health = vi.fn();
 
 function mount(rules: PermissionRuleView[]): void {
   list.mockResolvedValue(rules);
@@ -41,11 +42,15 @@ beforeEach(() => {
   list.mockReset();
   auditTail.mockReset();
   auditExport.mockReset();
+  health.mockReset();
   // 默认给一份空账：审计用例自己覆盖它（写在 mount 里会把用例设的值冲掉，第一次就踩了）
   auditTail.mockResolvedValue(AUDIT_EMPTY);
+  // 默认健康：T37 的降级横幅由专门用例覆盖（不给默认值会让既有用例吃到多余文案）
+  health.mockResolvedValue({ source: 'primary', recovered: false });
   add.mockResolvedValue(view());
   vi.stubGlobal('jujia', {
     permissionRulesList: list,
+    permissionRulesHealth: health,
     permissionRulesAdd: add,
     permissionRulesRemove: vi.fn().mockResolvedValue(true),
     permissionRulesToggle: vi.fn().mockResolvedValue(view()),
@@ -211,5 +216,28 @@ describe('权限页 · 执行审计', () => {
     expect(document.body.textContent).not.toContain('尚未接入');
     // 反过来也不许：内置终端每次都当面问、不经过策略判定，所以它不在判定账里 —— 这句必须说出来
     expect(scope.textContent).toContain('内置终端');
+  });
+});
+
+describe('规则表读坏了要有话（T37 的界面一半 · R23）', () => {
+  it('主文件读不出来（按空表运行）→ 横幅如实说，并指出 .bak 有上一份', async () => {
+    health.mockResolvedValue({ source: 'default', recovered: true });
+    mount([]);
+    const banner = await screen.findByText(/规则文件读不出来/);
+    expect(banner.textContent).toContain('.bak');
+    expect(banner.textContent).toContain('deny');
+  });
+
+  it('从备份恢复 → 说的是"已从备份恢复、请核对"（不许与"读不出来"混成一句）', async () => {
+    health.mockResolvedValue({ source: 'backup', recovered: true });
+    mount([view()]);
+    const banner = await screen.findByText(/已从备份/);
+    expect(banner.textContent).not.toContain('按「没有规则」运行');
+  });
+
+  it('健康（主文件读出）→ 一条横幅都不许出现', async () => {
+    mount([view()]);
+    await screen.findByText(/覆盖范围/); // 等页面真的装完（reload 已跑过）
+    expect(screen.queryByText(/规则文件读不出来|已从备份/)).toBeNull();
   });
 });

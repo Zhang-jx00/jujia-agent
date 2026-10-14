@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -130,5 +130,38 @@ describe('坏文件与旧版本', () => {
     const loaded = await store.load(ID);
     expect(loaded.ok).toBe(true);
     if (loaded.ok) expect(loaded.graph.version).toBe(CANVAS_GRAPH_VERSION);
+  });
+});
+
+describe('原子写与「损坏 ≠ 没有」（T40 · R23 修）', () => {
+  it('第二次保存留下上一版的 .bak（原子写的既有语义，与 json-store 同源）', async () => {
+    const store = createCanvasStore(root);
+    await store.save(ID, graph());
+    const v2 = graph({
+      nodes: [{ id: 'b', kind: 'prompt', x: 1, y: 1, config: { prompt: '第二版' } }],
+    });
+    await store.save(ID, v2);
+    // .bak = 上一版（"旧文件转 .bak"这一步真的发生了 —— 旧写法裸 writeFile 没有它）
+    const bak = await readFile(`${canvasFile(root, ID)}.bak`, 'utf8');
+    expect(bak).toContain('把要点写成三条');
+    const cur = await readFile(canvasFile(root, ID), 'utf8');
+    expect(cur).toContain('第二版');
+    // 读回来仍是新版（.bak 只是救援副本，不抢主文件的位置）
+    const loaded = await store.load(ID);
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) expect(JSON.stringify(loaded.graph)).toContain('第二版');
+  });
+
+  it('主文件损坏且没有备份：报「读不出来」，不许报成「没有这张图」', async () => {
+    const store = createCanvasStore(root);
+    await store.save(ID, graph());
+    await rm(`${canvasFile(root, ID)}.bak`, { force: true }); // 构造"无备份"现场
+    await writeFile(canvasFile(root, ID), '{ 这不是 JSON', 'utf8');
+    const r = await store.load(ID);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toContain('读不出来');
+      expect(r.error).not.toContain('没有这张图');
+    }
   });
 });

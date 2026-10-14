@@ -2,6 +2,7 @@ import {
   IPC,
   permissionRuleInputSchema,
   permissionRuleViewSchema,
+  permissionRulesHealthSchema,
 } from '@jujia/shared-ipc';
 import { z } from 'zod';
 import type { IpcContext } from './context';
@@ -18,6 +19,11 @@ export function registerPermissionRulesIpc(ctx: IpcContext): void {
 
   handle(IPC.PERMISSION_RULES_LIST, async () => {
     return z.array(permissionRuleViewSchema).parse(await permissionRules.list());
+  });
+
+  // T37 的界面一半（R23）：把"从哪一档读出来的"如实递给界面，不含糊
+  handle(IPC.PERMISSION_RULES_HEALTH, async () => {
+    return permissionRulesHealthSchema.parse(await permissionRules.health());
   });
 
   handle(IPC.PERMISSION_RULES_ADD, async (_e, input: unknown) => {

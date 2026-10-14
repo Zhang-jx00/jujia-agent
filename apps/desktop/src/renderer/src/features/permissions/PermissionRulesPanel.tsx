@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import type { AuditPageView, PermissionMode, PermissionRuleView } from '@jujia/shared-ipc';
+import type { AuditPageView, PermissionMode, PermissionRulesHealth, PermissionRuleView } from '@jujia/shared-ipc';
 import { IconTriangleAlert } from '../../ui/icons';
 
 /**
@@ -45,15 +45,19 @@ export function PermissionRulesPanel(): ReactElement {
   const [notice, setNotice] = useState<string | null>(null);
   const [audit, setAudit] = useState<AuditPageView | null>(null);
   const [auditMsg, setAuditMsg] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null);
+  /** T37 的界面一半（R23）：规则文件从哪一档读出来的 —— 读坏了要在这页上说 */
+  const [health, setHealth] = useState<PermissionRulesHealth | null>(null);
 
   const reload = async (): Promise<void> => {
     try {
-      const [list, config] = await Promise.all([
+      const [list, config, healthNow] = await Promise.all([
         window.jujia.permissionRulesList(),
         window.jujia.configGet(),
+        window.jujia.permissionRulesHealth(),
       ]);
       setRules(list);
       setMode(config.config.permissionMode);
+      setHealth(healthNow);
       // 审计读失败**不连带拖垮这一页**：规则表还能改，账要单独说一句为什么看不到
       try {
         setAudit(await window.jujia.auditTail(20));
@@ -133,6 +137,15 @@ export function PermissionRulesPanel(): ReactElement {
 
   return (
     <div className="w2-panel">
+      {health !== null && (health.source !== 'primary' || health.recovered) && (
+        // T37（R23）：规则读坏了**不静默** —— 旧行为是"悄悄按空表跑"，用户写过的 deny 不生效
+        // 而界面显示"还没有任何规则"。这里把来源如实说出来。
+        <p className="p0-err" role="status">
+          {health.source === 'default'
+            ? '规则文件读不出来，已按「没有规则」运行 —— 你写过的 deny 可能没有生效；请检查数据目录的 permission-rules.json（上一份在 .bak 里）'
+            : '规则主文件损坏，已从备份 .bak 恢复 —— 请核对下面的列表是否完整'}
+        </p>
+      )}
       <section className="p0-card">
         <h2>权限模式（会话级意图）</h2>
         <p className="p0-subtitle">

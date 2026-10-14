@@ -796,6 +796,16 @@ export const permissionRuleViewSchema = z.object({
 });
 export type PermissionRuleView = z.infer<typeof permissionRuleViewSchema>;
 
+/**
+ * 权限规则表的**读入健康度**（T37 的界面一半 · R23）：
+ * 规则文件读坏了不许静默当成"没有规则"—— 界面据此如实显示"来源"与"发生过降级"。
+ */
+export const permissionRulesHealthSchema = z.object({
+  source: z.enum(['primary', 'backup', 'default']),
+  recovered: z.boolean(),
+});
+export type PermissionRulesHealth = z.infer<typeof permissionRulesHealthSchema>;
+
 /* ------------------------------------------------------------------ *
  * 执行审计（M4 收尾 · 其二）
  * ------------------------------------------------------------------ */

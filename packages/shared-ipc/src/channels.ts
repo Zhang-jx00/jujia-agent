@@ -117,6 +117,8 @@ export const IPC = {
   PERMISSION_RULES_ADD: 'permission:rules-add',
   PERMISSION_RULES_REMOVE: 'permission:rules-remove',
   PERMISSION_RULES_TOGGLE: 'permission:rules-toggle',
+  /** 规则表的读入健康度（T37：读坏了不许静默当成"没有规则"—— 界面据此如实显示来源） */
+  PERMISSION_RULES_HEALTH: 'permission:rules-health',
   /** 执行审计（M4 收尾 · 其二）：读今天的账 / 导出到本机文件 */
   AUDIT_TAIL: 'audit:tail',
   AUDIT_EXPORT: 'audit:export',

@@ -1,6 +1,6 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { JsonStore } from '@jujia/shared';
+import { readFile, readdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { JsonStore, atomicWriteJson } from '@jujia/shared';
 import {
   CANVAS_GRAPH_VERSION,
   CANVAS_MAX_FILE_BYTES,
@@ -91,7 +91,16 @@ export function createCanvasStore(root: string): CanvasStore {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
       const loaded = await storeOf(root, id).read();
-      if (loaded.data === null) return { ok: false, error: `没有这张图：${id}` };
+      if (loaded.data === null) {
+        // T40（R23）：**损坏 ≠ 没有** —— 读不出来时说"读不出来"，别把坏文件报成"图不存在"
+        // （旧写法两者同一句话；用户会以为图丢了，其实是文件坏了、原件还在盘上）
+        return {
+          ok: false,
+          error: loaded.recovered
+            ? `这张图读不出来（文件损坏？原件保留在磁盘上，未删除）：${id}`
+            : `没有这张图：${id}`,
+        };
+      }
       const migrated = migrateGraph(graphVersionOf(loaded.data), loaded.data);
       if (!migrated.ok) return { ok: false, error: migrated.error };
       return { ok: true, graph: migrated.graph };
@@ -112,9 +121,10 @@ export function createCanvasStore(root: string): CanvasStore {
         return { ok: false, error: `这张图 ${String(Math.round(bytes / 1024))} KB，超过上限 ${String(CANVAS_MAX_FILE_BYTES / 1024)} KB` };
       }
       const file = canvasFile(root, id);
-      await mkdir(dirname(file), { recursive: true });
+      // 原子写走 json-store 的同一台机器（tmp → fsync → 旧文件转 .bak → rename）——
+      // 旧写法是裸 writeFile：文件头自称"json-store 同源"，实现却差一步（T40 审计项，R23 修）。
       const envelope = { version: 1, updatedAt: new Date().toISOString(), data: parsed.data };
-      await writeFile(file, `${JSON.stringify(envelope, null, 2)}\n`, 'utf8');
+      await atomicWriteJson(file, envelope);
       return { ok: true };
     },
   };

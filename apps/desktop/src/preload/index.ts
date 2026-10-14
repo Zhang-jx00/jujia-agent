@@ -44,6 +44,7 @@ import {
   permissionRequestSchema,
   permissionRuleInputSchema,
   permissionRuleViewSchema,
+  permissionRulesHealthSchema,
   scheduleDeleteSchema,
   scheduleEventSchema,
   scheduleListResultSchema,
@@ -98,6 +99,7 @@ import {
   type PluginsState,
   type PermissionRuleInput,
   type PermissionRuleView,
+  type PermissionRulesHealth,
   type ScheduleDeleteInput,
   type ScheduleEventPayload,
   type ScheduleListResult,
@@ -504,6 +506,11 @@ const api = {
 
   async permissionRulesList(): Promise<PermissionRuleView[]> {
     return z.array(permissionRuleViewSchema).parse(await ipcRenderer.invoke(IPC.PERMISSION_RULES_LIST));
+  },
+
+  /** T37 的界面一半（R23）：规则表从哪一档读出来的 —— 读坏了要看得见 */
+  async permissionRulesHealth(): Promise<PermissionRulesHealth> {
+    return permissionRulesHealthSchema.parse(await ipcRenderer.invoke(IPC.PERMISSION_RULES_HEALTH));
   },
 
   async permissionRulesAdd(input: PermissionRuleInput): Promise<PermissionRuleView> {
