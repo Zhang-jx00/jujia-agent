@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStreamTimeout, listModels, resolveEndpoint, streamChat } from './openai-compat';
 import type { ProviderEvent } from './types';
 
@@ -463,31 +463,45 @@ describe('流式的空闲超时与单次调用上限', () => {
 });
 
 describe('createStreamTimeout', () => {
-  it('不 beat 就到期：idleExceeded 变真且信号被触发', async () => {
+  /**
+   * **这一组必须用假时钟**（CI 首跑回填抓到的真形态，2026-10-14）：原来用真实 `sleep(30)` 打拍子，
+   * 而 CI 的负载会让一次 30ms 睡变成 80ms+ —— 60ms 的 idle 定时器**诚实地**触发了，
+   * "beat 续命"于是间歇性红（本地窄缝永远复现不了）。这是"断言依赖真实时钟"那一族：
+   * 要验证的是**逻辑**（beat 会重新计满 idle），不是"CI 的调度有多准"。换成假时钟后逐毫秒可控。
+   */
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('不 beat 就到期：idleExceeded 变真且信号被触发', () => {
     const clock = createStreamTimeout({ idleMs: 40, totalMs: 10_000 });
     expect(clock.idleExceeded()).toBe(false);
-    await new Promise<void>((r) => setTimeout(r, 120));
+    vi.advanceTimersByTime(120);
     expect(clock.idleExceeded()).toBe(true);
     expect(clock.signal.aborted).toBe(true);
     expect(clock.totalExceeded()).toBe(false);
     clock.dispose();
   });
 
-  it('beat 续命：单段间隔都小于空闲上限时，累计多久都不 idle', async () => {
+  it('beat 续命：单段间隔都小于空闲上限时，累计多久都不 idle', () => {
     const clock = createStreamTimeout({ idleMs: 60, totalMs: 30_000 });
     for (let i = 0; i < 8; i += 1) {
-      await new Promise<void>((r) => setTimeout(r, 30));
+      vi.advanceTimersByTime(30);
       clock.beat();
     }
+    // 8 段 × 30ms = 240ms 累计，远超 idleMs；但**每一段都没到 60ms** —— 一次都不许触发
     expect(clock.idleExceeded()).toBe(false);
     expect(clock.signal.aborted).toBe(false);
     clock.dispose();
   });
 
-  it('dispose 之后定时器全部撤掉（不留下会把进程拖住的句柄）', async () => {
+  it('dispose 之后定时器全部撤掉（不留下会把进程拖住的句柄）', () => {
     const clock = createStreamTimeout({ idleMs: 40, totalMs: 60 });
     clock.dispose();
-    await new Promise<void>((r) => setTimeout(r, 150));
+    vi.advanceTimersByTime(150);
     expect(clock.idleExceeded()).toBe(false);
     expect(clock.totalExceeded()).toBe(false);
     expect(clock.signal.aborted).toBe(false);
