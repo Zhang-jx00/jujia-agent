@@ -392,21 +392,27 @@ describe('流式的空闲超时与单次调用上限', () => {
   });
 
   it('反向：数据持续到达时长流**不被空闲超时误杀**（变异 M33 摘掉 beat 就红在这里）', async () => {
+    /**
+     * 参数是"窗口给足"后定的（CI 回填第二轮：80ms/15ms 的组合在忙机上被挤爆过一次，
+     * 报的是"上游 0 秒没有再吐字"——单个 chunk 间隔被调度拖过 80ms，**诚实地**误杀）。
+     * 约束两头都要：上限必须**小于整串时长**（否则"摘掉 beat"的变异就测不出来了，M33 失红），
+     * 又要远大于单段间隔（给忙机留足 jitter 窗口）。200 < 600 ✓，余量 170ms。
+     */
     const mock = await startServer(async (_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       for (let i = 0; i < 20; i += 1) {
         res.write(sseChunk(`第${String(i)}段`));
-        await new Promise<void>((r) => setTimeout(r, 15));
+        await new Promise<void>((r) => setTimeout(r, 30));
       }
       res.write('data: [DONE]\n\n');
       res.end();
     });
     servers.push(mock);
-    // 整串流约 300ms，而空闲上限只有 80ms：不续命就一定被掐
+    // 整串流约 600ms，而空闲上限只有 200ms：不续命就一定被掐
     const events = await collect(
       streamChat(
         { baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] },
-        { idleTimeoutMs: 80, totalTimeoutMs: 30_000 },
+        { idleTimeoutMs: 200, totalTimeoutMs: 30_000 },
       ),
     );
     const text = events
