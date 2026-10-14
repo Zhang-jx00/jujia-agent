@@ -64,13 +64,23 @@ describe('工作区提示与淘汰话术（chat-service 源锁）', () => {
  * `logger.test.ts` 与 `log-store.test.ts` 各自守住；这里只钉"失败点接没接上那个出口"。
  */
 describe('落盘与降级失败要进结构化日志（T47 源锁）', () => {
+  /**
+   * **结构判据一律看"去掉整行注释之后"的源码**。
+   * 这不是洁癖：M268 首校时我把 `persistLogger?.warn(...)` 整行注释掉，锁照样绿 ——
+   * 因为正则匹配到的是**注释里的文本**。一条能被注释满足的断言 = 装饰（证据完整性第 4 条），
+   * 所以这里用 `code`（剥掉整行注释）做结构判定，`src`（原文）只留给"某句话还在不在"那种文案锁。
+   */
+  const code = src.replace(/^\s*\/\/.*$/gm, '');
+
   it('裸 console.warn 只许剩两处：fail() 自己 + 淘汰那条信息行', () => {
     // 计数而不是逐条：新增一处"顺手 console.warn 一下"的失败点会直接把这里打死 ——
     // 那正是本条要拦的行为（失败点必须走 fail，才有文件里那一行）。
-    const warns = [...src.matchAll(/console\.warn\(/g)].map((m) => m.index);
+    const warns = [...code.matchAll(/console\.warn\(/g)];
     expect(warns.length, `chat-service 里 console.warn 出现了 ${String(warns.length)} 次，只许 2 次`).toBe(2);
-    expect(src).toMatch(/function fail\(/);
-    expect(src).toMatch(/persistLogger\?\.warn\(/);
+    expect(code).toMatch(/function fail\(/);
+    expect(code).toMatch(/persistLogger\?\.warn\(/);
+    // 反过来钉住"日志那一行不是注释"：把上面那条调用注释掉，本条必须红（M268 的实撞形状）
+    expect(/\/\/\s*persistLogger\?\.warn/.test(src), 'persistLogger 的调用不许停在注释里').toBe(false);
   });
 
   it('装配根把 logger 接了进来（否则默认出口仍然只进 console）', () => {
