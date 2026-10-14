@@ -1,5 +1,5 @@
 {
-  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）；M20–M21 来自扩容 3（文档查看：innerHTML 不许回来 / 链接协议白名单不许放宽）；M22–M23 来自铺设 6（记忆写入：路径守卫不许退化成拼字符串 / 写类档位不许降成读）；M26–M32 来自安全内核修复轮（外部审查 T1 只读绕过敏感判定 / T2 NTFS 备用数据流 / T3 钩子子进程环境 / T4 钩子配置写入过门）；M33–M37 来自外部审查修复 2（P1 第一批：T7 流式两条时间界限 / T5 会话闸门 / T6 落盘记账与清单串行）；M40 来自组件测试首批（错误边界的捕获状态）；M41–M44 来自外部审查修复 3（T19 硬 ask 不渲染「总是允许」/ T9 超时精准关闭与批准计划回读）；M71–M81 来自无限画布 M9a 前三步（图契约与键名扫描 · 编排层纯规则 · 豁免清单）；M82–M84 来自 M9a 接线锁（界面归属判别 · 事件归属字段 · 执行链路不许另起）；M85 来自复核 047 第二遍实验（停止被判成完成）；M86–M88 来自 M9b B1（对齐辅助线 / 命令面板 / 吸附时机）；M89 来自 CSS 版接线锁（样式规则整块失去）；M90–M92 来自 B2 局部重跑；M93–M99 来自 B3 条件分支；M100–M103 来自 M8 push 收口（推送被降成软 ask / 推送绕过权限门 / 远端名形状校验失守 / 外发文案被换成中性一句）；M104–M105 来自加固 4（cmd 元字符表 / 经 cmd 的判据分叉）；**M106–M119 来自修复批二**（T23 终端会话生命周期：接回失效 / 上限失效 / 尾部不截 / 截错头 / 不记 tail / seq 不动 / 卸载又杀会话 / 决策被绕过 / 状态通道永远答「没有」/ 硬 ask 被放宽；T24 文档页阅读位置：换文件带走旧位置 / 空路径也记 / 滚动没接上 / 读失败不忘）；M127–M128 来自修复批三（下）T30（入参上限被摘 / handler 绕开契约）。基线：本轮主提交；M193–M205 来自铺设 7（M7 定时任务：算式层拒收口径与锚点边界 · 补跑水位线 · 只跑一条 · 免审批键拒收 · 装配即启动）；M206–M211 来自优化5（R18：展开用真实高度轨道过渡 · 箭头同元素转 180° · 收起态 inert · 按压反馈覆盖可点家族）；M212–M215 来自优化6（R19：图标 aria-hidden 契约 · currentColor · 字符画/emoji 清扫）；M216 来自规整13（R20：属性门控背景规则的目标类必须存在 —— 主题背景静默失效的防复发）",
+  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）；M20–M21 来自扩容 3（文档查看：innerHTML 不许回来 / 链接协议白名单不许放宽）；M22–M23 来自铺设 6（记忆写入：路径守卫不许退化成拼字符串 / 写类档位不许降成读）；M26–M32 来自安全内核修复轮（外部审查 T1 只读绕过敏感判定 / T2 NTFS 备用数据流 / T3 钩子子进程环境 / T4 钩子配置写入过门）；M33–M37 来自外部审查修复 2（P1 第一批：T7 流式两条时间界限 / T5 会话闸门 / T6 落盘记账与清单串行）；M40 来自组件测试首批（错误边界的捕获状态）；M41–M44 来自外部审查修复 3（T19 硬 ask 不渲染「总是允许」/ T9 超时精准关闭与批准计划回读）；M71–M81 来自无限画布 M9a 前三步（图契约与键名扫描 · 编排层纯规则 · 豁免清单）；M82–M84 来自 M9a 接线锁（界面归属判别 · 事件归属字段 · 执行链路不许另起）；M85 来自复核 047 第二遍实验（停止被判成完成）；M86–M88 来自 M9b B1（对齐辅助线 / 命令面板 / 吸附时机）；M89 来自 CSS 版接线锁（样式规则整块失去）；M90–M92 来自 B2 局部重跑；M93–M99 来自 B3 条件分支；M100–M103 来自 M8 push 收口（推送被降成软 ask / 推送绕过权限门 / 远端名形状校验失守 / 外发文案被换成中性一句）；M104–M105 来自加固 4（cmd 元字符表 / 经 cmd 的判据分叉）；**M106–M119 来自修复批二**（T23 终端会话生命周期：接回失效 / 上限失效 / 尾部不截 / 截错头 / 不记 tail / seq 不动 / 卸载又杀会话 / 决策被绕过 / 状态通道永远答「没有」/ 硬 ask 被放宽；T24 文档页阅读位置：换文件带走旧位置 / 空路径也记 / 滚动没接上 / 读失败不忘）；M127–M128 来自修复批三（下）T30（入参上限被摘 / handler 绕开契约）。基线：本轮主提交；M193–M205 来自铺设 7（M7 定时任务：算式层拒收口径与锚点边界 · 补跑水位线 · 只跑一条 · 免审批键拒收 · 装配即启动）；M206–M211 来自优化5（R18：展开用真实高度轨道过渡 · 箭头同元素转 180° · 收起态 inert · 按压反馈覆盖可点家族）；M212–M215 来自优化6（R19：图标 aria-hidden 契约 · currentColor · 字符画/emoji 清扫）；M216 来自规整13（R20：属性门控背景规则的目标类必须存在 —— 主题背景静默失效的防复发）；**M263–M275 来自加固18（R27 审计清零批）**（T49 钩子改写后不重判 / 「总是允许」按旧 bypassable 压硬 ask；T48 JSON 形态不剔密 / HTTP 正文绕过剔密 / SSE error 原文无界；T47 失败只进 console / 装配根没接 logger；T43 手动执行退回不过契约；T44 定时事件缺窗口守卫；T46 memo 依赖丢视口；T45 监听器没装 / 告警溢出挤错方向；T50 diff 正文失败被折成空）",
   "mutations": [
     {
       "id": "M1",
@@ -2096,6 +2096,110 @@
       "find": "      return s.source === 'primary' ? s.data.path : null;",
       "replace": "      return s.data.path;",
       "test": "apps/desktop/src/main/open-with-service.test.ts"
+    },
+    {
+      "id": "M263",
+      "desc": "钩子改写参数后不再重判（T49 被回退）：只重过 tool.parse，权限门沿用改写前那份判定 —— 只读放行可被改成读 .env",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "    gate = judge(args);",
+      "replace": "    // 不重判（旧形状：钩子改写过参数也照旧放行）",
+      "test": "packages/agent-core/src/tools/executor.test.ts"
+    },
+    {
+      "id": "M264",
+      "desc": "「本次总是允许」仍按改写前的 bypassable 算（T49 的另一半）：软 ask 压掉改写后的硬 ask，等于替用户签敏感文件",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "    alwaysAllowed = alwaysAllowedNow(gate);",
+      "replace": "    // alwaysAllowed 保持改写前那一份（旧形状）",
+      "test": "packages/agent-core/src/tools/executor.test.ts"
+    },
+    {
+      "id": "M265",
+      "desc": "JSON 形态的密钥字段不剔（T48 的盲区回潮）：api_key 那种「键名带引号、值也带引号」的写法原样留在审计与错误消息里",
+      "file": "packages/agent-core/src/audit/redact.ts",
+      "find": "    return `${head}***${tail}`;",
+      "replace": "    return `${head}${_value}${tail}`;",
+      "test": "packages/agent-core/src/audit/redact.test.ts"
+    },
+    {
+      "id": "M266",
+      "desc": "HTTP 错误正文绕过剔密（T48 第一个出口）：401 回显的 Authorization 原样进错误消息 → 渲染层",
+      "file": "packages/agent-core/src/providers/openai-compat.ts",
+      "find": "    return presentable(text, 300);",
+      "replace": "    return text.replace(/\\s+/g, ' ').slice(0, 300);",
+      "test": "packages/agent-core/src/providers/openai-compat-redact.test.ts"
+    },
+    {
+      "id": "M267",
+      "desc": "SSE data 里的 error 原文既不剔密也不设上界（T48 第二个出口）",
+      "file": "packages/agent-core/src/providers/openai-compat.ts",
+      "find": "上游返回错误：${presentable(msg, 300)}",
+      "replace": "上游返回错误：${msg}",
+      "test": "packages/agent-core/src/providers/openai-compat-redact.test.ts"
+    },
+    {
+      "id": "M268",
+      "desc": "失败出口只进 console（T47 被回退）：打包后 console 不落文件，六处写失败重新变成「没人知道」",
+      "file": "apps/desktop/src/main/chat-service.ts",
+      "find": "  persistLogger?.warn(scope, msg,",
+      "replace": "  // persistLogger?.warn(scope, msg,",
+      "test": "apps/desktop/src/main/chat-honesty-wiring.test.ts"
+    },
+    {
+      "id": "M269",
+      "desc": "装配根不接 logger（T47 的另一半）：setter 存在但没人调，默认出口仍是只写 console",
+      "file": "apps/desktop/src/main/index.ts",
+      "find": "setPersistLogger(logger);",
+      "replace": "void setPersistLogger;",
+      "test": "apps/desktop/src/main/chat-honesty-wiring.test.ts"
+    },
+    {
+      "id": "M270",
+      "desc": "手动执行工具退回「不过契约」（T43 被回退）：payload 直接当合法形状用，args 又以 unknown 进 runTool",
+      "file": "apps/desktop/src/main/ipc/tools.ts",
+      "find": "    const parsed = toolRunSchema.safeParse(payload ?? {});",
+      "replace": "    const parsed = { success: true as const, data: (payload ?? {}) as { toolName: string; args?: Record<string, unknown> } };",
+      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
+    },
+    {
+      "id": "M271",
+      "desc": "定时任务事件推送不问「窗口还活着吗」（T44 被回退）：窗口销毁后 send 抛，而抛在定时任务的事件出口上",
+      "file": "apps/desktop/src/main/ipc/schedule.ts",
+      "find": "          if (win !== undefined && !win.isDestroyed()) win.webContents.send(IPC.SCHEDULE_EVENT, parsed.data);",
+      "replace": "          win?.webContents.send(IPC.SCHEDULE_EVENT, parsed.data);",
+      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
+    },
+    {
+      "id": "M272",
+      "desc": "画布 graph 的 memo 依赖里丢掉视口（T46 被回退）：只平移不编辑就保存，落盘的是上一次编辑时的视口",
+      "file": "apps/desktop/src/renderer/src/features/canvas/CanvasPanel.tsx",
+      "find": "    () => toGraph(nodes, edges, connectionId, viewport),\n    [nodes, edges, connectionId, viewport],",
+      "replace": "    () => toGraph(nodes, edges, connectionId, viewport),\n    [nodes, edges, connectionId],",
+      "test": "apps/desktop/src/renderer/src/memo-ref.test.ts"
+    },
+    {
+      "id": "M273",
+      "desc": "装配点不装 unhandledrejection 监听（T45 被回退）：兜底组件挂着但从来收不到东西，界面上仍然「点了没反应」",
+      "file": "apps/desktop/src/renderer/src/main.tsx",
+      "find": "installFailureReporter();",
+      "replace": "void installFailureReporter;",
+      "test": "apps/desktop/src/renderer/src/wiring-r22.test.ts"
+    },
+    {
+      "id": "M274",
+      "desc": "告警溢出时丢新的而不是挤旧的（T45 的判据回退）：第四条失败静默消失 = 最需要露出的那条没说话",
+      "file": "apps/desktop/src/renderer/src/ui/failure-notice.tsx",
+      "find": "  while (items.length > MAX_VISIBLE) items.splice(0, items.length - MAX_VISIBLE);",
+      "replace": "  while (items.length > MAX_VISIBLE) items.splice(MAX_VISIBLE);",
+      "test": "apps/desktop/src/renderer/src/ui/failure-notice.test.tsx"
+    },
+    {
+      "id": "M275",
+      "desc": "git diff 正文读失败重新被折成空（T50 被回退）：ok:true + 关键行为空，与「没有关键行」长得分毫不差",
+      "file": "packages/agent-core/src/git/git.ts",
+      "find": "  const rawError = rawRes.ok ? null : rawRes.error;",
+      "replace": "  const rawError: string | null = null;",
+      "test": "packages/agent-core/src/git/git.test.ts"
     }
   ]
 }

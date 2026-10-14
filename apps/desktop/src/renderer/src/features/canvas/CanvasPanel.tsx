@@ -135,7 +135,10 @@ export function CanvasPanel(): ReactElement {
   const [busy, setBusy] = useState(false);
   const [runState, setRunState] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
-  const viewportRef = useRef({ x: 0, y: 0, zoom: 1 });
+  // T46：视口是**状态**，不是 ref。保存/运行用的 `graph` 是 useMemo 出来的，
+  // 而 memo 读 `ref.current` = 读一个"变了也不会让缓存失效"的值：
+  // 只平移画布、不碰任何节点，`graph.viewport` 仍是上一次编辑时的旧值，落盘就是错的。
+  const [viewport, setViewportState] = useState({ x: 0, y: 0, zoom: 1 });
   const rfRef = useRef<ReactFlowInstance<FlowNode, Edge> | null>(null);
   /** B1：拖动时的对齐辅助线（只画不判，判定在纯函数里） */
   const [guides, setGuides] = useState<{ vertical: AlignLine | null; horizontal: AlignLine | null }>({
@@ -148,8 +151,8 @@ export function CanvasPanel(): ReactElement {
 
   /** 保存与运行都要用的当前图（纯函数，不做 IO） */
   const graph = useMemo(
-    () => toGraph(nodes, edges, connectionId, viewportRef.current),
-    [nodes, edges, connectionId],
+    () => toGraph(nodes, edges, connectionId, viewport),
+    [nodes, edges, connectionId, viewport],
   );
 
   const reload = useCallback(async (): Promise<void> => {
@@ -209,12 +212,12 @@ export function CanvasPanel(): ReactElement {
         return false;
       }
       const probe: CanvasGraph = {
-        ...toGraph(nodes, edges, connectionId, viewportRef.current),
+        ...toGraph(nodes, edges, connectionId, viewport),
         edges: [...edges.map((e) => ({ id: e.id, from: e.source, to: e.target })), { id: 'probe', from: c.source ?? '', to: c.target ?? '' }],
       };
       return findCycle(probe) === null;
     },
-    [nodes, edges, connectionId],
+    [nodes, edges, connectionId, viewport],
   );
 
   const addNodeAt = (kind: 'prompt' | 'tool' | 'condition' | 'loop', at?: { x: number; y: number }): void => {
@@ -339,10 +342,10 @@ export function CanvasPanel(): ReactElement {
       setConnectionId(parsed.data.connectionId);
       setNodes(parsed.data.nodes.map(toFlowNode));
       setEdges(parsed.data.edges.map(toFlowEdge));
-      viewportRef.current = parsed.data.viewport;
+      setViewportState(parsed.data.viewport);
       // T40：视口要真的回放 —— 旧写法只写 ref，等于写完没人看（React Flow 不知道）。
       // 下一帧再落：节点/边刚 set 进去，先让它渲染完，再把实例视口对准存下来的那一个。
-      requestAnimationFrame(() => rfRef.current?.setViewport(viewportRef.current));
+      requestAnimationFrame(() => rfRef.current?.setViewport(parsed.data.viewport));
       setSelected(null);
       setMsg({ kind: 'ok', text: `已打开 ${id}` });
     } finally {
@@ -594,7 +597,8 @@ export function CanvasPanel(): ReactElement {
             rfRef.current = instance;
           }}
           onMoveEnd={(_e, vp) => {
-            viewportRef.current = { x: vp.x, y: vp.y, zoom: vp.zoom };
+            // T46：写进状态而不是 ref —— memo 依赖它，平移后保存的才是**当下**视口
+            setViewportState({ x: vp.x, y: vp.y, zoom: vp.zoom });
           }}
           nodeTypes={NODE_TYPES}
           nodesDraggable

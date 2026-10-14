@@ -7,6 +7,7 @@ import { ensureConfigFile } from './config-store';
 import { getDataRoot } from './paths';
 import { createLogStore } from './log-store';
 import { createLogger, resolveDefaultMinLevel } from './logger';
+import { setPersistLogger } from './chat-service';
 import {
   applySecurityBaseline,
   assertSecureWebPreferences,
@@ -36,6 +37,9 @@ app.setName('JujiaAgent');
  */
 const logs = createLogStore({ dir: join(getDataRoot(), 'logs'), clock: () => new Date() });
 const logger = createLogger(logs, { minLevel: resolveDefaultMinLevel(process.env) });
+// T47：把失败出口交给对话链路。不调这一句，chat-service 里那六处失败就只进 console ——
+// 而**打包后的 Electron 里 console 不进任何文件**，"落盘失败只进 console"正是 2026-10-09 审计的原话。
+setPersistLogger(logger);
 
 const isSmoke = process.argv.includes('--smoke');
 /** 启动性能实测模式（M18）：打印启动时间线后退出，用于建立可回归的性能预算 */

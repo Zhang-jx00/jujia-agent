@@ -305,6 +305,10 @@ export async function getDiffSummary(cwd: string, staged = false): Promise<GitRe
   const picked = stat.slice(0, DIFF_MAX_FILES);
 
   const rawRes = await git(cwd, ['diff', ...(staged ? ['--cached'] : []), '--no-color', '--unified=0']);
+  // T50：失败不许折成空字符串。旧写法返回仍是 `ok:true`，于是"这次改动没有关键行"与
+  // "关键行读不出来（正文超过 maxBuffer）"在界面上长得分毫不差 —— 静默失败 + 谎报，
+  // 正是 2026-10-09 审计里 B7 那一族在核心包里的同形。
+  const rawError = rawRes.ok ? null : rawRes.error;
   const raw = rawRes.ok ? rawRes.stdout : '';
 
   // 按 'diff --git' 切块
@@ -399,6 +403,12 @@ export async function getDiffSummary(cwd: string, staged = false): Promise<GitRe
   }
 
   const notes: string[] = [];
+  // T50：正文读不出来必须单独说一句。上面每个文件的 highlights 此刻都是空的，
+  // 而"空"有两种意思（没有关键行 / 关键行读不出来）—— 界面分辨不了，就得由数据说清。
+  // 与下一条同一口径（"不读的内容必须说出来，只把行数写成 0 会让人以为新文件是空的"）。
+  if (rawError !== null) {
+    notes.push(`改动正文读不出来（${rawError}）：关键行一栏为空，行数仍按统计计`);
+  }
   if (truncatedFiles || skippedUntracked > 0) {
     notes.push(`改动文件超过 ${DIFF_MAX_FILES} 个，只汇总了前 ${DIFF_MAX_FILES} 个`);
   }

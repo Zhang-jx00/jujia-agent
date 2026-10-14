@@ -192,11 +192,14 @@ async function runToolCore(
   // 2) 权限门 —— 先过策略层（模式 + 用户规则），再决定要不要问。
   //    注意：deny / ask 规则对**只读**工具同样生效（用户可以要求"这个只读工具也要问我"），
   //    因此不再用 `tool.kind !== 'read'` 作为唯一判据。
-  const gate = decideGate({
+  //
+  //    T49：判定式抽成 `judge()` 而不是就地写一份 —— 钩子改写参数后要用**同一套输入**重判。
+  //    抄两份参数清单早晚漏一项（本仓在 startTurn 与审计出口上都已经犯过这个错）。
+  const judge = (checked: unknown) => decideGate({
     mode: opts.mode ?? 'default',
     toolName: tool.name,
     kind: tool.kind,
-    args: args as Record<string, unknown>,
+    args: checked as Record<string, unknown>,
     // 工具声明过"哪条参数是命令行"才送过去：命令前缀规则靠它取值，没声明就不参与
     ...(tool.commandArg !== undefined ? { commandArg: tool.commandArg } : {}),
     ...(opts.rules ? { rules: opts.rules } : {}),
@@ -206,19 +209,21 @@ async function runToolCore(
     // 缺了这一格的现场：CI 的 RUNNER~1 用户目录下根内每个文件都被判敏感，executor 三例全红）
     workspaceRoot: ctx.workspaceRoot,
   });
+  let gate = judge(args);
   sink.gate = gate;
 
-  if (gate.action === 'deny') {
-    return {
-      outcome: {
-        ok: false,
-        content: `已按你的权限设置拒绝本次 ${tool.name}：${gate.reason}。请不要重试同一操作，改为向用户说明或换个思路。`,
-      },
-      asked: false,
-      decision: 'deny',
-      durationMs: Date.now() - started,
-    };
-  }
+  /** deny 的统一出口：改写后重判也可能走到这里，两处必须说同一句话 */
+  const denyByGate = (): RunToolResult => ({
+    outcome: {
+      ok: false,
+      content: `已按你的权限设置拒绝本次 ${tool.name}：${gate.reason}。请不要重试同一操作，改为向用户说明或换个思路。`,
+    },
+    asked: false,
+    decision: 'deny',
+    durationMs: Date.now() - started,
+  });
+
+  if (gate.action === 'deny') return denyByGate();
 
   /**
    * 「本次会话总是允许」只对**软 ask** 生效（`gate.bypassable`）。
@@ -227,8 +232,9 @@ async function runToolCore(
    * 于是下一段的 PermissionRequest 钩子与弹窗对这些情况照常执行 ——
    * 界面上的一个按钮不能把用户自己写的审批钩子连带废掉。
    */
-  const alwaysAllowed =
-    gate.action === 'ask' && gate.bypassable && (opts.alwaysAllow?.has(tool.name) ?? false);
+  const alwaysAllowedNow = (g: typeof gate): boolean =>
+    g.action === 'ask' && g.bypassable && (opts.alwaysAllow?.has(tool.name) ?? false);
+  let alwaysAllowed = alwaysAllowedNow(gate);
   let asked = false;
   let decision: PermissionDecision | undefined;
 
@@ -275,6 +281,16 @@ async function runToolCore(
         durationMs: Date.now() - started,
       };
     }
+    // T49：改写过的参数**重新过一遍权限门**（这一条是 2026-10-14 核心包审计线抓出来的洞）。
+    // 旧写法只重过 `tool.parse`，于是钩子成了绕过判定的后门：
+    //   · `read_file notes.md`（只读放行）改成 `read_file .env` —— 没人问过；
+    //   · `write_file normal.txt`（软 ask，被"本次总是允许"压掉）改成 `write_file .env` ——
+    //     `alwaysAllowed` 用的是改写前的 `bypassable`，等于替用户签了一张他没见过的高危单。
+    // 审计那侧跟着改：`sink.gate` 换成重判后的那份，账本里的判定与真实执行的是同一份参数。
+    gate = judge(args);
+    sink.gate = gate;
+    if (gate.action === 'deny') return denyByGate();
+    alwaysAllowed = alwaysAllowedNow(gate);
   }
 
   // 4) 权限门：PermissionRequest 钩子在**弹窗之前**参与决策

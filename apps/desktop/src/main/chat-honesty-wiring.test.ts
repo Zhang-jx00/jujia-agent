@@ -47,3 +47,51 @@ describe('工作区提示与淘汰话术（chat-service 源锁）', () => {
     expect(panel).toContain('setHistoryHint(event.notice)');
   });
 });
+
+/**
+ * T47（审计清零批 · 2026-10-14）：R25 把"这一轮没写进去"接上了 done.notice，
+ * 但审计原文那条**"落盘失败只进 console"**并没有全清 —— 模块级函数里还留着六处：
+ * 轮末历史写失败、元信息写失败、任务记录写失败、起轮补写失败、摘要读不出来、
+ * 记忆装配与 SessionStart 钩子失败。淘汰路径 `void flushSession(doomed)` 丢掉返回值也属同一族。
+ * 打包后的 Electron 里 `console.warn` 不进任何文件，所以这六处今天等于"没人知道"。
+ *
+ * 修法是把出口收到**一个** `fail()`：console（开发期）+ 结构化日志（打包后唯一翻查的地方）。
+ * 刻意不做成 deps 一路传 —— 这六点都不在 `ChatDeps` 的调用链上，为传一个出口改六处签名，
+ * 代价比一个装配期 setter 大，风险却相同。
+ *
+ * 覆盖面要如实说：**这是源锁，不是运行期真值**。`chat-service` 在 vitest 里 import 不动
+ * （它依赖 electron），所以"日志真的落到文件、按级别过滤、剔密在落盘前"由
+ * `logger.test.ts` 与 `log-store.test.ts` 各自守住；这里只钉"失败点接没接上那个出口"。
+ */
+describe('落盘与降级失败要进结构化日志（T47 源锁）', () => {
+  it('裸 console.warn 只许剩两处：fail() 自己 + 淘汰那条信息行', () => {
+    // 计数而不是逐条：新增一处"顺手 console.warn 一下"的失败点会直接把这里打死 ——
+    // 那正是本条要拦的行为（失败点必须走 fail，才有文件里那一行）。
+    const warns = [...src.matchAll(/console\.warn\(/g)].map((m) => m.index);
+    expect(warns.length, `chat-service 里 console.warn 出现了 ${String(warns.length)} 次，只许 2 次`).toBe(2);
+    expect(src).toMatch(/function fail\(/);
+    expect(src).toMatch(/persistLogger\?\.warn\(/);
+  });
+
+  it('装配根把 logger 接了进来（否则默认出口仍然只进 console）', () => {
+    expect(src).toContain('export function setPersistLogger(');
+    const index = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    expect(index).toMatch(/setPersistLogger\(logger\)/);
+  });
+
+  it('六类失败的说法一个都不许在改造中丢掉', () => {
+    for (const phrase of [
+      '历史没写进去',
+      '元信息没写进去',
+      '任务记录没写进去',
+      '起轮时会话元信息没写进去',
+      '摘要读不出来',
+      '装配失败',
+      'SessionStart 失败',
+    ]) {
+      expect(src, phrase).toContain(phrase);
+    }
+    // 淘汰路径照旧走同一个 flushSession：失败怎么算、怎么说，只有一处定义
+    expect(src).toMatch(/void flushSession\(doomed\)/);
+  });
+});

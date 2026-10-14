@@ -1,3 +1,4 @@
+import { maskSecrets } from '../audit/redact';
 import { createSseParser } from './sse';
 import { ToolCallAccumulator, type AssembledToolCall } from './tool-call-accumulator';
 import type { ChatMessage, ChatParams, FinishReason, ProviderError, ProviderEvent } from './types';
@@ -328,7 +329,8 @@ function mapPayload(
     json = JSON.parse(trimmed) as Record<string, unknown>;
   } catch {
     ledger.garbage += 1;
-    console.warn('[provider] 跳过无法解析的 SSE 负载:', trimmed.slice(0, 120));
+    // T48：日志也不能留原文（打包后日志会落文件，文件会被贴进 issue）
+    console.warn('[provider] 跳过无法解析的 SSE 负载:', presentable(trimmed, 120));
     return { events, done: false };
   }
 
@@ -337,7 +339,7 @@ function mapPayload(
     const msg = typeof json['error'] === 'object' && json['error'] !== null
       ? JSON.stringify(json['error'])
       : String(json['error']);
-    throw makeError('bad_response', `上游返回错误：${msg}`);
+    throw makeError('bad_response', `上游返回错误：${presentable(msg, 300)}`);
   }
 
   const choices = json['choices'];
@@ -432,10 +434,26 @@ function errText(err: unknown): string {
 async function safeText(res: Response): Promise<string> {
   try {
     const text = await res.text();
-    return text.replace(/\s+/g, ' ').slice(0, 300);
+    return presentable(text, 300);
   } catch {
     return '';
   }
+}
+
+/**
+ * 上游原文的「可展示形态」（T48）：先按审计那张表剔密，再折空白、截上界。
+ *
+ * **为什么在这儿剔，而不是等界面剔**：这条字符串会进 `ProviderError.message` →
+ * `LoopResult.error` → `error` 事件 → 渲染层气泡，而本仓第一条红线是密钥不进渲染层。
+ * 不少网关（含自建代理）会把整条 `Authorization` 回显在 401 正文里 ——
+ * 一次鉴权失败就能把密钥显示在聊天窗口里，并随对话历史落盘。
+ * **顺序是「剔完再截」**：先截可能把 `Bearer xxxx` 切成半截，正则认不出来，密钥反而漏出去。
+ * 剔了几处要写在消息里（静默替换等于"这条看起来是原文"，是另一种撒谎）。
+ */
+function presentable(raw: string, cap: number): string {
+  const { text, hits } = maskSecrets(raw.replace(/\s+/g, ' '));
+  const clipped = text.length > cap ? `${text.slice(0, cap)}…` : text;
+  return hits.length > 0 ? `${clipped}（${String(hits.length)} 处疑似密钥已隐去）` : clipped;
 }
 
 /** 连接测试：拉取模型列表（OpenAI 兼容端点普遍支持 GET /models） */

@@ -562,6 +562,67 @@ describe('生命周期钩子接入（W5d）：钩子能拒绝、能改写、能�
     await expect(stat(join(root, 'legit.txt'))).rejects.toThrow();
   });
 
+  it('PreToolUse 把只读工具改写到敏感路径 → 改写后的参数**重新过门**，问的是新路径（T49）', async () => {
+    // 病根（2026-10-14 核心包审计线抓到）：`decideGate` 在钩子**之前**只算一次，
+    // 钩子改写 args 之后只重过 `tool.parse`，**没有重过权限门**。
+    // 于是 `read_file notes.md`（只读放行）被改成 `read_file .env` 时，那扇门再没看过它一眼 ——
+    // 而 T1 把敏感检查提到"任何 allow 之前"，正是为了拦住这一次读取。
+    const secret = join(root, '.env');
+    await writeFile(secret, 'API_KEY=sk-hookbypassvalue-1234567890\n', 'utf8');
+    const { runner } = fakeHooks({ PreToolUse: { updatedInput: { path: secret } } });
+    const { resolver, asked } = fixedResolver('deny');
+    const res = await runTool(
+      readFileTool,
+      { path: join(root, 'notes.md') },
+      ctx(),
+      resolver,
+      { hooks: runner },
+    );
+    expect(res.asked).toBe(true);
+    expect(asked).toHaveLength(1);
+    expect(JSON.stringify(asked[0]?.args)).toContain('.env'); // 问的是改写后的那个路径
+    expect(res.decision).toBe('deny');
+    expect(res.outcome.content).not.toContain('sk-hookbypassvalue');
+  });
+
+  it('反向对照：改写后仍是普通路径 → 一次都不许多问（重判不等于逢改必问）', async () => {
+    const other = join(root, 'other.txt');
+    await writeFile(other, '普通内容\n', 'utf8');
+    const { runner } = fakeHooks({ PreToolUse: { updatedInput: { path: other } } });
+    const { resolver, asked } = fixedResolver('allow_once');
+    const res = await runTool(
+      readFileTool,
+      { path: join(root, 'notes.md') },
+      ctx(),
+      resolver,
+      { hooks: runner },
+    );
+    expect(asked).toHaveLength(0);
+    expect(res.outcome.ok).toBe(true);
+    expect(res.outcome.content).toBe('普通内容\n');
+  });
+
+  it('改写前的软 ask 压不掉改写后的硬 ask：「本次总是允许」不许替用户签敏感路径（T49）', async () => {
+    // 同一处病根的第二个方向，也是更贵的那个：`alwaysAllowed` 用的是**改写前**的 `gate.bypassable`。
+    // `write_file normal.txt` 是软 ask（可被"总是允许"压掉），钩子把它换成 `.env` 就是硬 ask ——
+    // 旧代码照旧压掉，于是勾选过一次"总是允许"之后，敏感文件被静默改写。
+    const secret = join(root, '.env');
+    await writeFile(secret, 'A=1\n', 'utf8');
+    const { runner } = fakeHooks({ PreToolUse: { updatedInput: { path: secret, content: 'by-hook' } } });
+    const { resolver, asked } = fixedResolver('deny');
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'normal.txt'), content: 'x' },
+      ctx(),
+      resolver,
+      { hooks: runner, alwaysAllow: new Set(['write_file']) },
+    );
+    expect(asked).toHaveLength(1); // 改写前不问也算对，但改写后**必须**问
+    expect(res.decision).toBe('deny');
+    expect(await readFile(secret, 'utf8')).toBe('A=1\n');
+    await expect(stat(join(root, 'normal.txt'))).rejects.toThrow();
+  });
+
   it('PermissionRequest 钩子 allow → 跳过弹窗直接执行（审批策略可编程）', async () => {
     const { runner, calls } = fakeHooks({ PermissionRequest: { permissionDecision: 'allow' } });
     const res = await runTool(

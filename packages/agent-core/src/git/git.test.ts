@@ -131,6 +131,32 @@ describe('getDiffSummary：只给关键行，不灌全文', () => {
     expect(f?.highlights.join('\n')).toContain('export function b()');
   });
 
+  it('正文超过 maxBuffer 读不出来 → 关键行为空必须说一句"读不出来"，不许当成没有改动（T50）', async () => {
+    // 2026-10-14 核心包审计线抓到：`const raw = rawRes.ok ? rawRes.stdout : ''` 把失败折成空字符串，
+    // 返回仍是 `ok:true`，于是"这次改动没有关键行"与"关键行读不出来"在界面上长得分毫不差。
+    // 这里**真的**把它撑爆（`git()` 默认 maxBuffer = 4MB），而不是假设那条路会失败。
+    await writeFile(join(repo, 'big.txt'), 'seed\n', 'utf8');
+    await g(['add', 'big.txt']);
+    await g(['commit', '-qm', 'big-seed']);
+    await writeFile(join(repo, 'big.txt'), '改动一行用于撑满缓冲区的内容\n'.repeat(150_000), 'utf8');
+
+    const r = await getDiffSummary(repo);
+    expect(r.ok).toBe(true); // 统计那一路是好的，整体不该失败
+    const f = r.data?.files.find((x) => x.path === 'big.txt');
+    expect(f?.added).toBeGreaterThan(0); // 行数照给
+    expect(f?.highlights).toHaveLength(0); // 关键行这一格确实是空的
+    expect(r.data?.note ?? '').toContain('读不出来'); // 但必须说得出为什么空
+
+    // 反向对照：把大改动提交掉、只留一个小改动，那句话就不许再出现
+    // （否则这条 note 变成"永远在喊读不出来"，等于用一句谎覆盖另一句谎）
+    await g(['add', 'big.txt']);
+    await g(['commit', '-qm', 'big-apply']);
+    await writeFile(join(repo, 'small.txt'), '一行\n', 'utf8');
+    const after = await getDiffSummary(repo);
+    expect(after.ok).toBe(true);
+    expect(after.data?.note ?? '').not.toContain('读不出来');
+  }, 60_000);
+
   it('纯括号/空行这类低信息量内容不会占满摘录', async () => {
     await writeFile(join(repo, 'x.ts'), 'const a = 1;\n', 'utf8');
     await g(['add', '.']);

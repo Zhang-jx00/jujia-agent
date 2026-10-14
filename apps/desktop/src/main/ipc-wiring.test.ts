@@ -321,12 +321,60 @@ describe('T30：CHAT_SEND 的入参必须有契约（上限与文案都收在 sh
   });
 });
 
-describe('推送前必须问"窗口还活着吗"（T40 审计项 · 2026-10-14 修）', () => {
-  it('四条状态推送通道的 send 之前都有 isDestroyed 守卫，且守卫紧挨着 send', () => {
-    // send 到已销毁的 webContents 会抛 —— 守卫必须**就在 send 的前一句**（别处写过不算数）
-    for (const f of ['ipc/terminal.ts', 'ipc/browser.ts', 'ipc/context.ts', 'ipc/canvas.ts']) {
-      const src = read(f);
-      expect(src, f).toMatch(/isDestroyed\(\)\)\s*\w+\.webContents\.send/);
+describe('T43：TOOL_RUN 的入参必须有契约（审计清零批 · 与 T30 同一口径）', () => {
+  it('用 toolRunSchema 校验，手写 typeof 与「unknown 直塞 runTool」都不许回头', () => {
+    // 2026-10-14 审计复看抓到 T30 的同形漏网：对话那条通道补了入站契约，手动执行这条没有，
+    // args 至今以 unknown 进 runTool —— 两条入口对同一种错说两种话。
+    expect(tools).toContain('toolRunSchema.safeParse(payload ?? {})');
+    expect(tools).not.toContain("typeof toolName !== 'string'");
+    expect(tools).not.toContain('as { toolName?: unknown; args?: unknown }');
+  });
+
+  it('契约只管形状（扁平对象 + 名称上限），字段含义仍归各工具的 tool.parse', () => {
+    // 契约住在 `contracts-tool.ts`：`contracts.ts` 顶到了 max-lines 800（2026-10-14 加这条入站契约时
+    // 被当场拦住），按本仓纪律是拆文件、不是放宽阈值。
+    const contracts = read('../../../../packages/shared-ipc/src/contracts-tool.ts');
+    expect(contracts).toContain('export const toolRunSchema');
+    expect(contracts).toContain('z.record(z.unknown()).optional()');
+    expect(contracts).toContain("min(1, '缺少工具名')"); // 既有文案一字不改（界面依赖它）
+  });
+});
+
+describe('推送前必须问"窗口还活着吗"（T40 审计项 · 2026-10-14 修；T44 换成现扫全量）', () => {
+  /**
+   * 扫描范围 = 全部 ipc 模块 + 装配根 + 审批桥（T44）。
+   *
+   * **为什么换掉写死的四条清单**：M7 新增 `ipc/schedule.ts` 时它带着一条没有守卫的 send
+   * 直接进了主干，而那条锁**照样全绿** —— 因为它只检查清单里的四个文件。
+   * 这正是本文件开头批评过的形态（"写死清单，新增模块就静默离开范围"），
+   * 只不过这次漏的是判据而不是注册表。2026-10-14 审计复看时抓到。
+   */
+  const SEND_SCAN = [...IPC_FILES, './index.ts', './permission-bridge.ts'];
+
+  it('每一个 webContents.send 调用点都紧挨着 isDestroyed 守卫（现扫，不写死清单）', () => {
+    // 判据形状沿用 T40：守卫必须在 send 的**同一行或紧邻上一行**（别处写过不算数）。
+    // **按原始行扫描、逐行跳过注释**，不用 stripComments：整段块注释被压成一行会让报出来的
+    // 行号对不上真实文件（首版实测把 58 行报成 47 行）—— 诊断信息指错位置等于没有诊断。
+    const checked: string[] = [];
+    const offenders: string[] = [];
+    const isComment = (l: string): boolean => {
+      const t = l.trim();
+      return t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') || t === '';
+    };
+    for (const rel of SEND_SCAN) {
+      const lines = read(rel).split('\n');
+      lines.forEach((line, i) => {
+        if (isComment(line) || !line.includes('webContents.send(')) return;
+        checked.push(`${rel}:${String(i + 1)}`);
+        const here = line.includes('isDestroyed()');
+        let prev = i - 1;
+        while (prev >= 0 && isComment(lines[prev] ?? '')) prev -= 1;
+        const guarded = here || (prev >= 0 && (lines[prev] ?? '').includes('isDestroyed()'));
+        if (!guarded) offenders.push(`${rel}:${String(i + 1)}  ${line.trim()}`);
+      });
     }
+    // 绝对下限：扫到 0 个点时"没有违规"是假的（改路径 / 改写法都会让清单静默清空）
+    expect(checked.length, `扫到的 send 调用点：\n${checked.join('\n')}`).toBeGreaterThanOrEqual(7);
+    expect(offenders, `缺守卫的 send 调用点：\n${offenders.join('\n')}`).toEqual([]);
   });
 });

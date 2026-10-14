@@ -53,6 +53,22 @@ describe('maskSecrets（命令文本里可能夹着密钥）', () => {
     const r = maskSecrets('set A_TOKEN=aaaaaaaaaaaaaaaaaaaaaa; set B_PASSWORD=bbbbbbbbbbbbbbbbbbbb');
     expect(r.hits.length).toBeGreaterThanOrEqual(2);
   });
+
+  it('JSON 形态的密钥字段也剔（上游报错正文与工具参数都是这种形状 · T48）', () => {
+    // 2026-10-14 审计清零批抓出的盲区：`KV_SECRET_RE` 的键名与值之间只允许 `[=:]?\s*`，
+    // 而 JSON 里是 `"api_key":"sk-..."` —— 两个引号卡在中间，**整条规则形同不存在**。
+    // 于是 provider 把上游 401/error 原文拼进消息时，密钥一路走到渲染层并随历史落盘。
+    const secret = 'sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const r = maskSecrets(`{"message":"quota","api_key":"${secret}"}`);
+    expect(r.text).not.toContain(secret);
+    expect(r.text).toContain('***');
+    expect(r.hits.join(',')).toContain('api_key');
+
+    // 反向对照：普通 JSON 字段一个字都不许动（审计"看得见做了什么"全靠它没被误伤）
+    const clean = '{"path":"src/a.ts","content":"普通正文","maxEntries":500}';
+    expect(maskSecrets(clean).text).toBe(clean);
+    expect(maskSecrets(clean).hits).toEqual([]);
+  });
 });
 
 describe('summarizeArgs（参数摘要：可核对，不可复现内容）', () => {

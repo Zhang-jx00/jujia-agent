@@ -14,6 +14,7 @@ import { PermissionDialog } from './features/permission/PermissionDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { KeepAlive } from './KeepAlive';
 import { IconTriangleAlert } from './ui/icons';
+import { FailureNotices } from './ui/failure-notice';
 
 // 懒加载：连接页与对话页不在首屏，拆出去可显著减小初始 bundle（懒加载策略见 PERF-BUDGET）
 const ConnectionsPanel = lazy(() =>
@@ -301,6 +302,8 @@ export function App(): ReactElement {
 
       {/* 权限审批弹窗挂在最外层：任何页面触发的工具调用都能被审批 */}
       <PermissionDialog />
+      {/* T45：失败兜底同样挂最外层 —— 它接的是"没人 catch 的那一步"（见 ui/failure-notice.tsx） */}
+      <FailureNotices />
     </div>
   );
 }

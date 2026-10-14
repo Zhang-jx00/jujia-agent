@@ -49,6 +49,15 @@ const PATH_KEY_RE = /(^|[^a-z])(path|dir|folder|cwd|file)$/i;
 const KV_SECRET_RE =
   /([A-Za-z0-9_.-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|AUTH)[A-Za-z0-9_.-]*)([=:]?\s*)([A-Za-z0-9+/_.-]{12,})/gi;
 
+/**
+ * JSON 形态的密钥字段（`"api_key": "sk-..."`）—— T48 补的盲区。
+ * 上游报错正文与工具参数都是这种形状，而 `KV_SECRET_RE` 的键名与值之间只允许 `[=:]?\s*`：
+ * JSON 里隔着两个引号，那条规则**整条形同不存在**。值仍取 12 个字符以上（与上面同一条顾虑：
+ * 别把 `"author":"Jane Doe"` 这种普通字段洗成星号）。
+ */
+const JSON_SECRET_RE =
+  /("(?:[A-Za-z0-9_.-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|AUTH)[A-Za-z0-9_.-]*)"\s*:\s*")([^"]{12,})(")/gi;
+
 /** 没有键名可依附的长随机串：一整段、无空格、不含 / 与 . （路径与文件名放过，令牌通常不长成那样） */
 const BARE_SECRET_RE = /(?:^|\s)([A-Za-z0-9+/=_-]{32,})(?=\s|$)/g;
 
@@ -62,6 +71,12 @@ const COMMAND_MAX_CHARS = 400;
 export function maskSecrets(text: string): { text: string; hits: string[] } {
   const hits: string[] = [];
   let out = text;
+
+  // JSON 字段先走（T48）：它的键名带引号，后面的 KV / BARE 都碰不到同一段文本
+  out = out.replace(JSON_SECRET_RE, (_m, head: string, _value: string, tail: string) => {
+    hits.push(head.slice(1, -1)); // 键名去掉引号，hits 列表读起来才是"哪个字段被隐了"
+    return `${head}***${tail}`;
+  });
 
   out = out.replace(HEADER_SECRET_RE, (_m, prefix: string, _value: string) => {
     hits.push(`头里的 ${String(prefix).trim()}`);

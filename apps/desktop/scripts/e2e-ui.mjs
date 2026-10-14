@@ -3718,6 +3718,39 @@ try {
   }
   ok('翻页真值：120 → +11（盘）→ +11（窗口），最早一条可见且只出现一次，计数自洽');
 
+  step('T45 失败兜底：一次没人接住的 IPC 拒绝必须在界面上说出来，而且关得掉');
+  /**
+   * 本轮新增的用户可见能力（渲染层 `unhandledrejection` → 一条告警）。
+   * **为什么值得单独一步**：这条护栏是给"下一处漏写 catch 的代码"兜底的，
+   * 组件测试只能证明组件本身会画，证不了**真应用里那个监听器真的装上过**（装配在 main.tsx）。
+   * 触发用的是本轮 T43 刚立的契约：`toolRun('')` 在主进程被契约拒掉 ⇒ `invoke` 拒绝，
+   * 而这一处调用**故意不 await** —— 那正是"没人接住"的现场，不是编出来的错误码。
+   */
+  await win4.evaluate(() => {
+    void window.jujia.toolRun('', {});
+  });
+  // 等的是**这句固定的前半段**，不是整条消息：Electron 会把渲染层的拒绝包成
+  // `Error invoking remote method 'tool:run': Error: 缺少工具名`（探针实测原文），
+  // 拿"接住它：缺少工具名"这种拼接整句去比，永远匹配不上 —— 首跑就是这样红的，
+  // 红在**断言写法**而不是产品（判据换成不依赖外壳前缀的两段，见下）。
+  if ((await waitText4('但没有地方接住它')) !== true) {
+    fail(
+      '没人接住的 IPC 拒绝仍然静默（T45 的兜底没生效：监听器没装 / 组件没挂 / 契约没拒）',
+      (await body4()).slice(-900),
+    );
+  }
+  const notice = win4.locator('[data-failure-notices] .jj-failure-notice', { hasText: '缺少工具名' }).first();
+  if ((await notice.getAttribute('role')) !== 'alert') {
+    fail('告警没有 role="alert"（读屏不会播 —— 说给看得见的人不等于说给所有人）');
+  }
+  await notice.locator('button').first().click();
+  await win4.waitForTimeout(250);
+  // 只断言"我这条"没了：别处若真有需要露出的失败，不该被这一步当成自己的失败
+  if ((await win4.locator('[data-failure-notices] .jj-failure-notice', { hasText: '缺少工具名' }).count()) > 0) {
+    fail('点 × 之后那条还留着（关不掉 = 变成常驻噪声，界面会被它压住）');
+  }
+  ok('拒绝被说出来（并写明"没有地方接住它"），关得掉，role=alert 可被读屏播');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;

@@ -4,6 +4,7 @@ export * from './pdf-limits';
 export * from './canvas-graph';
 export * from './canvas-run';
 export * from './contracts';
+export * from './contracts-tool';
 export * from './contracts-log';
 export * from './contracts-update';
 export * from './contracts-media';

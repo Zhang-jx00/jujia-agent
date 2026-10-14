@@ -1,4 +1,4 @@
-import { IPC, toolRunResultSchema, type ToolRunResult } from '@jujia/shared-ipc';
+import { IPC, toolRunResultSchema, toolRunSchema, type ToolRunResult } from '@jujia/shared-ipc';
 import { runTool } from '@jujia/agent-core';
 import { getWorkspaceInfo } from '../workspace';
 import type { IpcContext } from './context';
@@ -15,10 +15,12 @@ export function registerToolIpc(ctx: IpcContext): void {
   const { handle, deps, registry, mcp, plugins, skills, hookRunner, loadPolicy } = ctx;
 
   handle(IPC.TOOL_RUN, async (_e, payload: unknown): Promise<ToolRunResult> => {
-    const { toolName, args } = (payload ?? {}) as { toolName?: unknown; args?: unknown };
-    if (typeof toolName !== 'string' || toolName === '') {
-      throw new Error('缺少工具名');
-    }
+    // T43：入参契约在 shared-ipc，与 T30 的 CHAT_SEND 同一口径 —— 形状与上限只在这一处判。
+    // 取代原先的手写 `typeof toolName !== 'string'`：那一版工具名没有长度上限，
+    // 且把 `args` 以 `unknown` 原样塞进 runTool，报的是各工具 tool.parse 的原文（同错不同话）。
+    const parsed = toolRunSchema.safeParse(payload ?? {});
+    if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? '工具参数不合法');
+    const { toolName, args } = parsed.data;
 
     const info = await getWorkspaceInfo();
     // MCP 工具操作的是外部服务，不需要工作区；内置文件工具才需要。

@@ -4,6 +4,9 @@
  * 这批修复的共同形状：**界面上的"没反应"与"谎报"** —— 用普通组件测试逐条复现
  * 成本高（要摆出流中/并发/损坏等现场），但每条都有一个非常明确的源码不变量：
  * 旧写法必须绝迹、新守卫必须在位。对照口径：`chat-honesty-wiring.test.ts`（R21）。
+ *
+ * 文件名带 R22 是它的**出生批次**，不是准入条件：后续轮次的渲染层源码锁也加在这里
+ * （T45 的装配接线、T46 的视口锚点迁移都是），因为判据同类、`read()` 的相对路径也同一套。
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -56,6 +59,24 @@ describe('界面交互群源锁（T40 · 加固15）', () => {
 
   it('画布视口真的回放（setViewport），不是只写 ref 没人看', () => {
     const cv = read('./features/canvas/CanvasPanel.tsx');
-    expect(cv).toMatch(/setViewport\(viewportRef\.current\)/);
+    // T46 把视口从 ref 换成状态（memo 读 `ref.current` 必然读到过期值），锚点因此从
+    // `setViewport(viewportRef.current)` 跟到 `setViewport(parsed.data.viewport)`。
+    // **锁判的还是同一件事**：读回来的视口要交给 React Flow，而不是写进没人看的地方。
+    // "保存时的视口必须是当下那一个"由 memo-ref.test.ts（T46）钉，这里不重复。
+    expect(cv).toMatch(/setViewport\(parsed\.data\.viewport\)/);
+  });
+});
+
+describe('失败兜底的装配接线（T45 · 审计清零批）', () => {
+  it('装配根装上监听、App 挂上组件 —— 缺一条就是"接口有、界面上没有"', () => {
+    // 行为面在 ui/failure-notice.test.tsx（jsdom 里真渲染、真派发 unhandledrejection）；
+    // 这里只钉"接线"那两环：漏装监听 = 兜底从来不会触发，而全仓其它测试照旧全绿。
+    const main = read('./main.tsx');
+    const app = read('./App.tsx');
+    expect(main).toMatch(/installFailureReporter\(\)/);
+    expect(app).toContain('<FailureNotices />');
+    // 组件与安装函数必须来自同一个模块（第二份实现就是第二个口径）
+    expect(main).toMatch(/from '\.\/ui\/failure-notice'/);
+    expect(app).toMatch(/from '\.\/ui\/failure-notice'/);
   });
 });

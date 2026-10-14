@@ -41,6 +41,7 @@ import { getDataRoot } from './paths';
 import { buildContentParts, buildModelHistory, mergeTurnResult, withContentParts } from './model-history';
 import { createPendingNotes, shouldAskAgain, type PendingNotes } from './pending-notes';
 import { createSessionJournal } from './session-journal';
+import type { Logger } from './logger';
 import { needsEviction, pickEvictionCandidate } from './session-lru';
 import { taskStore } from './task-store';
 import {
@@ -164,6 +165,32 @@ const journal = createSessionJournal({
   saveMeta: (meta) => store().saveMeta(meta),
 });
 
+/**
+ * 失败出口（T47 · 2026-10-14 审计清零批）。
+ *
+ * 2026-10-09 审计那条"落盘失败只进 console"到本轮才全清：R25 把**活动轮次**的那一条接上了
+ * `done.notice`（界面看得见），但模块级函数里还留着六处只写 console ——
+ * 而**打包后的 Electron 里 console 不进任何文件**，于是那六处等于"没人知道"。
+ * 结构化日志（M12 批一）就在同一个进程里、出口是现成的，缺的只是接过来。
+ *
+ * 为什么是一个模块级 setter 而不是 `ChatDeps` 一路传：这些失败点（轮末 flush、元信息、
+ * 任务记录、起轮补写、摘要读、记忆装配、SessionStart 钩子）都不在 deps 的调用链上，
+ * 为一个出口改六处签名的代价比 setter 大，风险却相同。
+ */
+let persistLogger: Logger | null = null;
+
+/** 由装配根在 `app.whenReady()` 之后调用；不调用 = 退回"只进 console"的旧行为（不假装日志一定在） */
+export function setPersistLogger(log: Logger): void {
+  persistLogger = log;
+}
+
+/** 失败必须说话：console（开发期）+ 结构化日志（打包后唯一能被翻查的地方） */
+function fail(scope: string, msg: string, err?: unknown): void {
+  console.warn(`[${scope}] ${msg}`, err ?? '');
+  // logger 自己"发射后不管"（见 logger.ts 文件头）：记日志失败不许拖垮它要记的这件事
+  persistLogger?.warn(scope, msg, err === undefined ? {} : { error: err instanceof Error ? err.message : String(err) });
+}
+
 /** ChatMessage → 入库形态（`system` 不落盘由 `persistable` 负责过滤） */
 function toStored(m: ChatMessage): StoredMessage {
   return toStoredMessage(m.role as StoredRole, m.content, new Date(), {
@@ -189,14 +216,11 @@ async function flushSession(s: Session): Promise<string | null> {
   try {
     const out = await journal.flush(s.id, all.map(toStored), (total) => metaOf(s, total));
     if (out.metaError !== null) {
-      console.warn(
-        `[chat] 会话 ${s.id.slice(0, 8)} 的消息已落盘，但元信息没写进去（清单条数会旧一格，不会重复追加）：`,
-        out.metaError,
-      );
+      fail('chat', `会话 ${s.id.slice(0, 8)} 的消息已落盘，但元信息没写进去（清单条数会旧一格，不会重复追加）`, out.metaError);
     }
     return null;
   } catch (err) {
-    console.warn(`[chat] 会话 ${s.id.slice(0, 8)} 的历史没写进去：`, err);
+    fail('chat', `会话 ${s.id.slice(0, 8)} 的历史没写进去`, err);
     return err instanceof Error ? err.message : String(err);
   }
 }
@@ -209,7 +233,7 @@ async function persistTask(id: string, rec: TaskRecord): Promise<void> {
   try {
     await taskStore().write(id, rec);
   } catch (err) {
-    console.warn(`[task] 会话 ${id.slice(0, 8)} 的任务记录没写进去（崩溃恢复这条线会缺一段）：`, err);
+    fail('task', `会话 ${id.slice(0, 8)} 的任务记录没写进去（崩溃恢复这条线会缺一段）`, err);
   }
 }
 
@@ -477,7 +501,7 @@ export function sendMessage(
       try {
         await store().saveMeta(metaOf(session, journal.persistedCount(session.id)));
       } catch (err) {
-        console.warn('[task] 起轮时会话元信息没写进去（崩溃后这张恢复卡片可能找不到）：', err);
+        fail('task', '起轮时会话元信息没写进去（崩溃后这张恢复卡片可能找不到）', err);
       }
 
       const { record, apiKey } = await resolveConnection(connectionId);
@@ -492,10 +516,7 @@ export function sendMessage(
       const summaryText = await store()
         .readSummary(session.id)
         .catch((err: unknown) => {
-          console.warn(
-            '[compact] 摘要读不出来，本轮按未压缩继续:',
-            err instanceof Error ? err.message : String(err),
-          );
+          fail('compact', '摘要读不出来，本轮按未压缩继续', err);
           return '';
         });
       const summarySection =
@@ -548,7 +569,7 @@ export function sendMessage(
           }
         } catch (err) {
           // 记忆装配失败不能让对话挂掉：退回基础人格，并留下日志
-          console.warn('[memory] 装配失败，退回基础人格:', err instanceof Error ? err.message : err);
+          fail('memory', '装配失败，退回基础人格', err);
         }
       }
 
@@ -586,7 +607,7 @@ export function sendMessage(
           }
         } catch (err) {
           // 钩子失败不能让对话挂掉（钩子契约里也是 fail-open），但必须留下痕迹
-          console.warn('[hooks] SessionStart 失败:', err instanceof Error ? err.message : err);
+          fail('hooks', 'SessionStart 失败', err);
         }
       }
 

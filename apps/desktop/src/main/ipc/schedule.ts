@@ -55,7 +55,10 @@ export function registerScheduleIpc(ctx: IpcContext): void {
             console.warn('[schedule] 事件形状不合法，已丢弃：', parsed.error.message);
             return;
           }
-          deps.getWindow?.()?.webContents.send(IPC.SCHEDULE_EVENT, parsed.data);
+          // 窗口可能已经销毁（T44：与 canvas/browser/context/terminal 同一口径 ——
+          // send 到已销毁的 webContents 会抛，而抛在这里等于定时任务的事件出口自己成了崩溃点）
+          const win = deps.getWindow?.();
+          if (win !== undefined && !win.isDestroyed()) win.webContents.send(IPC.SCHEDULE_EVENT, parsed.data);
         },
       });
       serviceRef.start();
