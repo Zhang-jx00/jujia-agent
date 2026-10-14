@@ -201,6 +201,10 @@ async function runToolCore(
     ...(tool.commandArg !== undefined ? { commandArg: tool.commandArg } : {}),
     ...(opts.rules ? { rules: opts.rules } : {}),
     ...(opts.alwaysAsk ? { alwaysAsk: opts.alwaysAsk } : {}),
+    // 敏感判定的 8.3 短名兜底只扫"相对根"的那一段 —— ctx.workspaceRoot 就是本轮的工作区根
+    // （未选工作区时是哨兵 `__no_workspace__`：前缀匹配不上任何真实路径，等价旧的保守行为；
+    // 缺了这一格的现场：CI 的 RUNNER~1 用户目录下根内每个文件都被判敏感，executor 三例全红）
+    workspaceRoot: ctx.workspaceRoot,
   });
   sink.gate = gate;
 

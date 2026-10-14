@@ -1984,6 +1984,22 @@
       "find": "  if (layers.taskResume && layers.taskResume.trim() !== '') {\n    parts.push(layers.taskResume.trim());\n  }",
       "replace": "  void layers.taskResume;",
       "test": "packages/agent-core/src/memory/memory.test.ts"
+    },
+    {
+      "id": "M249",
+      "desc": "短名兜底丢了「相对根」限定（回到全串扫描）：CI 的 RUNNER~1 前缀把根下每个文件都打成敏感",
+      "file": "packages/agent-core/src/permissions/policy.ts",
+      "find": "  const scanned = relToRoot(host, workspaceRoot);",
+      "replace": "  const scanned = host;",
+      "test": "packages/agent-core/src/permissions/policy.test.ts"
+    },
+    {
+      "id": "M250",
+      "desc": "相对根的前缀匹配丢了目录边界（\\ws2 也会被 \\ws 认成之下）：根外文件被当成根内文件",
+      "file": "packages/agent-core/src/permissions/policy.ts",
+      "find": "  const rest = h.slice(r.length);\n  if (rest !== '' && rest !== '\\\\' && !rest.startsWith('\\\\')) return host; // 前缀发生在文件名中间：不算在根下",
+      "replace": "  const rest = h.slice(r.length);\n  void rest;",
+      "test": "packages/agent-core/src/permissions/policy.test.ts"
     }
   ]
 }

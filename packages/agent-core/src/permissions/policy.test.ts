@@ -262,6 +262,41 @@ describe('具名断言：敏感路径优先于只读放行（T1）', () => {
     expect(d.action).toBe('ask');
     expectHardAsk(d, 'read_file 读 .git 的短名形态');
   });
+
+  it('短名兜底只看**相对工作区根**的那一段：根自身前缀带短名时不误伤（CI 实跑把它逼出来的）', () => {
+    /**
+     * 机理（CI 首跑红现场）：GitHub 托管机上临时目录是 `C:\\Users\\RUNNER~1\\AppData\\...` ——
+     * 纯词法的短名兜底把**根下每一个文件**都判成"敏感"，于是"读自己的临时文件"也要问，
+     * executor 那三例全红（拒答解析器一拒就 fail）。本机用户名"张"没有短名别名，永远绿 ——
+     * 这条洞只在"用户目录带 8.3 别名"的机器上露头。
+     *
+     * 修法：**别名攻击改的是"被匹配名字"的写法，那段必然在根之下**；
+     * 根自己的前缀叫 RUNNER~1 不构成任何绕过。所以兜底只扫相对根的那一段；
+     * 根之外的路径保持原来的全串扫描（保守不变）。
+     */
+    const root = 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\jujia-exec-abc';
+    // 根前缀带短名 + 文件名普通 → 不再敏感（修前这里是"短名"）
+    expect(sensitiveReason(`${root}\\x.txt`, root)).toBeNull();
+    expect(sensitiveReason(`${root}\\sub\\notes.md`, root)).toBeNull();
+    // 攻击仍然抓得到：短名段在**根之下**
+    expect(sensitiveReason(`${root}\\GIT~1\\config`, root)).toContain('短名');
+    expect(sensitiveReason(`${root}\\sub\\ENV~1`, root)).toContain('短名');
+    // 根之外：保持全串扫描（保守）
+    expect(sensitiveReason('D:\\other\\GIT~1\\x', root)).toContain('短名');
+    // 大小写不敏感（Windows 语义）：大写根也能对上
+    expect(sensitiveReason(`${root.toUpperCase()}\\x.txt`, root)).toBeNull();
+    // 边界不许被前缀吃掉：`jujia-exec-abc2` 不是 `jujia-exec-abc` 之下 ——
+    // 判据取"根外口径"（全串扫描会把前缀里的 RUNNER~1 扫出来）：若边界失效，
+    // 这条会被当成根内、只剩 `2\normal.txt` 可扫，短名就"消失"了。
+    expect(
+      sensitiveReason('C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\jujia-exec-abc2\\normal.txt', root),
+    ).toContain('短名');
+    // decideGate 级：根下普通文件放行（不再弹窗）
+    const d = decideGate(
+      ctx({ kind: 'read', toolName: 'read_file', args: { path: `${root}\\x.txt` }, workspaceRoot: root }),
+    );
+    expect(d.action).toBe('allow');
+  });
 });
 
 describe('具名断言：记忆 / 文档正文不参与权限判定', () => {

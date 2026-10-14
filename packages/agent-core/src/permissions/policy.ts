@@ -82,6 +82,11 @@ export interface GateContext {
    * 猜错的那条 deny 规则会作用在一段根本不是命令的文本上（看着拦住了，其实没有）。
    */
   commandArg?: string;
+  /**
+   * 工作区根（可选）：只给敏感判定用 —— **8.3 短名兜底只扫"相对根"的那一段**。
+   * 缺省时保持全串扫描（旧行为），不知道根是谁的门不受影响。
+   */
+  workspaceRoot?: string;
 }
 
 /** 即使处于 acceptEdits，也不自动放行的敏感路径特征（按参数分级的关键） */
@@ -127,8 +132,13 @@ function splitAds(target: string): { host: string; stream: string | null } {
   return { host: target.slice(0, offset + idx), stream: body.slice(idx + 1) };
 }
 
-/** 该路径是否属于「必须人工确认」的敏感目标 */
-export function sensitiveReason(target: string): string | null {
+/**
+ * 该路径是否属于「必须人工确认」的敏感目标。
+ *
+ * `workspaceRoot` 只有一个用处：**8.3 短名兜底只扫"相对根"的那一段**（见下）。
+ * 不传（旧调用点 / 没有工作区概念的门）时保持全串扫描，行为与从前一致。
+ */
+export function sensitiveReason(target: string, workspaceRoot?: string): string | null {
   const { host, stream } = splitAds(target);
   for (const { re, why } of SENSITIVE_PATH_PATTERNS) {
     // 按**宿主名**匹配，而不是按整串匹配（外部审查 T2）
@@ -141,8 +151,15 @@ export function sensitiveReason(target: string): string | null {
    * `.env` 就是 `ENV~1`，写的还是同一个文件；而上面那张清单是纯词法正则，
    * `realpath` 又不展开短名 —— 于是换一个写法就能让清单失配、变成"不问就读"。
    * 与下面"带流名"是同一条推理：**认不出来就归到要问的一侧**（fail closed，但不是拒绝）。
+   *
+   * **只看"相对根"的那一段（CI 首跑逼出来的修正）**：GitHub 托管机上临时目录是
+   * `C:\Users\RUNNER~1\AppData\...` —— 全串扫描会把**根下每一个文件**都判成敏感，
+   * 于是"读自己的临时文件"也要问（executor 三例在 CI 全红；本机用户没有短名别名，永远绿）。
+   * 别名攻击改的是"被匹配名字"的写法，那段**必然在根之下**；根自己的前缀叫 RUNNER~1
+   * 不构成任何绕过。根之外的路径保持全串扫描（保守不变）。
    */
-  const short = eightDot3Segment(host);
+  const scanned = relToRoot(host, workspaceRoot);
+  const short = eightDot3Segment(scanned);
   if (short !== null) {
     return `路径含 8.3 短名形态（${short}），敏感名清单按字面匹配会被绕开`;
   }
@@ -150,6 +167,21 @@ export function sensitiveReason(target: string): string | null {
   // 而且这里到底是不是 ADS 取决于文件系统 —— 不确定就归到要问的一侧（fail closed）
   if (stream !== null) return '路径含冒号（NTFS 备用数据流形态），流名不构成独立文件';
   return null;
+}
+
+/**
+ * `host` 相对 `root` 的那一段；不在根之下（或没有根）时返回**原串**。
+ * 大小写不敏感（Windows 语义）；边界按目录分隔符判 —— `ws2` 不是 `ws` 之下。
+ */
+function relToRoot(host: string, root: string | undefined): string {
+  if (root === undefined || root === '') return host;
+  const h = host.replace(/\//g, '\\').toLowerCase();
+  const r = root.replace(/\//g, '\\').toLowerCase().replace(/\\+$/, '');
+  if (!h.startsWith(r)) return host;
+  const rest = h.slice(r.length);
+  if (rest !== '' && rest !== '\\' && !rest.startsWith('\\')) return host; // 前缀发生在文件名中间：不算在根下
+  // 按原串切（长度与 toLowerCase 一一对应，切片后保留原大小写）
+  return host.slice(r.length);
 }
 
 /**
@@ -229,7 +261,7 @@ export function decideGate(ctx: GateContext): GateDecision {
   // 4) 敏感目标：**先问再说**，acceptEdits 也一样（按参数分级）。
   //    这一条排在只读放行之前，所以 `read_file` 读 `.env` 现在会弹硬确认（T1 的修复点，变异 M26）
   if (target !== null) {
-    const why = sensitiveReason(target);
+    const why = sensitiveReason(target, ctx.workspaceRoot);
     if (why !== null) {
       if (ctx.mode === 'dontAsk') {
         // 文案是批复点名的（2026-09-27 复核 034 的 R-6）：必须说清**这次没发生**，
