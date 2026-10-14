@@ -295,6 +295,7 @@ store（仓库级）里可用的 40 位 OAuth 令牌（git 按顺序问 helper�
 门禁实跑（退出码为准）：typecheck 0 · lint 0 · test 0（`127 passed | 1 skipped (128)` / `1947 passed | 1 skipped (1948)`）·
 check:docs 0 + check:docs:selftest 0 · e2e 0（**61 步**整跑）· smoke 0 · perf 0（首帧 **417ms**）。
 **全量变异不再复跑**（零源码改动、零新靶面 —— 同一日已在同源的基线 `5e7b23c` 上 250/250 全拦；如实标注）。
+CI run `38513144116`（收口提交 `a441cd5`）**十步全绿** —— 推送恢复后的**第四绿**。
 **红证实验**：把 README 新增链接改坏 → check:docs 当堂红并点名 `docs/DESIGN-M14-typo.md`（退出码 1）→ 精确还原 → 复绿。
 CHANGELOG 轮换：搬家块 **v0.69.0-铺设7**，块体 **41 行**，sha256 前 12 位 **`af2868d4281b`**；归档 98 → **99** 条、主文件 **12** 条。
 
