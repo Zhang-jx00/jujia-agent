@@ -440,10 +440,16 @@ const GATE_SLOW = ['smoke', 'perf', 'verify:pack', 'mut'];
    */
   const gateLines = progress.split('\n');
   const findDef = (word, scripts) => {
+    // ① 先按"点名 ≥3 个脚本"认定义行（定义行的硬特征）；
+    //    ② 没有再看含"门禁"的行（宽松兜底）；③ 再退第一处出现。
+    // R24 收口实测：宽松口径（'门禁' 也算）会被正文里「门禁机械化…」这种标题词骗走 —— 收紧之。
     for (let i = 0; i < gateLines.length; i += 1) {
       const l = gateLines[i] ?? '';
-      if (!l.includes(word)) continue;
-      if (l.includes('门禁') || scripts.filter((s) => l.includes(s)).length >= 3) return { idx: i, line: l };
+      if (l.includes(word) && scripts.filter((s) => l.includes(s)).length >= 3) return { idx: i, line: l };
+    }
+    for (let i = 0; i < gateLines.length; i += 1) {
+      const l = gateLines[i] ?? '';
+      if (l.includes(word) && l.includes('门禁')) return { idx: i, line: l };
     }
     const fi = gateLines.findIndex((l) => (l ?? '').includes(word));
     return { idx: fi, line: fi >= 0 ? (gateLines[fi] ?? '') : '' };
