@@ -32,6 +32,23 @@ const here = dirname(fileURLToPath(import.meta.url));
 const MAIN_ENTRY = join(here, '..', 'out', 'main', 'index.js');
 
 /**
+ * **预检：构建产物在不在**（R26 实测踩到，写进台账）：`scripts/cleanup.py --apply` 会把
+ * `apps/desktop/out` 收进 `.trash`（它是可重建产物），而**直接 `node scripts/e2e-ui.mjs` 不带构建** ——
+ * 于是 Electron 只甩一句"找不到应用"，看不出是"没构建"还是"构建坏了"。
+ * 这条禁忌写在操作禁忌表里，人照样会忘 —— 那就让脚本自己把话说清楚（fail-fast，不启动窗口）。
+ * 正确跑法永远是 `npm run e2e`（= `electron-vite build` && 本脚本）。
+ */
+if (!existsSync(MAIN_ENTRY)) {
+  console.error(
+    `\n[e2e] 缺构建产物：${MAIN_ENTRY}\n` +
+      '      本脚本不带构建，跑的是上一次 `electron-vite build` 的产物；\n' +
+      '      而 `scripts/cleanup.py --apply` 会把 apps/desktop/out 收进 .trash（可重建）。\n' +
+      '      正确跑法：npm run e2e\n',
+  );
+  process.exit(1);
+}
+
+/**
  * 测试数据落在**项目内** `.tmp/e2e-<运行标识>/`，不写系统盘（用户明确要求"测试不要占 C 盘"）。
  * 两处都要挪才叫真隔离：
  * - `JUJIA_DATA_BASE_DIR` 管应用自己的数据根；

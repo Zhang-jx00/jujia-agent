@@ -93,6 +93,22 @@ if (!Number.isInteger(readmeSteps) || readmeSteps !== realSteps) {
 const STEP_FROM = `${readmeSteps} 步全自动`;
 const STEP_TO = `${readmeSteps + 3} 步全自动`;
 
+/**
+ * 「CHANGELOG 标题时间戳」这条的靶子**从文件现读**：取第二条标题（第一条是本轮新条目，
+ * 按口径还没打标签、只查格式）。写死版本号或写死某分钟都会在下一次交付后被腐蚀（本仓四次），
+ * 而这一条天生"只增不换"，所以锚点必须跟着台账走。
+ */
+const clLines = readFileSync(join(repoRoot, 'CHANGELOG.md'), 'utf8').split('\n');
+const clHeadIdx = clLines.map((l, i) => (/^## \[v/.test(l) ? i : -1)).filter((i) => i >= 0);
+const headLine = clHeadIdx.length > 1 ? (clLines[clHeadIdx[1]] ?? '') : '';
+const headStated = / — (\d{4}-\d{2}-\d{2} \d{2}:\d{2})$/.exec(headLine)?.[1] ?? '';
+if (headStated === '') {
+  fail(
+    '自检锚点失效：CHANGELOG 里找不到"第二条带 ` — YYYY-MM-DD HH:MM` 的标题" —— ' +
+      '第 17 条护栏的靶子立在坏基线上，先看标题格式有没有漂移',
+  );
+}
+
 /** 每个用例：文件、要替换的片段、替换成什么、期望命中的检查项名 */
 const cases = [
   {
@@ -280,6 +296,45 @@ const cases = [
       "  it('发送 initialize 并记录服务端信息与协议版本', async () => {\n" +
       "  it('发送 initialize 并记录服务端信息与协议版本', async () => {",
     expect: '测试用例标题在单文件内唯一',
+  },
+  {
+    name: '标题时间戳写成未来（台账里的时间戳也是数字 · 第 17 条）',
+    file: 'CHANGELOG.md',
+    from: headLine,
+    to: headLine.replace(headStated, '2099-01-01 00:00'),
+    expect: 'CHANGELOG 标题时间戳不晚于标签指向的提交',
+  },
+  {
+    name: 'PROGRESS §三 抄回滚动叙述（第 18 条·上半）',
+    file: 'docs/PROGRESS.md',
+    from: '待办明细见 `docs/HANDOVER.md` §3.2；排期与 DoD 见 `docs/TRACK-ROADMAP.md` §二/§三/§六。',
+    to:
+      '**最新交付**：自检注入的滚动叙述（用来证明第 18 条会咬）。\n\n' +
+      '待办明细见 `docs/HANDOVER.md` §3.2；排期与 DoD 见 `docs/TRACK-ROADMAP.md` §二/§三/§六。',
+    expect: '滚动叙述禁令',
+  },
+  {
+    name: 'HANDOVER 抄回"最近三轮"（第 18 条·下半）',
+    file: 'docs/HANDOVER.md',
+    from: '### 2.12 质量基建（这是本项目最值钱的部分之一，请务必沿用）',
+    to:
+      '**最近三轮已交付**：自检注入。\n\n' +
+      '### 2.12 质量基建（这是本项目最值钱的部分之一，请务必沿用）',
+    expect: '滚动叙述禁令',
+  },
+  {
+    name: '已被证伪的"还没做"句式回来（第 19 条状态句锁）',
+    file: 'docs/DESIGN-SESSIONS.md',
+    from: '# 会话持久化 · 数据布局报备（轨道铺设计划 6 · **已批；6a 与 6b 均已交付**）',
+    to: '# 会话持久化 · 数据布局报备（轨道铺设计划 6 · **已批；6a 已交付，6b 待做**）',
+    expect: '状态句回归锁',
+  },
+  {
+    name: '整节插入吃掉文档小节标题（第 20 条 · R26 施工时作者本人踩过）',
+    file: 'docs/TEST-POLICY.md',
+    from: '## 三、日常使用也想换到别的盘',
+    to: '## 三十、日常使用也想换到别的盘',
+    expect: '活文档的编号小节连续',
   },
 ];
 

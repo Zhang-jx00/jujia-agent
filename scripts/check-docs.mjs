@@ -1192,6 +1192,195 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 17. CHANGELOG 标题时间戳不许晚于"标签指向的那次提交"（R26 · 复核 084）
+ *
+ * 为什么加：R21–R24 四条条目把"打算什么时候收口"写成了时间戳（比真实提交晚 27 分钟到 7 小时），
+ * R25 初稿更写成次晨 01:10 —— **未来时间**。台账里的时间戳也是数字，凭印象写就会往"更从容"的方向飘；
+ * R25 靠手工逐条对 `git log` 才挖出来（复核 082），这条把那次手工对账固化成机器判断。
+ *
+ * 时区坑（设计上绕开）：标题是本机墙钟（+0800），而 CI runner 的本地时区是 UTC ——
+ * 若比较"现在"就会把正确的标题判成未来。这里取 `git log -1 --format=%ai <tag>`
+ * （提交**自己记录**的偏移）截前 16 字符，比的是同一面墙钟，与检查器跑在哪台机器无关
+ * （CI 的 checkout 已是 `fetch-depth: 0`，标签在）。
+ *
+ * 最新一条豁免时刻比对：它正等着本轮打标签 —— 与第 14 条"回退点标签存在性"同一口径。
+ * 防失焦：一条都没比对上（标签全读不到 / 标题解析失效）先红，不静默放过。
+ * ------------------------------------------------------------------ */
+{
+  const heads = [
+    ...read('CHANGELOG.md').matchAll(
+      /^## \[(v[\d.]+-[^\s·\]]+)[^\]\n]*\] — (\d{4}-\d{2}-\d{2} \d{2}:\d{2})/gm,
+    ),
+  ];
+  const late = [];
+  const unreadable = [];
+  let compared = 0;
+  heads.forEach((m, idx) => {
+    const tag = m[1] ?? '';
+    const stated = m[2] ?? '';
+    if (idx === 0) return;
+    let stamp = '';
+    try {
+      stamp = execFileSync('git', ['log', '-1', '--format=%ai', tag], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
+        .trim()
+        .slice(0, 16);
+    } catch {
+      unreadable.push(tag);
+      return;
+    }
+    compared += 1;
+    if (stated > stamp) late.push(`${tag}：标题写 ${stated}，而标签指向的提交在 ${stamp}`);
+  });
+  report(
+    `CHANGELOG 标题时间戳不晚于标签指向的提交（现扫 ${String(heads.length)} 条 / 比对 ${String(compared)} 条 / 最新一条豁免）`,
+    heads.length > 0 && compared > 0 && late.length === 0 && unreadable.length === 0,
+    [
+      heads.length === 0 ? '一条标题都没解析到 —— 这条护栏在跑空' : '',
+      heads.length > 0 && compared === 0
+        ? '一条都没比对上：标签在本地读不到（git 不在 PATH？CI 需要 fetch-depth: 0）'
+        : '',
+      unreadable.length > 0 ? `这些标签读不到，时刻无法核对：${unreadable.join('、')}` : '',
+      late.length > 0
+        ? `标题时间**晚于**提交时刻（不许写"打算什么时候"，更不许写未来）：\n     ${late.join('\n     ')}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 18. 滚动叙述禁令：权威之外不许抄"最近几轮交付了什么"（R26 · 复核 084）
+ *
+ * 为什么加：PROGRESS §三 停在 `v0.56.0-铺设9` 达 20 轮（自 `023d8ff`，2026-10-08 起没人更新），
+ * HANDOVER 的「最近三轮已交付」停在 `v0.48–50`。这类句子**天生会过期** —— 每轮都要人记得改，
+ * 而"状态只写一处"本来就是本仓纪律（数字同理，见第 5 条"N件套"）。
+ * 治本是把两处改成指针（CHANGELOG 顶部 12 条 / ROADMAP §6.2），这条负责保证**再写回来当场红**。
+ * 防失焦：PROGRESS 连 §三 都找不到时先红（护栏不许跑在没有靶子的地方）。
+ * ------------------------------------------------------------------ */
+{
+  const at = progress.indexOf('## 三、下一个动作');
+  const hits = [];
+  if (at === -1) hits.push('PROGRESS 里找不到「## 三、下一个动作」这一节 —— 护栏失去靶子');
+  const sec = at === -1 ? '' : progress.slice(at);
+  for (const m of sec.matchAll(/\*\*最新交付\*\*/g)) {
+    hits.push(`PROGRESS §三 第 ${String(progress.slice(0, at + m.index).split('\n').length)} 行写了「**最新交付**」`);
+  }
+  const ho = read('docs/HANDOVER.md');
+  for (const m of ho.matchAll(/\*\*最近三轮已交付\*\*/g)) {
+    hits.push(`HANDOVER 第 ${String(ho.slice(0, m.index).split('\n').length)} 行写了「**最近三轮已交付**」`);
+  }
+  report(
+    '滚动叙述禁令：PROGRESS §三 与 HANDOVER 不许抄"最近几轮交付了什么"（只许指回 CHANGELOG 顶部与 ROADMAP §6.2）',
+    at !== -1 && hits.length === 0,
+    hits.length === 0
+      ? ''
+      : `${hits.join('\n     ')}\n     这类句子必然过期：进度请写进 CHANGELOG 或 ` + '`TRACK-ROADMAP.md` §6.2，本节只留指针。',
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 19. 状态句回归锁：已被证伪的"还没做"句式不许回来（R26 · 复核 084）
+ *
+ * 为什么加：2026-10-09 深度审计数出 9 处文档漂移，根因不是"没人写文档"，而是
+ * **同一句状态写在多处、交付之后只改了一处**（HANDOVER 的"半更新"态最典型：同一页里
+ * M9 说已收口、M9b 说没开始）。数字类漂移早被第 4b/6 条盯住，状态句一直没人管 ——
+ * 因为"还没做完"本身合法，机器无法凭一句话判断真假。
+ * 折中做法：**把本轮逐条核实为假的写法钉成短语锁**，再出现即红（每条都指回一次真实漂移）。
+ * 范围 = README 与 docs/ 下的活文档：历史归档、CHANGELOG 旧条目与 review/ 台账
+ * 都是审计轨迹（要允许它们引用当时写错的话），不扫也不回改。
+ * ------------------------------------------------------------------ */
+{
+  const PHRASE_LOCKS = [
+    ['M9b 未开始', '画布五批已全交付（B3b `v0.77.0-扩容4`）'],
+    ['6b 未做', '6b 已交付 `v0.44.0-铺设6b`'],
+    ['6b 待做', '同上 —— 这一条连 DESIGN-SESSIONS 的标题行都漂过'],
+    ['`push`（**尚未实现**', 'push 已交付 `v0.56.0-铺设9`（硬 ask、不可被「总是允许」压掉）'],
+    ['PDF / Markdown 应用内查看（选型待拍板', '两者都已交付（`v0.36.0-扩容3` / `v0.46.0-M19a`·`v0.47.0-M19b`）'],
+    ['（argv/process）**零测试**', '`argv.test.ts` 自 `v0.57.0-加固4` 就在；`process.ts` 无专测另记在 R-13'],
+    ['渲染层**零单测**', '渲染层现有 23 个测试文件'],
+  ];
+  const hits = [];
+  let scanned = 0;
+  for (const rel of walkLiveFiles(['.md'])) {
+    if (rel !== 'README.md' && !rel.startsWith('docs/')) continue;
+    if (rel === 'CHANGELOG.md') continue; // 历史条目原文不回改，也不当违例
+    scanned += 1;
+    const lines = read(rel).split('\n');
+    lines.forEach((line, i) => {
+      for (const [phrase, why] of PHRASE_LOCKS) {
+        if (line.includes(phrase)) hits.push(`${rel}:${String(i + 1)}「${phrase}」—— ${why}`);
+      }
+    });
+  }
+  report(
+    `状态句回归锁：已被证伪的"还没做"句式不许回来（锁 ${String(PHRASE_LOCKS.length)} 条 / 现扫 ${String(scanned)} 份活文档）`,
+    scanned > 0 && hits.length === 0,
+    [scanned === 0 ? '一份活文档都没扫到 —— 这条护栏在跑空' : '', hits.join('\n     ')]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 20. 活文档的编号小节必须连续（R26 · 复核 084）
+ *
+ * 为什么加：第 16 条把"整节插入吃标题"这一类机械化到了 CHANGELOG 与复核台账 —— 而它**不限**
+ * 在那两份。R26 施工时自己踩了一次：给 `docs/TEST-POLICY.md` 追加一节时拿"## 六、…"整行当锚点、
+ * new_string 没写回它，标题被静吃掉（正文还在、编号从五直接跳到七）。**当天就写进禁忌表的形状，
+ * 作者本人都复发了** —— 说明只靠人记得必然再犯，于是把 16 号的判据推广到活文档。
+ *
+ * 判据：同一文件里 `^## [一二三…]、` 这一类小节标题，**按出现顺序必须是 1,2,3… 每次 +1**
+ * （吃标题 → 跳号；整节错位 → 重号或倒序）。两种情形都点名文件 + 行号。
+ * 不参与判定的：用阿拉伯编号的文档（HANDOVER）、没有编号小节的文档（README）—— 它们**不足两条**，
+ * 跳过；但参与判定的文件数太少说明定位器失效（防失焦先红，与 16 号同口径）。
+ * ------------------------------------------------------------------ */
+{
+  const CN = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  const toCn = (s) => {
+    if (s === '十') return 10;
+    if (s.startsWith('十')) return 10 + (CN[s.slice(1)] ?? 0);
+    const tail = s.indexOf('十');
+    if (tail > 0) return (CN[s.slice(0, tail)] ?? 0) * 10 + (CN[s.slice(tail + 1)] ?? 0);
+    return CN[s] ?? 0;
+  };
+  const bad = [];
+  let participating = 0;
+  for (const rel of walkLiveFiles(['.md'])) {
+    if (rel === 'CHANGELOG.md') continue; // 顶部 12 条不参与编号检查（16 号已按段落管它）
+    const lines = read(rel).split('\n');
+    const seq = [];
+    lines.forEach((l, i) => {
+      const m = /^## ([一二三四五六七八九十]+)、/.exec(l);
+      if (m) seq.push({ n: toCn(m[1]), line: i + 1, text: l.slice(0, 40) });
+    });
+    if (seq.length < 2) continue;
+    participating += 1;
+    seq.forEach((h, i) => {
+      if (h.n !== i + 1) {
+        bad.push(
+          `${rel}:${String(h.line)} 第 ${String(i + 1)} 个编号小节却写着「${h.text}…」` +
+            `（期望「## ${'一二三四五六七八九十'[i] ?? String(i + 1)}、…」—— 上一节标题被吃掉或编号重复/倒序）`,
+        );
+      }
+    });
+  }
+  report(
+    `活文档的编号小节连续无跳号无重号（现参与 ${String(participating)} 份文档；不足两个编号小节的文档不参与）`,
+    participating >= 5 && bad.length === 0,
+    [
+      participating < 5 ? `只有 ${String(participating)} 份文档参与 —— 编号定位器可能失效（防失焦）` : '',
+      bad.length > 0 ? bad.join('\n     ') : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 
