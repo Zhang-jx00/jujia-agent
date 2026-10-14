@@ -77,14 +77,29 @@ describe('maskSecrets（命令文本里可能夹着密钥）', () => {
     // "星号 + 关键字 + 星号" 的组合让引擎在每个起点都把两半星号重切一遍 = **O(n²)**。
     // 这条锁判的是**耗时**而不是产物：一条二次方的正则挂在"每条报错都要过一次"的路上，
     // 就是本仓最忌的另一件事 —— 界面卡住且不说话（上游给 2MB 正文就能把主进程钉死）。
+    //
+    // **两种形状都要测**（首版只测了 A，变异 M276 当场逃逸 —— 因为 A 被预检跳过了，
+    // 根本没走到那条正则，星号有没有界都无所谓）：
+    //   A 整段没有密钥词 → 靠**线性预检**跳过两趟替换；
+    //   B 有密钥词 + 后面跟一长串无空格文本 → 预检放行，此时救场的是**键名星号有界**。
     const big = 'E'.repeat(200_000);
-    const started = performance.now();
-    const r = maskSecrets(`{"message":"${big}","type":"server_error"}`);
-    const tookMs = performance.now() - started;
-    expect(r.hits).toEqual([]); // 没有密钥键名，就该一个字都不动
-    expect(r.text).toContain(big);
-    // 300ms 是"线性 + 两倍余量"的量级（探针实测四条正则修完后合计个位数毫秒）
-    expect(tookMs, `剔密 20 万字符用了 ${tookMs.toFixed(0)}ms`).toBeLessThan(300);
+
+    // A：没有密钥词，一个字都不许动
+    const t0 = performance.now();
+    const a = maskSecrets(`{"message":"${big}","type":"server_error"}`);
+    const msA = performance.now() - t0;
+    expect(a.hits).toEqual([]);
+    expect(a.text).toContain(big);
+    expect(msA, `无密钥词的 20 万字符用了 ${msA.toFixed(0)}ms`).toBeLessThan(300);
+
+    // B：有密钥词（预检放行），长串跟在后面 —— 这一条才是"星号有界"的靶面
+    const secret = 'sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const t1 = performance.now();
+    const b = maskSecrets(`{"api_key":"${secret}","note":"${big}"}`);
+    const msB = performance.now() - t1;
+    expect(b.text).not.toContain(secret); // 该剔的还是要剔（预检不是为了少剔）
+    expect(b.text).toContain(big); // 长串本身不许被吃掉
+    expect(msB, `带密钥词的 20 万字符用了 ${msB.toFixed(0)}ms`).toBeLessThan(300);
   });
 });
 
