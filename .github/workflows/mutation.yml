@@ -19,7 +19,10 @@ jobs:
     # 变异一轮要跑很多测试文件；给足时间，宁可慢也不要中途被砍掉后误判成"逃逸"
     timeout-minutes: 180
     steps:
+      # 与 ci.yml 保持同一检查条件：全量历史 + 标签（本地怎么跑，手动机就怎么跑）
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

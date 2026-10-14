@@ -11,7 +11,12 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
+      # 全量历史 + 标签：check:docs 有一条要核对「CHANGELOG 回退点标签真实存在」，
+      # 默认 depth=1 的浅克隆**不带标签** → CI 上这条检查必然假红（CI 首跑回填抓到；
+      # 本地全量克隆永远绿）。取全量是刻意的：宁多拉几百 KB，不关掉一条真检查。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
