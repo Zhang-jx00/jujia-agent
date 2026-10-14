@@ -114,8 +114,13 @@ export function ChatComposer(props: Props): ReactElement {
           }
         }}
         onKeyDown={(e) => {
+          // 组合输入期间（拼音选字）回车不是"发送"；229 是部分 IME 的 keyCode 兜底（T40）。
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
+            // 流式中回车不许重发（T40）：旧行为会重入 send()、把 user 气泡打出去，
+            // 主进程的"正在生成中"错误再被 catch 吞掉顺手关掉停止按钮。
+            if (props.sending) return;
             props.onSend();
           }
         }}

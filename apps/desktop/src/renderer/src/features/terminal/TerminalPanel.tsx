@@ -291,11 +291,21 @@ export function TerminalPanel({ workspaceRoot }: TerminalPanelProps): ReactEleme
           onClick={() => {
             const id = sessionRef.current;
             if (!id) return;
-            // 手工关闭：会话唯一的界面出口（另一个是进程自己退出）
-            void window.jujia.terminalKill(id).catch(() => undefined);
-            sessionRef.current = null;
-            setStatus('exited');
-            setMessage('会话已由你结束。需要时请重新启动（新会话要你确认）。');
+            // T40：不在"还没成功"时就宣布结果 —— 旧写法把失败吞掉（catch(() => undefined)）
+            // 仍然把界面切成"已结束"：用户下次回来才发现进程还在。
+            window.jujia
+              .terminalKill(id)
+              .then(() => {
+                // 手工关闭：会话唯一的界面出口（另一个是进程自己退出）
+                sessionRef.current = null;
+                setStatus('exited');
+                setMessage('会话已由你结束。需要时请重新启动（新会话要你确认）。');
+              })
+              .catch((err: unknown) => {
+                setMessage(
+                  `结束会话失败：${err instanceof Error ? err.message : String(err)} —— 会话可能还在运行，可重试`,
+                );
+              });
           }}
         >
           结束会话

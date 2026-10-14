@@ -3,7 +3,6 @@ import type { ReactElement } from 'react';
 import { RESUME_USER_TEXT } from '@jujia/shared-ipc';
 import type {
   ChatSessionMeta,
-  CompactStatusView,
   ConnectionView,
   PendingNoteItem,
   StreamEvent,
@@ -16,6 +15,7 @@ import { belongsToSession } from './stream-routing';
 import { TaskCard } from './TaskCard';
 import { ToolCard } from './ToolCard';
 import { useAttachments } from './use-attachments';
+import { useCompact } from './use-compact';
 import { useTaskCard } from './use-task-card';
 import { IconPencil, IconTriangleAlert, IconX } from '../../ui/icons';
 
@@ -93,6 +93,8 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
    */
   const [pageHint, setPageHint] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  /** T40：翻页在飞保护（连点会重复前插、同页重复 key） */
+  const [olderBusy, setOlderBusy] = useState(false);
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
   const [toolLines, setToolLines] = useState<ToolLine[]>([]);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -145,14 +147,9 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
    * B（结束记要点）：`pendingNotes` 是上次退出留下的待办账，`pendingDraft` 同样只是预览。
    * 两处的"预览"都刻意不写盘 —— 点存才走 apply。
    */
-  const [compactInfo, setCompactInfo] = useState<CompactStatusView | null>(null);
-  const [compactDraft, setCompactDraft] = useState<{
-    summary: string;
-    truncated: boolean;
-    willCover: number;
-  } | null>(null);
-  const [compactBusy, setCompactBusy] = useState(false);
-  const [compactHint, setCompactHint] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  // 压缩簇（预览 → 存 / 不存 → 刷新 + 会话切换时重问）整体在 useCompact（加固15 · 行数触顶拆出）
+  const { compactInfo, compactDraft, compactBusy, compactHint, askCompact, discardCompact, applyCompact } =
+    useCompact(sessionId, sending);
   const [pendingNotes, setPendingNotes] = useState<PendingNoteItem[]>([]);
   const [pendingDraft, setPendingDraft] = useState<{ sessionId: string; text: string } | null>(null);
   const [pendingBusy, setPendingBusy] = useState(false);
@@ -353,13 +350,21 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
 
   /** 继续一个磁盘上的会话（6a 的"重启不丢对话"就落在这里） */
   async function resume(id: string): Promise<void> {
-    const page = await window.jujia.chatHistory({ sessionId: id, limit: 120 });
-    resetView();
-    setBubbles(toHistoryBubbles(page.messages, page.hasMore));
-    selectSession(id);
-    setPickId(id);
-    setHistoryTotal(page.total);
-    setLoadedFrom(page.hasMore);
+    // 注：这里**刻意不拦**"流中切会话"——切换中流是既有设计能力（e2e [26] 的隔离断言正是靠它），
+    // 硬拦会把它拆掉（R22 首版试过，被 e2e 当堂否决）。"切回能续见、能停"的正确修法
+    // （按会话的流中状态）已重排 R23（见 review 079 与 TRACK-ROADMAP §6.2）。
+    try {
+      const page = await window.jujia.chatHistory({ sessionId: id, limit: 120 });
+      resetView();
+      setBubbles(toHistoryBubbles(page.messages, page.hasMore));
+      selectSession(id);
+      setPickId(id);
+      setHistoryTotal(page.total);
+      setLoadedFrom(page.hasMore);
+    } catch (err) {
+      // T40：读历史失败要说话（旧写法 void 出去 = "点了没反应"）
+      setHistoryHint(`读历史失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**
@@ -367,6 +372,8 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
    * 顺序反了就等于"以为翻完了"其实只是没读 —— 两层各管各的上界，别互相顶替。
    */
   async function loadOlder(): Promise<void> {
+    // T40：在飞保护 —— 连点会重复前插，同页出现重复 key（h-<offset+i>-<role> 撞车）。
+    if (olderBusy) return;
     if (sessionId === undefined) {
       setWindowSize((w) => w + 200);
       return;
@@ -375,14 +382,22 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
       setWindowSize((w) => w + 200);
       return;
     }
-    const before = loadedFrom;
-    const page = await window.jujia.chatHistory({ sessionId, before, limit: 120 });
-    const older = toHistoryBubbles(page.messages, page.hasMore);
-    setBubbles((prev) => [...older, ...prev]);
-    setHistoryTotal(page.total);
-    setLoadedFrom(page.hasMore);
-    // 取到了消息却一条气泡都没多 = 界面看起来"点了没反应"，这句话必须由我们说出来（T33）
-    setPageHint(olderPageNotice({ fetched: page.messages.length, bubbles: older.length, hasMore: page.hasMore }));
+    setOlderBusy(true);
+    try {
+      const before = loadedFrom;
+      const page = await window.jujia.chatHistory({ sessionId, before, limit: 120 });
+      const older = toHistoryBubbles(page.messages, page.hasMore);
+      setBubbles((prev) => [...older, ...prev]);
+      setHistoryTotal(page.total);
+      setLoadedFrom(page.hasMore);
+      // 取到了消息却一条气泡都没多 = 界面看起来"点了没反应"，这句话必须由我们说出来（T33）
+      setPageHint(olderPageNotice({ fetched: page.messages.length, bubbles: older.length, hasMore: page.hasMore }));
+    } catch (err) {
+      // T40：读失败要说话（旧写法 void 出去 = "点了没反应"）
+      setPageHint(`读更早的消息失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setOlderBusy(false);
+    }
   }
 
   /** 四态判定：空 / 加载 / 错误 / 成功 */
@@ -398,28 +413,7 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
   /** 加图提示里点名"发给谁"：隐私表述要落到具体连接，不能只说"服务商" */
   const connectionName = connections.find((c) => c.id === connectionId)?.name ?? '当前连接';
 
-  /* ---------------- 6b：压缩（A）与「结束记要点」（B） ---------------- */
-
-  /** 会话切换、或一轮跑完之后重新问一次状态（阈值判定只在主进程算，界面不复制规则） */
-  useEffect(() => {
-    setCompactDraft(null);
-    setCompactHint(null);
-    if (sessionId === undefined) {
-      setCompactInfo(null);
-      return;
-    }
-    if (sending) return;
-    let cancelled = false;
-    void window.jujia.chatCompactStatus(sessionId).then((s) => {
-      if (!cancelled) setCompactInfo(s);
-    }, () => {
-      // 问不到状态不是错：只是这一轮不提示。下一轮结束还会再问，静默失败才是问题
-      if (!cancelled) setCompactInfo(null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, sending]);
+  /* ---------------- 6b：「结束记要点」（B） ---------------- */
 
   /** 上次退出攒下的待办账：开机问一次，用户说过「不再问」就永不再弹 */
   useEffect(() => {
@@ -432,45 +426,6 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
       cancelled = true;
     };
   }, []);
-
-  async function askCompact(): Promise<void> {
-    if (sessionId === undefined) return;
-    setCompactBusy(true);
-    setCompactHint(null);
-    try {
-      const r = await window.jujia.chatCompactPreview(sessionId);
-      if (!r.ok) {
-        setCompactHint({ kind: 'err', text: r.error });
-        return;
-      }
-      setCompactDraft({ summary: r.summary, truncated: r.truncated, willCover: r.willCover });
-    } finally {
-      setCompactBusy(false);
-    }
-  }
-
-  /** 「先不存」：只把预览丢掉 —— 磁盘与水印从这一刻起也没被动过 */
-  function discardCompact(): void {
-    setCompactDraft(null);
-    setCompactHint({ kind: 'ok', text: '没存。发给模型的上下文一点没变。' });
-  }
-
-  async function applyCompact(): Promise<void> {
-    if (sessionId === undefined || compactDraft === null) return;
-    setCompactBusy(true);
-    try {
-      const r = await window.jujia.chatCompactApply(sessionId, compactDraft.summary);
-      setCompactDraft(null);
-      setCompactHint(
-        r.ok
-          ? { kind: 'ok', text: `已压缩到第 ${String(r.compactedThrough)} 条，原始记录一字未删（在磁盘上可查）` }
-          : { kind: 'err', text: r.error },
-      );
-      setCompactInfo(await window.jujia.chatCompactStatus(sessionId));
-    } finally {
-      setCompactBusy(false);
-    }
-  }
 
   async function endSessionAndRemember(): Promise<void> {
     if (sessionId === undefined) return;
@@ -544,6 +499,9 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
     const text = input.trim();
     const images = tray.current();
     if ((text === '' && images.length === 0) || !connectionId) return;
+    // T40：流式中不许重入（回车/连点都走这里）—— 主进程会拒"正在生成中"，而 catch 会把
+    // sending 关掉：停止按钮失效 + 幽灵气泡两件都发生过。守卫放在动任何界面状态之前。
+    if (sending) return;
 
     const userBubble: Bubble = {
       id: `u-${Date.now()}`,
@@ -599,7 +557,12 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
 
   async function stop(): Promise<void> {
     if (!sessionId) return;
-    await window.jujia.chatStop(sessionId);
+    try {
+      await window.jujia.chatStop(sessionId);
+    } catch (err) {
+      // T40：失败要说话（旧写法 void 出去 = "点了没反应"）
+      setHistoryHint(`停止失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**
@@ -905,6 +868,7 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
           type="button"
           className="jj-btn jj-btn-quiet jj-transition"
           onClick={() => void loadOlder()}
+          disabled={olderBusy}
         >
           {loadedFrom > 0
             ? `从磁盘再读 ${String(Math.min(120, loadedFrom))} 条`

@@ -4257,6 +4257,52 @@ CI run `38515892985` **十步全绿**（推送恢复后**第六绿**）。回填
 
 ---
 
+## 复核 079 · 加固15（R22 · 修复批四：界面交互群 —— T40 渲染层八条）
+
+**轮次**：R22 · 遗留清理序列（十轮表 §6.2 第二批）· 2026-10-14。**范围**：
+`features/chat/{ChatComposer,ChatPanel}.tsx`（回车守卫 / 会话切换守卫 / 翻页在飞 / 三处 catch）·
+`features/chat/use-compact.ts`（**拆文件**：ChatPanel 行数触顶 823/800）·
+`features/permission/PermissionDialog.tsx`（按 id）· `features/terminal/TerminalPanel.tsx`（kill 谎报）·
+`features/ide/IdePanel.tsx`（读失败不再装"没选"）· `features/canvas/CanvasPanel.tsx`（视口回放）·
+新增 `chat-composer.test.tsx` + `wiring-r22.test.ts` + PROGRESS/CHECKLIST 计数。**零新依赖**；
+无权限语义变化（全是界面守卫与"说话面"）。
+
+**第一遍**：起点 `9f44e9f`（十轮计划入账）干净；版本号先改 0.81.0 再跑图形类门禁。
+门禁实跑（退出码为准、禁管道）：typecheck 0 · **lint 首跑红**（ChatPanel `823/800` 触顶 →
+拆 `use-compact.ts` 后复绿；**拆文件不抬上限**，同 R14 先例）· test 0（`130 passed | 1 skipped (131)` /
+`1960 passed | 1 skipped (1961)`，+2 文件 / +8 例）· check:docs 0（首跑红 = "131 vs 129"计数同步）。
+CHANGELOG 轮换：搬家块 **v0.71.0-优化5**，块体 **34 行**，sha256 前 12 位 **`96da5eea59c9`**；
+归档 100 → **101** 条、主文件 **12** 条。
+
+**第二遍**
+
+- **逐条核实（八条全成立）**：① Enter 绕过 disabled 直调 `send()`（`onKeyDown` 无守卫，成立）·
+  ② `resume()`/新会话无 `sending` 守卫（`resetView` 清 sending，成立）· ③ 审批成功路径 `slice(1)`
+  与 catch 的按 id 两种口径并存（成立）· ④ 翻页无在飞保护、`resume/loadOlder/stop` 无 catch（成立）·
+  ⑤ `terminalKill(...).catch(() => undefined)` 后无条件"已结束"（成立）· ⑥ `workspaceGet` 失败
+  `.catch(() => undefined)` 与"还没选择"同一句话（成立）· ⑦ 视口只写 ref、`setViewport` 现扫零命中（成立）·
+  ⑧ IME 无 `isComposing`/229（成立）。**没有一条"已被前轮修掉"** —— 与 R21 不同，这批全是存活项。
+- **修复形状统一**：守卫放在"动任何界面状态之前"（send 顶部）；拒绝类切换要**说出原因**
+  （不安静地什么都不做）；成功/失败两条路径**同一口径**（审批按 id、kill 先成功再切状态）。
+- **e2e 当堂咬住一条"修法越界"（本轮最重要的教训，如实记）**：第②条（流中切会话）首版按"硬拦"实现
+  → e2e [26] **当场红**（`A 会话的正文掉进了 B 的界面`—— 换会话被拦后界面仍停在 A，
+  后续断言把 A 的现场读成了 B）。**这份 e2e 是"切换中流是设计能力"这件事的持有者** ——
+  硬拦 = 拆设计。处置：**回退硬拦、保留其余七条**；正确修法（按会话的流中状态：`Set<sessionId>`
+  + 切回恢复"发送中/可停"）**重排 R23**。与"改完的合法性由锁说话"同一纪律；
+  **修一条缺陷之前先问"这份能力是不是有人正靠它站着"**。
+- **三条新靶面（M254–M256）**：send 守卫被摘 / 审批 `slice(1)` 回退 / 视口回放被摘 ——
+  **校准在提交后基线上补跑**，结果随回填行。
+- **测试面**：`chat-composer.test.tsx` 3 例真组件（IME 事件 / 流中 / Shift+Enter —— RTL 的
+  `isComposing` 注入在 jsdom 上实测有效）；`wiring-r22.test.ts` 5 条源锁（含"按钮真的挂了
+  `olderBusy`"与"旧吞法绝迹"两条防回退）。
+
+**按标签回退拿到的是什么**：`git checkout v0.81.0-加固15` → 界面群八条修复 + `use-compact.ts` 拆分 +
+两条新测试 + 台账/CHANGELOG（0.81.0）。
+
+**远端核对**：随文末回填（提交与推送后补；e2e / smoke / perf 与 M254–M256 同步回填）。
+
+---
+
 ## 复核规范（后续每次沿用；2026-10-07 起为**闭环模式**）
 
 > **模式变更（2026-10-07，负责人决定）**：开发 / 两遍复核 / 台账 / 门禁 / 推送 / 标签 / 发布**由同一方闭环**，

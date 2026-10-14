@@ -340,6 +340,9 @@ export function CanvasPanel(): ReactElement {
       setNodes(parsed.data.nodes.map(toFlowNode));
       setEdges(parsed.data.edges.map(toFlowEdge));
       viewportRef.current = parsed.data.viewport;
+      // T40：视口要真的回放 —— 旧写法只写 ref，等于写完没人看（React Flow 不知道）。
+      // 下一帧再落：节点/边刚 set 进去，先让它渲染完，再把实例视口对准存下来的那一个。
+      requestAnimationFrame(() => rfRef.current?.setViewport(viewportRef.current));
       setSelected(null);
       setMsg({ kind: 'ok', text: `已打开 ${id}` });
     } finally {

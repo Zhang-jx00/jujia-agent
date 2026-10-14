@@ -2024,6 +2024,30 @@
       "find": "      if (win !== undefined && !win.isDestroyed()) win.webContents.send(IPC.TERMINAL_STREAM, event);",
       "replace": "      win?.webContents.send(IPC.TERMINAL_STREAM, event);",
       "test": "apps/desktop/src/main/ipc-wiring.test.ts"
+    },
+    {
+      "id": "M254",
+      "desc": "send 的「流式中」守卫被摘（T40 被回退）：流中回车重入、幽灵气泡与停止失效回来",
+      "file": "apps/desktop/src/renderer/src/features/chat/ChatPanel.tsx",
+      "find": "    // T40：流式中不许重入（回车/连点都走这里）—— 主进程会拒\"正在生成中\"，而 catch 会把\n    // sending 关掉：停止按钮失效 + 幽灵气泡两件都发生过。守卫放在动任何界面状态之前。\n    if (sending) return;",
+      "replace": "    void sending;",
+      "test": "apps/desktop/src/renderer/src/wiring-r22.test.ts"
+    },
+    {
+      "id": "M255",
+      "desc": "审批成功路径回退成 slice(1)（T40 被回退）：队首已被超时移除时误删排队中的下一张卡",
+      "file": "apps/desktop/src/renderer/src/features/permission/PermissionDialog.tsx",
+      "find": "    setEditing(false);\n    // T40：按 id 移除（与 catch 分支同一口径）—— `slice(1)` 会在\"队首恰已被超时事件移除\"\n    // 的竞态里把排队中的下一张卡一起删掉：那张卡没被决定就从界面上消失了。\n    setQueue((prev) => prev.filter((r) => r.id !== request.id));",
+      "replace": "    setEditing(false);\n    setQueue((prev) => prev.slice(1));",
+      "test": "apps/desktop/src/renderer/src/wiring-r22.test.ts"
+    },
+    {
+      "id": "M256",
+      "desc": "画布视口回放被摘（T40 被回退）：只写 ref 不 setViewport，「存而不用」回来",
+      "file": "apps/desktop/src/renderer/src/features/canvas/CanvasPanel.tsx",
+      "find": "      requestAnimationFrame(() => rfRef.current?.setViewport(viewportRef.current));",
+      "replace": "      void rfRef.current;",
+      "test": "apps/desktop/src/renderer/src/wiring-r22.test.ts"
     }
   ]
 }

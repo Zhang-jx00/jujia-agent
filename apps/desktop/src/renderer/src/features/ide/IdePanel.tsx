@@ -23,6 +23,8 @@ const PdfView = lazy(() => import('./PdfView').then((m) => ({ default: m.PdfView
  */
 export function IdePanel(): ReactElement {
   const [root, setRoot] = useState<string | null>(null);
+  /** T40：工作区信息读失败要说出来 —— 不许与"还没选择工作区"混成同一句话 */
+  const [rootError, setRootError] = useState<string | null>(null);
   const [listings, setListings] = useState<Record<string, Listing>>({});
   const [open, setOpen] = useState<string | null>(null);
   const [content, setContent] = useState('');
@@ -43,7 +45,10 @@ export function IdePanel(): ReactElement {
         setRoot(info.root);
         if (info.root !== null) void loadDir('.');
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        // T40：读失败 ≠ 没选工作区 —— 两句话分开说（旧写法两个都显示成"还没选择"）
+        if (alive) setRootError(err instanceof Error ? err.message : String(err));
+      });
     return () => {
       alive = false;
     };
@@ -168,7 +173,13 @@ export function IdePanel(): ReactElement {
   return (
     <div className="jj-ide">
       <div className="jj-ide-tree" aria-label="文件树">
-        <p className="p0-subtitle">{root === null ? '还没选择工作区（去「概览」页选）' : `工作区：${root}`}</p>
+        <p className="p0-subtitle">
+          {rootError !== null
+            ? `工作区信息读不出来：${rootError} —— 可在「概览」页确认后重开本页`
+            : root === null
+              ? '还没选择工作区（去「概览」页选）'
+              : `工作区：${root}`}
+        </p>
         {root !== null && <TreeNode rel="." depth={0} listings={listings} onToggle={toggleDir} onOpen={openFile} />}
       </div>
 

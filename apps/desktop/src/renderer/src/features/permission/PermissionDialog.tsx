@@ -107,7 +107,9 @@ export function PermissionDialog(): ReactElement | null {
       );
     }
     setEditing(false);
-    setQueue((prev) => prev.slice(1));
+    // T40：按 id 移除（与 catch 分支同一口径）—— `slice(1)` 会在"队首恰已被超时事件移除"
+    // 的竞态里把排队中的下一张卡一起删掉：那张卡没被决定就从界面上消失了。
+    setQueue((prev) => prev.filter((r) => r.id !== request.id));
   }
 
   /** 允许但先改参数：JSON 不合法就地报错，不提交 */
