@@ -173,7 +173,11 @@ export function openExternalIfSafe(url: string): boolean {
     console.warn('[security] 已拒绝外部打开（非 http/https）:', url);
     return false;
   }
-  void shell.openExternal(url);
+  // 失败不许吞（T40，2026-10-14 修）：与 open-with-launch.ts 同一口径 ——
+  // `void` 掉等于"点了没反应"且无记录；这里至少留下可查的痕。
+  void shell.openExternal(url).catch((err: unknown) => {
+    console.error('[security] 系统浏览器打开失败：', err);
+  });
   return true;
 }
 

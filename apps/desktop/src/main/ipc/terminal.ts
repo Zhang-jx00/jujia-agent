@@ -37,7 +37,9 @@ export function registerTerminalIpc(ctx: IpcContext): void {
 
   const terminal = new TerminalService(
     (event) => {
-      deps.getWindow?.()?.webContents.send(IPC.TERMINAL_STREAM, event);
+      // 窗口可能已经销毁（T40：send 到已销毁的 webContents 会抛）—— 先问活着吗
+      const win = deps.getWindow?.();
+      if (win !== undefined && !win.isDestroyed()) win.webContents.send(IPC.TERMINAL_STREAM, event);
     },
     // fail-closed：权限桥不可用时一律拒绝，绝不因为"取不到审批"就放行
     (req) => {

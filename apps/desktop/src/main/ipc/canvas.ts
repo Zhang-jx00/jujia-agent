@@ -57,7 +57,9 @@ export function registerCanvasIpc(ctx: IpcContext): void {
             console.warn('[canvas] 事件形状不合法，已丢弃（这是内部缺陷，不该发生）：', parsed.error.message);
             return;
           }
-          deps.getWindow?.()?.webContents.send(IPC.CANVAS_EVENT, parsed.data);
+          // 窗口可能已经销毁（T40：send 到已销毁的 webContents 会抛）—— 先问活着吗
+          const win = deps.getWindow?.();
+          if (win !== undefined && !win.isDestroyed()) win.webContents.send(IPC.CANVAS_EVENT, parsed.data);
         },
         ...(deps.fetcher === undefined ? {} : { fetcher: deps.fetcher }),
       });

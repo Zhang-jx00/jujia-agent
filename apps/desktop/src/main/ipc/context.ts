@@ -123,7 +123,9 @@ export function createIpcContext(deps: IpcDeps): IpcContext {
     externalServers: () => plugins.externalServers(),
   });
   mcp.onChanged((views) => {
-    deps.getWindow?.()?.webContents.send(IPC.MCP_STATE_CHANGED, views);
+    // 窗口可能已经销毁（T40：send 到已销毁的 webContents 会抛）—— 先问活着吗
+    const win = deps.getWindow?.();
+    if (win !== undefined && !win.isDestroyed()) win.webContents.send(IPC.MCP_STATE_CHANGED, views);
   });
   // 应用退出时退掉所有 MCP 子进程，避免留下孤儿进程
   app.on('before-quit', () => {

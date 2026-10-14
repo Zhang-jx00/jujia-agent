@@ -252,7 +252,13 @@ export function createSessionStore(sessionsRoot: string): SessionStore {
 
     load: async (id) => {
       const path = messagesFile(sessionsRoot, id);
-      const raw = await readFile(path, 'utf8').catch(() => '');
+      // 读失败要分两说（T40 审计项，2026-10-14 修）：**文件不存在** = 全新会话，按空处理；
+      // **读得到路径但读不出来**（权限 / IO / 路径被别的东西占着）≠ 会话是空的 ——
+      // 静默回一份空历史等于"点开旧会话全忘了而界面无声"，必须往上抛。
+      const raw = await readFile(path, 'utf8').catch((err: unknown) => {
+        if ((err as { code?: string }).code === 'ENOENT') return '';
+        throw err;
+      });
       // 水印取自元信息；读不出、字段缺失、或是旧数据 → 一律按 0（未压缩）处理，不猜
       let compactedThrough = 0;
       if (raw !== '') {

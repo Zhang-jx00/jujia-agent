@@ -341,3 +341,20 @@ describe('load() 一并给出水印', () => {
     expect((await store.load(ID)).compactedThrough).toBe(0);
   });
 });
+
+describe('读失败不许静默变空（T40 审计项 · 2026-10-14 修）', () => {
+  it('消息文件存在但读不出来（路径被目录占着）→ load 要报错，不许回一份空历史', async () => {
+    const store = createSessionStore(root);
+    await record(store, meta(ID), [toStoredMessage('user', '一')]);
+    // 把消息文件换成目录：readFile 会报 EISDIR/EPERM —— 绝不是"这个会话没有消息"。
+    // 旧写法把一切读失败都吞成 ''，"点开旧会话全忘了而界面无声"就是这么来的。
+    await rm(messagesFile(root, ID));
+    await mkdir(messagesFile(root, ID));
+    await expect(store.load(ID)).rejects.toThrow();
+  });
+
+  it('文件真的不存在（全新会话）→ 仍按空处理，不误伤', async () => {
+    const store = createSessionStore(root);
+    await expect(store.load(ID)).resolves.toMatchObject({ messages: [] });
+  });
+});

@@ -38,7 +38,9 @@ export function registerBrowserIpc(ctx: IpcContext): void {
   const browser = createBrowserService({
     getWindow: () => deps.getWindow?.(),
     onChanged: (next) => {
-      deps.getWindow?.()?.webContents.send(IPC.BROWSER_STATE_CHANGED, next);
+      // 窗口可能已经销毁（T40：send 到已销毁的 webContents 会抛）—— 先问活着吗
+      const win = deps.getWindow?.();
+      if (win !== undefined && !win.isDestroyed()) win.webContents.send(IPC.BROWSER_STATE_CHANGED, next);
     },
   });
   // 退出时销毁，不留孤儿 webContents

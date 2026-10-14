@@ -320,3 +320,13 @@ describe('T30：CHAT_SEND 的入参必须有契约（上限与文案都收在 sh
     expect(chatIpc).not.toContain('text.trim() ==='); // 手写那套不许回头
   });
 });
+
+describe('推送前必须问"窗口还活着吗"（T40 审计项 · 2026-10-14 修）', () => {
+  it('四条状态推送通道的 send 之前都有 isDestroyed 守卫，且守卫紧挨着 send', () => {
+    // send 到已销毁的 webContents 会抛 —— 守卫必须**就在 send 的前一句**（别处写过不算数）
+    for (const f of ['ipc/terminal.ts', 'ipc/browser.ts', 'ipc/context.ts', 'ipc/canvas.ts']) {
+      const src = read(f);
+      expect(src, f).toMatch(/isDestroyed\(\)\)\s*\w+\.webContents\.send/);
+    }
+  });
+});

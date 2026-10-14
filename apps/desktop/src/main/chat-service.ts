@@ -71,6 +71,14 @@ import {
 const BASE_PROMPT = '你是俱佳Agent，一个运行在用户 Windows 桌面上的助手。回答简洁、准确，使用中文。';
 
 /**
+ * T40（2026-10-09 审计项，2026-10-14 修）：未选工作区的提示。
+ * 它**并入系统提示的重拼**（每轮覆盖），绝不逐轮 push 进消息数组 ——
+ * 旧写法会让上下文逐轮增长，且用户中途选好工作区后旧的"尚未选择"仍留在历史里自相矛盾。
+ */
+const NO_WORKSPACE_NOTICE =
+  '当前尚未选择工作区，所有文件类工具都不可用。若用户要求读写文件，请提示其先在「概览」页选择工作区。';
+
+/**
  * 单轮内最多允许的模型往返次数（Agent Loop 的熔断上界）。
  * 取 8：足够「读文件 → 改 → 跑测试 → 汇报」这类多步任务，又不至于把余额烧光。
  */
@@ -216,7 +224,7 @@ function evictOldSessions(): void {
     // 记账要等 flush 跑完再丢：先 forget 会让"下一次 flush 以为盘上是空的"，正好重演出 T6① 那个 bug
     if (doomed !== undefined && !doomed.running) void flushSession(doomed).then(() => journal.forget(doomed.id));
     console.warn(
-      `[chat] 会话数达到上限 ${MAX_SESSIONS}，已从内存卸载最久未使用的会话（历史已落盘，重启后仍可继续）`,
+      `[chat] 会话数达到上限 ${MAX_SESSIONS}，已从内存卸载最久未使用的会话（磁盘上的消息还在；未落盘的部分正在补写，写失败会单独报错）`,
     );
   }
 }
@@ -542,16 +550,15 @@ export function sendMessage(
       }
 
       if (deps.workspaceRoot === null) {
-        // 没有工作区：仍可对话，但工具一律会因路径校验失败而拒绝。
-        // 这里如实把情况写进上下文，避免模型反复尝试反复失败的工具调用。
-        session.messages.push({
-          role: 'system',
-          content: '当前尚未选择工作区，所有文件类工具都不可用。若用户要求读写文件，请提示其先在「概览」页选择工作区。',
-        });
-        // 没工作区也要能压缩与续跑：这一支不经过 assembleSystemPrompt，两段补在这里。
-        // 从常量重拼而不是往末尾追加 —— 每轮追加一次会把系统提示越攒越长。
+        // 没有工作区：仍可对话，但工具一律会因路径校验失败而拒绝。这里如实把情况写进上下文，
+        // 避免模型反复尝试反复失败的工具调用。
+        // **不往消息数组里逐轮追加**（T40 审计项，2026-10-14 修）：旧写法每轮 push 一条 system，
+        // 上下文逐轮增长，且用户中途选好工作区后旧的"尚未选择"仍留在历史里自相矛盾 ——
+        // 现在并入下方 headParts 的一次性重拼（每轮覆盖、绝不累积）。
         const firstSystem = session.messages[0];
-        const headParts = [BASE_PROMPT, summarySection, taskResumeSection].filter((s) => s !== '');
+        const headParts = [BASE_PROMPT, NO_WORKSPACE_NOTICE, summarySection, taskResumeSection].filter(
+          (s) => s !== '',
+        );
         if (firstSystem?.role === 'system' && headParts.length > 1) {
           firstSystem.content = headParts.join('\n\n');
         }
