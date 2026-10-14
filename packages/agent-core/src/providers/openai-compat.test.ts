@@ -393,34 +393,70 @@ describe('流式的空闲超时与单次调用上限', () => {
 
   it('反向：数据持续到达时长流**不被空闲超时误杀**（变异 M33 摘掉 beat 就红在这里）', async () => {
     /**
-     * 参数是"窗口给足"后定的（CI 回填第二轮：80ms/15ms 的组合在忙机上被挤爆过一次，
-     * 报的是"上游 0 秒没有再吐字"——单个 chunk 间隔被调度拖过 80ms，**诚实地**误杀）。
-     * 约束两头都要：上限必须**小于整串时长**（否则"摘掉 beat"的变异就测不出来了，M33 失红），
-     * 又要远大于单段间隔（给忙机留足 jitter 窗口）。200 < 600 ✓，余量 170ms。
+     * **这一版必须用假时钟 + 手工喂流**（CI 第三红抓到的真形态，2026-10-14 夜；它是
+     * "断言依赖真实时钟"那一族 —— 与 createStreamTimeout 组同一课）。病史如实：
+     * 参数从 80ms/15ms 放到 200ms/30ms 之后，超载 runner 上**又一次**被单块调度拖炸
+     * （同轮 git 组跑了 80 秒），报的还是"上游 …秒没有再吐字"——**诚实地**误杀。
+     * 要验的是"每块数据到达都续命"这条**接线**，不是"CI 的调度有多准"：
+     * 手工流 + 假时钟后逐毫秒可控、零真实等待。
+     *
+     * 判据两头都留（换靶不放宽）：每块间隔 150ms（虚拟）< 空闲上限 600ms，累计 20 块
+     * 3000ms 不许被掐；而摘掉 `beat()`（M33）后上限不会续命，600ms 头上必被掐 ——
+     * "上限小于整串时长"这条不变。
      */
-    const mock = await startServer(async (_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-      for (let i = 0; i < 20; i += 1) {
-        res.write(sseChunk(`第${String(i)}段`));
-        await new Promise<void>((r) => setTimeout(r, 30));
+    vi.useFakeTimers();
+    try {
+      const encoder = new TextEncoder();
+      let push: (s: string) => void = () => undefined;
+      let finish: () => void = () => undefined;
+      let kill: (e: Error) => void = () => undefined;
+      let aborted = false;
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          push = (s) => c.enqueue(encoder.encode(s));
+          finish = () => c.close();
+          kill = (e) => c.error(e);
+        },
+      });
+      // 手工流当"网络"：fetch 直接把这块流当响应体；信号断了就如实传导（真实网络里就是断读侧）
+      const fetcher = (async (_url: unknown, init?: RequestInit) => {
+        init?.signal?.addEventListener('abort', () => {
+          aborted = true;
+          kill(new Error('被信号掐断 —— 这是真实网络里 AbortSignal 的传导形状'));
+        });
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+      }) as unknown as typeof fetch;
+
+      const pump = collect(
+        streamChat(
+          { baseUrl: 'http://example.invalid/v1', apiKey: 'k', model: 'm', messages: [] },
+          { fetcher, idleTimeoutMs: 600, totalTimeoutMs: 30_000 },
+        ),
+      ).then(
+        (events) => ({ events, failure: null as unknown }),
+        (failure: unknown) => ({ events: [] as ProviderEvent[], failure }),
+      );
+
+      for (let i = 0; i < 20 && !aborted; i += 1) {
+        push(sseChunk(`第${String(i)}段`));
+        // 虚拟时间走 150ms（< 空闲上限 600）：每块都续命的话，累计多久都不该被掐
+        await vi.advanceTimersByTimeAsync(150);
       }
-      res.write('data: [DONE]\n\n');
-      res.end();
-    });
-    servers.push(mock);
-    // 整串流约 600ms，而空闲上限只有 200ms：不续命就一定被掐
-    const events = await collect(
-      streamChat(
-        { baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [] },
-        { idleTimeoutMs: 200, totalTimeoutMs: 30_000 },
-      ),
-    );
-    const text = events
-      .filter((e) => e.type === 'text_delta')
-      .map((e) => (e.type === 'text_delta' ? e.delta : ''))
-      .join('');
-    expect(text).toContain('第19段');
-    expect(events.at(-1)).toEqual({ type: 'done', reason: 'stop' });
+      if (!aborted) {
+        push('data: [DONE]\n\n');
+        finish();
+      }
+      const r = await pump;
+      if (r.failure !== null) throw r.failure;
+      const text = r.events
+        .filter((e) => e.type === 'text_delta')
+        .map((e) => (e.type === 'text_delta' ? e.delta : ''))
+        .join('');
+      expect(text).toContain('第19段');
+      expect(r.events.at(-1)).toEqual({ type: 'done', reason: 'stop' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('每 30ms 一直吐但永不结束 → 由**单次调用总上限**掐断，理由与空闲不同', async () => {
