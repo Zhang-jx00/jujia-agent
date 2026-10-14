@@ -2000,6 +2000,30 @@
       "find": "  const rest = h.slice(r.length);\n  if (rest !== '' && rest !== '\\\\' && !rest.startsWith('\\\\')) return host; // 前缀发生在文件名中间：不算在根下",
       "replace": "  const rest = h.slice(r.length);\n  void rest;",
       "test": "packages/agent-core/src/permissions/policy.test.ts"
+    },
+    {
+      "id": "M251",
+      "desc": "未选工作区提示被摘出系统提示重拼（退回「等于没写」：模型不知道没选工作区，或提示靠别处再存活）",
+      "file": "apps/desktop/src/main/chat-service.ts",
+      "find": "[BASE_PROMPT, NO_WORKSPACE_NOTICE, summarySection, taskResumeSection]",
+      "replace": "[BASE_PROMPT, summarySection, taskResumeSection]",
+      "test": "apps/desktop/src/main/chat-honesty-wiring.test.ts"
+    },
+    {
+      "id": "M252",
+      "desc": "读失败又吞成一切（回到旧形态）：权限 / IO / 被占路径与「文件不存在」一样静默变空（T40 修复被回退）",
+      "file": "apps/desktop/src/main/session-store.ts",
+      "find": "      const raw = await readFile(path, 'utf8').catch((err: unknown) => {\n        if ((err as { code?: string }).code === 'ENOENT') return '';\n        throw err;\n      });",
+      "replace": "      const raw = await readFile(path, 'utf8').catch(() => '');",
+      "test": "apps/desktop/src/main/session-store.test.ts"
+    },
+    {
+      "id": "M253",
+      "desc": "推送守卫被摘：send 前不再问窗口活着吗（T40 修复被回退，已销毁 webContents 上 send 会抛）",
+      "file": "apps/desktop/src/main/ipc/terminal.ts",
+      "find": "      if (win !== undefined && !win.isDestroyed()) win.webContents.send(IPC.TERMINAL_STREAM, event);",
+      "replace": "      win?.webContents.send(IPC.TERMINAL_STREAM, event);",
+      "test": "apps/desktop/src/main/ipc-wiring.test.ts"
     }
   ]
 }
