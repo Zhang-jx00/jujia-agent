@@ -432,15 +432,47 @@ const globToRe = (glob) => {
 const GATE_FAST = ['typecheck', 'lint', 'test', 'check:docs', 'e2e'];
 const GATE_SLOW = ['smoke', 'perf', 'verify:pack', 'mut'];
 {
-  const fastLine = /快档[^\n]*/.exec(progress)?.[0] ?? '';
-  const slowLine = /慢档[^\n]*/.exec(progress)?.[0] ?? '';
-  const fastNamed = GATE_FAST.filter((s) => fastLine.includes(s));
-  const slowNamed = GATE_SLOW.filter((s) => slowLine.includes(s));
+  /**
+   * R24 机械化：这几条判据此前取"全文第一处出现"——于是"慢档字样抢在门禁定义行之前"
+   * 这种事会把识别结果整个带偏，报出来的却是一句不知所云的"识别到 0/5"（R20/R13 各咬一次）。
+   * 现在两步走：① **找定义行**（含"门禁"或点名 ≥3 个脚本的那一行）；② **定义行之前不许
+   * 出现这两个字样** —— 犯了就点名"第几行、写了什么、怎么改"，直指病灶。
+   */
+  const gateLines = progress.split('\n');
+  const findDef = (word, scripts) => {
+    for (let i = 0; i < gateLines.length; i += 1) {
+      const l = gateLines[i] ?? '';
+      if (!l.includes(word)) continue;
+      if (l.includes('门禁') || scripts.filter((s) => l.includes(s)).length >= 3) return { idx: i, line: l };
+    }
+    const fi = gateLines.findIndex((l) => (l ?? '').includes(word));
+    return { idx: fi, line: fi >= 0 ? (gateLines[fi] ?? '') : '' };
+  };
+  const fastDef = findDef('快档', GATE_FAST);
+  const slowDef = findDef('慢档', GATE_SLOW);
+  const fastNamed = GATE_FAST.filter((s) => fastDef.line.includes(s));
+  const slowNamed = GATE_SLOW.filter((s) => slowDef.line.includes(s));
+  const early = [];
+  for (const [word, def] of [['快档', fastDef], ['慢档', slowDef]]) {
+    for (let i = 0; i < def.idx; i += 1) {
+      if ((gateLines[i] ?? '').includes(word)) {
+        early.push(`第 ${i + 1} 行「${word}」：${(gateLines[i] ?? '').slice(0, 60)}`);
+      }
+    }
+  }
   report(
-    'PROGRESS 的按档门禁清单与 package.json 脚本对齐',
-    fastNamed.length === GATE_FAST.length && slowNamed.length === GATE_SLOW.length,
-    `快档识别到 ${fastNamed.length}/${GATE_FAST.length}、慢档 ${slowNamed.length}/${GATE_SLOW.length}：` +
-      `${fastLine.slice(0, 40)} ｜ ${slowLine.slice(0, 40)}`,
+    'PROGRESS 的按档门禁清单与 package.json 脚本对齐（字样不许抢在定义行之前）',
+    fastNamed.length === GATE_FAST.length && slowNamed.length === GATE_SLOW.length && early.length === 0,
+    [
+      `定义行：快档 第 ${fastDef.idx + 1} 行（识别 ${fastNamed.length}/${GATE_FAST.length}）；` +
+        `慢档 第 ${slowDef.idx + 1} 行（识别 ${slowNamed.length}/${GATE_SLOW.length}）`,
+      early.length > 0
+        ? '字样出现在定义行**之前**（R20/R13 的复发形态）——把引用改成「图形类门禁与全量变异」或移到定义行之后：\n     ' +
+          early.join('\n     ')
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
   );
 
   /**
@@ -1092,6 +1124,61 @@ const walkLiveFiles = (exts) => {
       dupes.length > 0
         ? `同一条用例出现两次，多半是整块贴了两遍（总数会因此虚高）：\n     ${dupes.join('\n     ')}`
         : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 16. 段落完整性：吃标题会当场现形（R24 · "整节插入吃标题"四次复发后的机械化）
+ *
+ * 为什么加：编辑工具"整节插入"时锚点选在下一节标题上、new_string 又没写回它，
+ * 标题就被静默吃掉（026/R14/R15/R16 四次，全靠 grep 事后抓）。这一类伤是**结构性**的：
+ * ① CHANGELOG：每个 `## [v` 段落**恰有一条 `---` 分隔线**（吃掉标题会把两段并成一段 → 两条）；
+ *    标题数必须 == `回退点：` 出现数（吃掉标题 → 标题 11 / 回退点 12）。
+ * ② 复核台账：`## 复核 NN` 编号自 050 起必须**连续无洞**（吃掉标题 → 编号缺口）。
+ * 判据全部现扫；防失焦：两边都要扫到非零内容，扫空先红。
+ * ------------------------------------------------------------------ */
+{
+  const scanSegments = (text, headRe) => {
+    const lines = text.split('\n');
+    const heads = [];
+    lines.forEach((l, i) => {
+      if (headRe.test(l)) heads.push(i);
+    });
+    const bad = [];
+    for (let k = 0; k < heads.length - 1; k += 1) {
+      const seg = lines.slice(heads[k], heads[k + 1]);
+      const seps = seg.filter((l) => l === '---').length;
+      if (seps !== 1) {
+        bad.push(`第 ${heads[k] + 1} 行起「${(lines[heads[k]] ?? '').slice(0, 36)}…」段内 '---' 计 ${seps} 条（应恰 1 条）`);
+      }
+    }
+    return { heads: heads.length, bad };
+  };
+  const clText = read('CHANGELOG.md');
+  const cl = scanSegments(clText, /^## \[v/);
+  const clFoots = (clText.match(/^\*\*回退点\*\*：/gm) ?? []).length; // 注意是 `**回退点**：`（粗体包着，冒号在 ** 之后）
+  const rlText = read('review/REVIEW-LOG.md');
+  const nums = [...rlText.matchAll(/^## 复核 (\d+)/gm)].map((m) => Number(m[1])).filter((n) => n >= 50);
+  const gaps = [];
+  for (let i = 1; i < nums.length; i += 1) {
+    if ((nums[i] ?? 0) !== (nums[i - 1] ?? 0) + 1) gaps.push(`${String(nums[i - 1])} → ${String(nums[i])}`);
+  }
+  report(
+    `段落完整性：CHANGELOG 每段恰一条 '---' 且回退点数目对齐；复核编号无洞（现扫 ${String(cl.heads)} 段 / 复核 ${String(nums.length)} 条）`,
+    cl.bad.length === 0 &&
+      cl.heads === clFoots &&
+      cl.heads > 0 &&
+      nums.length > 0 &&
+      gaps.length === 0,
+    [
+      ...cl.bad,
+      cl.heads !== clFoots ? `CHANGELOG 标题 ${String(cl.heads)} 个但「回退点：」${String(clFoots)} 处（有标题被吃）` : '',
+      cl.heads === 0 ? '一段都没扫到 —— 段落定位器失效（防失焦）' : '',
+      nums.length === 0 ? '复核编号一条都没扫到 —— 防失焦先红' : '',
+      gaps.length > 0 ? `复核编号不连续：${gaps.join('、')}（吃标题或跳号）` : '',
     ]
       .filter(Boolean)
       .join('\n     '),

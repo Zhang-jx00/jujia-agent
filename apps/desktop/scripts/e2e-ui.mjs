@@ -3511,7 +3511,23 @@ try {
   await closedByCrash;
   app = undefined;
   const taskJsonlFile = join(dataDir, 'sessions', taskSid, 'task.json');
-  const crashedTask = JSON.parse(readFileSync(taskJsonlFile, 'utf8')).data;
+  /**
+   * 读任务记录真值。**容忍原子写的换名窗口**（R24 首跑撞到）：json-store 的写入是
+   * "旧文件先转 .bak、tmp 再 rename 成主文件"——两步之间主文件短暂不存在；轮询读取
+   * 恰好落在缝里就会 ENOENT 把整个套件炸掉（首跑现场：读于续跑收口写入进行时）。
+   * 处理：ENOENT 时短暂重试（换名窗口是亚毫秒级），**其他错误照旧上抛**。
+   */
+  const readTaskFile = async () => {
+    for (let i = 0; ; i += 1) {
+      try {
+        return JSON.parse(readFileSync(taskJsonlFile, 'utf8')).data;
+      } catch (err) {
+        if (!(err && err.code === 'ENOENT') || i >= 20) throw err;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
+  };
+  const crashedTask = await readTaskFile();
   if (crashedTask.status !== 'running') {
     fail(`崩溃现场的任务记录应当停在 running，实际 ${String(crashedTask.status)}`, JSON.stringify(crashedTask).slice(0, 300));
   }
@@ -3557,7 +3573,7 @@ try {
     if (!taskCardText.includes(needle)) fail(`卡片少了一句实话：「${needle}」`, taskCardText.slice(0, 400));
   }
   // 盘上真值②：被读一次之后标成 interrupted 并写回（读时判定；判定只发生在主进程）
-  const markedTask = JSON.parse(readFileSync(taskJsonlFile, 'utf8')).data;
+  const markedTask = await readTaskFile();
   if (markedTask.status !== 'interrupted' || typeof markedTask.interruptedAt !== 'string') {
     fail('读过之后任务记录没有被标成 interrupted（读时判定没生效？）', JSON.stringify(markedTask).slice(0, 300));
   }
@@ -3584,10 +3600,10 @@ try {
    * （首跑就是在这一步读到 running 而红的：updatedAt 停在最后一步 tool_end 的时刻；
    * 卡片在点「续跑」时就已被清掉，所以"等卡片消失"是空转，判据必须落在记录本身）。
    */
-  let finishedTask = JSON.parse(readFileSync(taskJsonlFile, 'utf8')).data;
+  let finishedTask = await readTaskFile();
   for (let i = 0; i < 80 && finishedTask.status !== 'done'; i += 1) {
     await win4.waitForTimeout(150);
-    finishedTask = JSON.parse(readFileSync(taskJsonlFile, 'utf8')).data;
+    finishedTask = await readTaskFile();
   }
   if (finishedTask.status !== 'done') {
     fail(`续跑完成后记录应当 done，实际 ${String(finishedTask.status)}`, JSON.stringify(finishedTask).slice(0, 300));

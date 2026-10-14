@@ -2064,6 +2064,22 @@
       "find": "  const sending = sendArmed || (sessionId !== undefined && streamingIds.has(sessionId));",
       "replace": "  const sending = sendArmed; void streamingIds;",
       "test": "apps/desktop/src/renderer/src/wiring-r22.test.ts"
+    },
+    {
+      "id": "M259",
+      "desc": "index.lock 等待被摘（回到一撞即失败）：另一个 git 进程占着索引锁时用户只拿到一条原始报错",
+      "file": "packages/agent-core/src/git/git.ts",
+      "find": "    if (!isIndexLockError(r.error)) return r;",
+      "replace": "    return r;",
+      "test": "packages/agent-core/src/git/git.test.ts"
+    },
+    {
+      "id": "M260",
+      "desc": "「被锁」话术被换回原始报错（等过也不说怎么办）：用户看不出该稍后重试",
+      "file": "packages/agent-core/src/git/git.ts",
+      "find": "        error:\n          `索引被锁（index.lock 还在，通常是另一个 git 进程正在操作同一仓库）——` +\n          `已等待约 ${String(waitedMs)}ms；请稍后重试。原始报错：${r.error}`,",
+      "replace": "        error: r.error,",
+      "test": "packages/agent-core/src/git/git.test.ts"
     }
   ]
 }

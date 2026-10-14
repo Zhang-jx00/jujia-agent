@@ -12,6 +12,7 @@ import {
   getRecentCommits,
   getStatus,
   isGitRepo,
+  isIndexLockError,
   isNoisePath,
   push,
   readUntrackedFile,
@@ -440,5 +441,35 @@ describe('readUntrackedFile：未跟踪条目的内容读取只跟普通文件',
     expect(r.truncated).toBe(true);
     // 一个条目只读一次：以前计数与摘录各读一遍，两处判断会分叉
     expect(fs.readCalls.value).toBe(1);
+  });
+});
+
+describe('index.lock 的「可见地等」（R24）', () => {
+  it('锁一直被占着：有界等待后如实报"被锁、等过、怎么办"，而不是甩一条原始报错', async () => {
+    expect(isIndexLockError("fatal: Unable to create 'x/.git/index.lock': File exists.")).toBe(true);
+    expect(isIndexLockError('fatal: not a git repository')).toBe(false);
+    await writeFile(join(repo, '.git', 'index.lock'), '', 'utf8'); // 手工占锁（另一个 git 进程的形状）
+    await writeFile(join(repo, 'lock-held.txt'), 'x', 'utf8');
+    const r = await stagePaths(repo, ['lock-held.txt']);
+    await rm(join(repo, '.git', 'index.lock'), { force: true });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('索引被锁');
+    expect(r.error).toContain('已等待约');
+    expect(r.error).toContain('index.lock');
+  });
+
+  it('锁在等待期间被释放：重试成功，note 说明等过（不是静默重试）', async () => {
+    await writeFile(join(repo, '.git', 'index.lock'), '', 'utf8');
+    await writeFile(join(repo, 'lock-freed.txt'), 'y', 'utf8');
+    const timer = setTimeout(() => {
+      void rm(join(repo, '.git', 'index.lock'), { force: true });
+    }, 500);
+    const r = await stagePaths(repo, ['lock-freed.txt']);
+    clearTimeout(timer);
+    expect(r.ok).toBe(true);
+    expect(r.note ?? '').toContain('等待 index.lock');
+    // 真的暂存成功了（磁盘真值：索引里看得见它）
+    const { stdout } = await run('git', ['diff', '--cached', '--name-only'], { cwd: repo, windowsHide: true });
+    expect(stdout).toContain('lock-freed.txt');
   });
 });

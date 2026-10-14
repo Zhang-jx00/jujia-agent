@@ -23,6 +23,8 @@ export interface GitResult<T> {
   ok: boolean;
   data?: T;
   error?: string;
+  /** 成功但发生过等待时的一句话（目前只有 index.lock 重试会产生它） */
+  note?: string;
 }
 
 export interface GitStatusEntry {
@@ -120,6 +122,51 @@ async function git(
 export async function isGitRepo(cwd: string): Promise<boolean> {
   const r = await git(cwd, ['rev-parse', '--is-inside-work-tree']);
   return r.ok && r.stdout.trim() === 'true';
+}
+
+/**
+ * index.lock 的「可见地等」（R24 · 十轮遗留候选，R2 的 e2e 侧同类修复的产品侧对应物）：
+ * 另一个 git 进程短暂占着索引锁时，**有界等待后重试** —— 而不是当场把原始报错甩给用户
+ * （旧行为：撞锁即失败，"重试"全靠人手动再来一遍）。
+ *
+ * 两条口径：① **等是有界的**（5 次、300ms 起步线性退避，总计约 3s —— 真被长任务占着就快速失败）；
+ * ② **等要说出来** —— 成功把"等过多久"带在 note 里（commit 的成功消息会带上；
+ * stage/unstage 的 note 由调用方决定要不要再展示，见 git-service）；最终等不到时，
+ * 错误里写清"被谁挡着、等了多久、怎么办"（这条 100% 会显示给用户）。
+ */
+export const INDEX_LOCK_RETRY_TRIES = 5;
+export const INDEX_LOCK_RETRY_BASE_MS = 300;
+
+export function isIndexLockError(text: string): boolean {
+  return /index\.lock/i.test(text);
+}
+
+async function gitWithIndexLockWait(
+  cwd: string,
+  args: string[],
+): Promise<{ ok: true; stdout: string; note?: string } | { ok: false; error: string }> {
+  let waitedMs = 0;
+  for (let attempt = 0; attempt < INDEX_LOCK_RETRY_TRIES; attempt += 1) {
+    const r = await git(cwd, args);
+    if (r.ok) {
+      return waitedMs === 0
+        ? r
+        : { ok: true, stdout: r.stdout, note: `等待 index.lock 释放约 ${String(waitedMs)}ms 后完成` };
+    }
+    if (!isIndexLockError(r.error)) return r;
+    if (attempt === INDEX_LOCK_RETRY_TRIES - 1) {
+      return {
+        ok: false,
+        error:
+          `索引被锁（index.lock 还在，通常是另一个 git 进程正在操作同一仓库）——` +
+          `已等待约 ${String(waitedMs)}ms；请稍后重试。原始报错：${r.error}`,
+      };
+    }
+    const wait = INDEX_LOCK_RETRY_BASE_MS * (attempt + 1);
+    waitedMs += wait;
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+  return { ok: false, error: '索引等待重试异常终止（不该发生）' };
 }
 
 /** 仓库状态（只读，可自动放行） */
@@ -459,14 +506,16 @@ export async function getRecentCommits(cwd: string, count = 10): Promise<GitResu
  */
 export async function stagePaths(cwd: string, paths: string[]): Promise<GitResult<null>> {
   if (paths.length === 0) return { ok: false, error: '未指定要暂存的路径' };
-  const r = await git(cwd, ['add', '--', ...paths]);
-  return r.ok ? { ok: true, data: null } : { ok: false, error: r.error };
+  const r = await gitWithIndexLockWait(cwd, ['add', '--', ...paths]);
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, data: null, ...(r.note === undefined ? {} : { note: r.note }) };
 }
 
 export async function unstagePaths(cwd: string, paths: string[]): Promise<GitResult<null>> {
   if (paths.length === 0) return { ok: false, error: '未指定要取消暂存的路径' };
-  const r = await git(cwd, ['restore', '--staged', '--', ...paths]);
-  return r.ok ? { ok: true, data: null } : { ok: false, error: r.error };
+  const r = await gitWithIndexLockWait(cwd, ['restore', '--staged', '--', ...paths]);
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, data: null, ...(r.note === undefined ? {} : { note: r.note }) };
 }
 
 /** 提交（**写操作**：调用方必须先过权限门；消息长度受控，避免塞入超长内容） */
@@ -474,9 +523,13 @@ export async function commit(cwd: string, message: string): Promise<GitResult<st
   const msg = message.trim();
   if (msg === '') return { ok: false, error: '提交信息不能为空' };
   if (msg.length > 2000) return { ok: false, error: '提交信息过长（上限 2000 字符）' };
-  const r = await git(cwd, ['commit', '-m', msg]);
+  const r = await gitWithIndexLockWait(cwd, ['commit', '-m', msg]);
   if (!r.ok) return { ok: false, error: r.error };
-  return { ok: true, data: r.stdout.split('\n')[0] ?? '' };
+  const firstLine = r.stdout.split('\n')[0] ?? '';
+  // 等过就把"等过"写进成功消息里（可见地等：不是静默重试）
+  return r.note === undefined
+    ? { ok: true, data: firstLine }
+    : { ok: true, data: `${firstLine}（${r.note}）`, note: r.note };
 }
 
 /**

@@ -4973,3 +4973,40 @@ check:docs / e2e（55 步，图标替换不影响既有断言；第 [54] 步的�
 **回退点**：`v0.72.0-优化6`；上一版 `v0.71.0-优化5`。
 
 ---
+
+---
+
+## [v0.73.0-规整13 · 收尾批：死代码盘点顺出来的一条静默失效 —— 主题背景三档终于落在画面上（R20）] — 2026-10-13 12:09
+
+**轨道**：**轨道规整计划 13**（收尾批 · 清理与展示 · 用户 2026-10-12 点名）· R20。**零新依赖**。
+
+**做了什么**：先按"死代码盘点"两向对（类名 → 引用、属性门控 → 目标类）扫全仓，扫出两类东西 ——
+真死的（删）和**看着死、里面藏着一条真缺陷的**（修）。
+
+1. **一条静默失效的真缺陷**：主题包三档背景（渐变 / 图片 / 毛玻璃）在 `styles.css` 里指向
+   `html[data-jj-bg-kind='…'] .app-shell` —— 而 DOM 里**没有任何元素叫 `.app-shell`**（根容器是 `.app-root`）。
+   属性出得对、变量算得对、规则就写在样式表里，**只有这一跳断了**：三个选项谁都选不动画面，而所有门禁全绿。
+   四处选择器指回真根（含图片背景的遮罩 `::before`）。
+2. **同一形状的第二处**：`prefers-reduced-transparency` 的降级规则写给 `.jj-glass` —— 同样没有任何元素带这个类，
+   "减少透明度"偏好对主题包从未生效过；一并改成 `html[data-jj-bg-kind='glass'] .app-root`。
+3. **死代码退场**：`jj-pop`（含 keyframes）、`jj-glass`、`jj-spin-when-allowed`、`jj-stagger-1/2/3` 全仓零引用 → 删除
+   （错峰**预算**保留在令牌层 `--motion-stagger-step`：删的是零调用点的实现，不是设计承诺）。
+4. **盘点结论（如实留档）**：动态拼接的类名家族（`jj-tool-${state}` / `jj-canvas-node-${status}` /
+   `jj-mcp-state-*` / `jj-mcp-kind-*` / `jj-perm-action-*`）**不是死代码** —— 字面量不在源码里、生成器在；
+   逐家族核对前缀后保留。大文件（`ChatPanel.tsx` 917 行 / `CanvasPanel.tsx` 610 行 / `McpPanel.tsx` 484 行）
+   **不在清理轮拆**，登记为结构性候选。
+5. **8 处 export 收口**：只在文件内使用的接口不再对外导（`FailureView` / `AppearancePanelProps` / `AlignPlan` /
+   `SessionScoped` / `ToolCardData` / `DocViewState` / `TreeEntry` / `MarkdownViewProps`）。
+
+**防复发是机械的**：`styles-wiring.test.ts` 新增一条 —— 扫出所有 `[data-…='…'] .xxx` 形状的规则，
+目标类名必须真的出现在渲染层源码里；**红证先写**（修之前它当堂红在 `app-shell` 上：
+`expected [ 'app-shell' ] to deeply equal []`），并带防失焦断言（扫到的规则数 > 0，否则扫描写坏会空转通过）。
+
+**验证方式**：快档五项全绿 —— typecheck / lint / 单测 **1796 通过（113 文件，+1 跳过）** / check:docs / e2e **55 → 56 步**
+（新的一步在脚本里打印为 [55]：真 Chromium 里选「柔和渐变」根容器算出 `linear-gradient`；选「毛玻璃」出现 blur
+或系统关了透明效果时的降级分支，两条都认；最后还原默认暗色，不让后面的步骤读到被改过的主题）。
+慢档与变异（M216 起）在收口时跑，逐项见 `review/REVIEW-LOG.md` 复核 069。
+
+**回退点**：`v0.73.0-规整13`；上一版 `v0.72.0-优化6`。
+
+---
