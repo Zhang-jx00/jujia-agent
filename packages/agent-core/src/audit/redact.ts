@@ -45,18 +45,35 @@ export interface SummarizeOptions {
 /** 路径类参数的名字形态（与 path-guard 那侧一致的几个叫法） */
 const PATH_KEY_RE = /(^|[^a-z])(path|dir|folder|cwd|file)$/i;
 
-/** 命令行里"键名=值 / 键名 值"形态的密钥（值取 12 个字符以上才动手，避免把 `Bearer` 这类词误伤） */
+/**
+ * 键名里出现这些词才可能是凭据 —— **判据的唯一来源**（`KV_SECRET_RE` 与 `JSON_SECRET_RE` 共用，
+ * 也用来在整段文本里没有这些词时**直接跳过两趟替换**，见 `maskSecrets` 里的 T60 说明）。
+ */
+const SECRET_KEY_WORD = 'TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|AUTH';
+const SECRET_KEY_WORD_RE = new RegExp(SECRET_KEY_WORD, 'i');
+
+/**
+ * 命令行里"键名=值 / 键名 值"形态的密钥（值取 12 个字符以上才动手，避免把 `Bearer` 这类词误伤）。
+ *
+ * **T60（2026-10-14，CI 抓出来的）**：键名段原来是
+ * `[A-Za-z0-9_.-]*(?:TOKEN|…)[A-Za-z0-9_.-]*` —— 两半**无上界的星号**让引擎在每个起点
+ * 都把整段长串重切一遍才肯承认"这里没有密钥词"，在**没有空格的长文本**上是 O(n²)：
+ * 实测 1 万字符 91ms / 5 万 2217ms / 20 万 34575ms。此前从没暴露，是因为唯一的调用方
+ * （审计落盘）先把命令截到 400 字；T48 把**上游 HTTP 正文**接进来之后，
+ * 一条 2MB 的报错就能把主进程钉死 —— 那是"卡住且不说话"，比丢一条日志更糟。
+ * 现在两半星号都**有界 64**（键名不可能比这更长；超出的形状本就不是凭据字段）。
+ */
 const KV_SECRET_RE =
-  /([A-Za-z0-9_.-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|AUTH)[A-Za-z0-9_.-]*)([=:]?\s*)([A-Za-z0-9+/_.-]{12,})/gi;
+  new RegExp(`([A-Za-z0-9_.-]{0,64}(?:${SECRET_KEY_WORD})[A-Za-z0-9_.-]{0,64})([=:]?\\s*)([A-Za-z0-9+/_.-]{12,})`, 'gi');
 
 /**
  * JSON 形态的密钥字段（`"api_key": "sk-..."`）—— T48 补的盲区。
  * 上游报错正文与工具参数都是这种形状，而 `KV_SECRET_RE` 的键名与值之间只允许 `[=:]?\s*`：
  * JSON 里隔着两个引号，那条规则**整条形同不存在**。值仍取 12 个字符以上（与上面同一条顾虑：
- * 别把 `"author":"Jane Doe"` 这种普通字段洗成星号）。
+ * 别把 `"author":"Jane Doe"` 这种普通字段洗成星号）。键名段同样有界（T60）。
  */
 const JSON_SECRET_RE =
-  /("(?:[A-Za-z0-9_.-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|AUTH)[A-Za-z0-9_.-]*)"\s*:\s*")([^"]{12,})(")/gi;
+  new RegExp(`("(?:[A-Za-z0-9_.-]{0,64}(?:${SECRET_KEY_WORD})[A-Za-z0-9_.-]{0,64})"\\s*:\\s*")([^"]{12,})(")`, 'gi');
 
 /** 没有键名可依附的长随机串：一整段、无空格、不含 / 与 . （路径与文件名放过，令牌通常不长成那样） */
 const BARE_SECRET_RE = /(?:^|\s)([A-Za-z0-9+/=_-]{32,})(?=\s|$)/g;
@@ -72,20 +89,32 @@ export function maskSecrets(text: string): { text: string; hits: string[] } {
   const hits: string[] = [];
   let out = text;
 
+  /**
+   * T60（2026-10-14，CI 抓出来的）：两趟"按**键名**判词"的替换先做一次线性预检。
+   * `KV_SECRET_RE` 与 `JSON_SECRET_RE` 都要求键名里含密钥词 —— 整段文本里一个词都没有时
+   * 它们**必然零命中**，那就没必要让引擎去把 20 万字符重切一遍。
+   * 这一句 + 键名星号有界，合起来把"上游给一大段正文"从 O(n²) 拉回线性。
+   */
+  const mayHaveKeyNamedSecret = SECRET_KEY_WORD_RE.test(out);
+
   // JSON 字段先走（T48）：它的键名带引号，后面的 KV / BARE 都碰不到同一段文本
-  out = out.replace(JSON_SECRET_RE, (_m, head: string, _value: string, tail: string) => {
-    hits.push(head.slice(1, -1)); // 键名去掉引号，hits 列表读起来才是"哪个字段被隐了"
-    return `${head}***${tail}`;
-  });
+  if (mayHaveKeyNamedSecret) {
+    out = out.replace(JSON_SECRET_RE, (_m, head: string, _value: string, tail: string) => {
+      hits.push(head.slice(1, -1)); // 键名去掉引号，hits 列表读起来才是"哪个字段被隐了"
+      return `${head}***${tail}`;
+    });
+  }
 
   out = out.replace(HEADER_SECRET_RE, (_m, prefix: string, _value: string) => {
     hits.push(`头里的 ${String(prefix).trim()}`);
     return `${prefix}***`;
   });
-  out = out.replace(KV_SECRET_RE, (_m, key: string, gap: string, _value: string) => {
-    hits.push(key);
-    return `${key}${gap}***`;
-  });
+  if (mayHaveKeyNamedSecret) {
+    out = out.replace(KV_SECRET_RE, (_m, key: string, gap: string, _value: string) => {
+      hits.push(key);
+      return `${key}${gap}***`;
+    });
+  }
   out = out.replace(BARE_SECRET_RE, (_m, _value: string) => {
     hits.push('一段长随机串');
     return ' *** ';

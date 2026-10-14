@@ -69,6 +69,23 @@ describe('maskSecrets（命令文本里可能夹着密钥）', () => {
     expect(maskSecrets(clean).text).toBe(clean);
     expect(maskSecrets(clean).hits).toEqual([]);
   });
+
+  it('剔密对「单串超长文本」必须是线性的（CI 实测咬过：34 秒 → 卡死级）', () => {
+    // 2026-10-14 实撞：T48 把上游 error 原文接进 `maskSecrets` 之后，CI 里那条"错误消息要有上界"
+    // 的用例 **30 秒超时**（本地 8 秒勉强跑完，看不出来）。计时探针给出增长阶：
+    // `KV_SECRET_RE` 在 1 万字符 91ms / 5 万 2217ms / 20 万 34575ms —— 键名里那个
+    // "星号 + 关键字 + 星号" 的组合让引擎在每个起点都把两半星号重切一遍 = **O(n²)**。
+    // 这条锁判的是**耗时**而不是产物：一条二次方的正则挂在"每条报错都要过一次"的路上，
+    // 就是本仓最忌的另一件事 —— 界面卡住且不说话（上游给 2MB 正文就能把主进程钉死）。
+    const big = 'E'.repeat(200_000);
+    const started = performance.now();
+    const r = maskSecrets(`{"message":"${big}","type":"server_error"}`);
+    const tookMs = performance.now() - started;
+    expect(r.hits).toEqual([]); // 没有密钥键名，就该一个字都不动
+    expect(r.text).toContain(big);
+    // 300ms 是"线性 + 两倍余量"的量级（探针实测四条正则修完后合计个位数毫秒）
+    expect(tookMs, `剔密 20 万字符用了 ${tookMs.toFixed(0)}ms`).toBeLessThan(300);
+  });
 });
 
 describe('summarizeArgs（参数摘要：可核对，不可复现内容）', () => {
