@@ -445,6 +445,10 @@ CHANGELOG 轮换：搬家块 **v0.75.0-铺设15**，块体 **34 行**，sha256 �
 （`137 passed | 1 skipped (138)` / `2055 passed | 1 skipped (2056)`，**+54 例 / +3 文件**）·
 `check:docs` 0 · `check:docs:selftest` 0（**24 处注入全拦**，还原后 `git diff` 零差异）·
 e2e 0（**64 步整跑，102 ✅ / 0 ❌**）· smoke 0 · perf 0（首帧 **397ms**，上一轮 430ms）。
+**变异首校（基线 `9e2bc7e`，即标签 `v0.87.0-接驳1` 指向的提交）**：**M277–M295 共 19 条全拦**
+（`MUT_EXIT=0` / 0 逃逸 / 0 注入失败 / 0 无法运行），跑完 `git status` 零残留。
+**本轮零逃逸不等于锁写得比上轮好** —— 是三件事凑齐：锚点在写入时就现扫校验、
+每条变异点名的文件自己持有断言（不靠邻文件的锁代打）、红证当场抄原文。
 **e2e 两跑如实记**：① 首跑红在本轮新增的第 63 步 —— `locator.click: Target page, context or browser has been closed`，
 栈停在 `saveHooksFromEditor (e2e-ui.mjs:1595)`。根因不是产品：那个 helper 的闭包绑的是**已销毁的旧窗口**
 （脚本中途重启过应用，1509 行那条注释早就写明"旧窗口的 helper 全部失效"），我在末尾这一步复用了它。
