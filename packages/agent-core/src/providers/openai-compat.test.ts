@@ -139,7 +139,7 @@ describe('streamChat：真实 SSE 端到端', () => {
     expect(events.at(-1)).toEqual({ type: 'done', reason: 'length' });
   });
 
-  it('无 [DONE] 直接断流：flush 吐尾包后仍给 done', async () => {
+  it('无 [DONE] 也没有 finish_reason 的断流：**不许**说成"答完了"（T55 · R31）', async () => {
     const mock = await startServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       // 注意：不写结尾空行，模拟服务端硬断
@@ -152,8 +152,122 @@ describe('streamChat：真实 SSE 端到端', () => {
       streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
     );
     const text = events.filter((e) => e.type === 'text_delta').map((e) => (e as { delta: string }).delta).join('');
+    // 已经吐出来的字**一个字不丢**（这条不是"半截就报错"，是"半截要说实话"）
     expect(text).toBe('尾包');
-    expect(events.at(-1)).toMatchObject({ type: 'done' });
+    // 旧写法在这里给 `done(stop)` —— 代理 `res.end()` 掐掉的半截回答会被界面显示成完整回答。
+    // 现在给的是"没有结束标记"这一态（口径见 `docs/DESIGN-T55-STREAM-END.md`）。
+    expect(events.at(-1)).toEqual({ type: 'done', reason: 'no_end_marker' });
+  });
+
+  /**
+   * T55 的**另一半**：兼容。
+   *
+   * 把"缺结束标记"一律判成截断是更简单也更错的写法 —— 有一批自建端点与网关
+   * **从不发 `finish_reason`、只在最后给一个 `[DONE]`**（OpenAI 协议里 `[DONE]` 本身就是收尾标记）。
+   * 把它们打成"回答不完整"会让这批厂商直接不可用，而用户看到的是一条没必要的警告。
+   * 所以口径是：**看到任意一个结束证据（`[DONE]` 或 `finish_reason`）就算写完**，
+   * 两个都没有才是"没有结束标记"。下面四条把这条边界钉住（前两条尤其防"将来有人收紧过头"）。
+   */
+  describe('结束标记的可信度：两种结束证据各算一次（T55 兼容口径）', () => {
+    const ask = async (write: (res: ServerResponse) => void): Promise<unknown> => {
+      const mock = await startServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        write(res);
+        res.end();
+      });
+      servers.push(mock);
+      const events = await collect(
+        streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+      );
+      return events.at(-1);
+    };
+
+    it('只给 [DONE]、从不给 finish_reason（自建端点常见）→ 仍算写完，不许报警', async () => {
+      expect(
+        await ask((res) => {
+          res.write(sseChunk('正文'));
+          res.write('data: [DONE]\n\n');
+        }),
+      ).toEqual({ type: 'done', reason: 'stop' });
+    });
+
+    it('只给 finish_reason 就关连接（没有 [DONE]）→ 按上游自述收尾', async () => {
+      expect(
+        await ask((res) => {
+          res.write(sseChunk('正文'));
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`);
+        }),
+      ).toEqual({ type: 'done', reason: 'stop' });
+    });
+
+    it('厂商自造的结束原因（不认识）→ 仍算"有结束证据"，按 stop 收尾（T26 口径不推翻）', async () => {
+      expect(
+        await ask((res) => {
+          res.write(sseChunk('正文'));
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'im_end' }] })}\n\n`);
+        }),
+      ).toEqual({ type: 'done', reason: 'stop' });
+    });
+
+    it('两个都没有 → no_end_marker（这一条与上面三条互为对照）', async () => {
+      expect(
+        await ask((res) => {
+          res.write(sseChunk('正文'));
+        }),
+      ).toEqual({ type: 'done', reason: 'no_end_marker' });
+    });
+
+    /**
+     * T55 与 T56 的**接缝**（本轮最容易写错的一格）：`endOfStream()` 里如果先问
+     * `toolCalls.hasCalls()`，那么"网关发了个空参数的调用就断流"这一种形状会拿到 `tool_calls`
+     * 这个结论 —— 拼装器据此认为"有结束证据"，把 `{}` 当合法零参放行，T56 的洞原样留着。
+     * 所以顺序必须是**先问有没有结束证据**。这条用例就是那道顺序闸。
+     */
+    it('空参数的工具调用 + 没有任何结束标记 → 结论是 no_end_marker，且那一格标 parseError（不执行假的零参）', async () => {
+      const mock = await startServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.write(
+          `data: ${JSON.stringify({
+            choices: [{ delta: { tool_calls: [{ index: 0, id: 'c0', function: { name: 'write_file', arguments: '' } }] } }],
+          })}\n\n`,
+        );
+        res.end(); // 没有 finish_reason，也没有 [DONE]
+      });
+      servers.push(mock);
+
+      const events = await collect(
+        streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+      );
+      expect(events.at(-1)).toEqual({ type: 'done', reason: 'no_end_marker' });
+      const calls = events.find((e) => e.type === 'tool_calls') as
+        | { calls: Array<{ arguments: Record<string, unknown> | null; parseError: string | null }> }
+        | undefined;
+      expect(calls?.calls[0]?.arguments).toBeNull();
+      expect(calls?.calls[0]?.parseError).toContain('参数');
+    });
+
+    it('同一个空参数调用，**有** [DONE] 时仍按无参工具放行（兼容面，别把网关一律打回）', async () => {
+      const mock = await startServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.write(
+          `data: ${JSON.stringify({
+            choices: [{ delta: { tool_calls: [{ index: 0, id: 'c0', function: { name: 'list_dir' } }] } }] })}\n\n`,
+        );
+        res.write('data: [DONE]\n\n');
+        res.end();
+      });
+      servers.push(mock);
+
+      const events = await collect(
+        streamChat({ baseUrl: mock.baseUrl, apiKey: 'k', model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+      );
+      const calls = events.find((e) => e.type === 'tool_calls') as
+        | { calls: Array<{ arguments: Record<string, unknown> | null; parseError: string | null }> }
+        | undefined;
+      expect(calls?.calls[0]?.arguments).toEqual({});
+      expect(calls?.calls[0]?.parseError).toBeNull();
+      expect(events.at(-1)).toEqual({ type: 'done', reason: 'tool_calls' });
+    });
   });
 
   it('HTTP 401 抛 http_error 并带上状态码与响应摘要', async () => {
@@ -740,5 +854,56 @@ describe('附带一条的实测口径：断流尾部的残缺多字节', () => {
       .join('');
     expect(text).toBe('正常内容');
     expect(text).not.toContain('\ufffd');
+  });
+});
+
+/* ---------------- 真原因与连接归还（T57①② · R31） ---------------- */
+
+describe('错误文本要带真原因，读完的流要还回去（T57）', () => {
+  it('undici 的 `fetch failed` 不许原样交给用户：cause 上的 code 必须进文案（T57②）', async () => {
+    // 真形状：`TypeError: fetch failed`，真原因（连不上 / 证书过期）在 `cause.code` 上。
+    // 旧写法只取 `err.message` ⇒ 五种故障在界面上长得一模一样。
+    const fetcher = (async () => {
+      const err = new TypeError('fetch failed');
+      (err as Error & { cause?: unknown }).cause = Object.assign(new Error('connect ECONNREFUSED'), {
+        code: 'ECONNREFUSED',
+      });
+      throw err;
+    }) as unknown as typeof fetch;
+
+    const failure = await collect(
+      streamChat({ baseUrl: 'http://example.invalid/v1', apiKey: 'k', model: 'm', messages: [] }, { fetcher }),
+    ).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(failure).toMatchObject({ code: 'network_error' });
+    const message = (failure as Error).message;
+    expect(message).toContain('ECONNREFUSED'); // 真原因上界面
+    expect(message).toContain('fetch failed'); // 原话也没被丢掉
+  });
+
+  it('`[DONE]` 收尾这条早退路径必须 cancel 掉响应流（T57①：连接不许留在池里）', async () => {
+    const encoder = new TextEncoder();
+    let cancelled = false;
+    const body = new ReadableStream({
+      start(c) {
+        c.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"收尾"}}]}\n\n'));
+        c.enqueue(encoder.encode('data: [DONE]\n\n'));
+        // 刻意**不 close**：真实上游在 [DONE] 之后连接还挂着，
+        // 而我们一旦 return 就再也不会读它 —— 这正是"留在池里"的那一面。
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetcher = (async () =>
+      new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })) as unknown as typeof fetch;
+
+    const events = await collect(
+      streamChat({ baseUrl: 'http://example.invalid/v1', apiKey: 'k', model: 'm', messages: [] }, { fetcher }),
+    );
+    expect(events.at(-1)).toEqual({ type: 'done', reason: 'stop' }); // [DONE] 是结束证据（T55 兼容面）
+    expect(cancelled).toBe(true);
   });
 });

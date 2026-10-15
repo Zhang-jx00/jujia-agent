@@ -1,5 +1,5 @@
 {
-  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）；M20–M21 来自扩容 3（文档查看：innerHTML 不许回来 / 链接协议白名单不许放宽）；M22–M23 来自铺设 6（记忆写入：路径守卫不许退化成拼字符串 / 写类档位不许降成读）；M26–M32 来自安全内核修复轮（外部审查 T1 只读绕过敏感判定 / T2 NTFS 备用数据流 / T3 钩子子进程环境 / T4 钩子配置写入过门）；M33–M37 来自外部审查修复 2（P1 第一批：T7 流式两条时间界限 / T5 会话闸门 / T6 落盘记账与清单串行）；M40 来自组件测试首批（错误边界的捕获状态）；M41–M44 来自外部审查修复 3（T19 硬 ask 不渲染「总是允许」/ T9 超时精准关闭与批准计划回读）；M71–M81 来自无限画布 M9a 前三步（图契约与键名扫描 · 编排层纯规则 · 豁免清单）；M82–M84 来自 M9a 接线锁（界面归属判别 · 事件归属字段 · 执行链路不许另起）；M85 来自复核 047 第二遍实验（停止被判成完成）；M86–M88 来自 M9b B1（对齐辅助线 / 命令面板 / 吸附时机）；M89 来自 CSS 版接线锁（样式规则整块失去）；M90–M92 来自 B2 局部重跑；M93–M99 来自 B3 条件分支；M100–M103 来自 M8 push 收口（推送被降成软 ask / 推送绕过权限门 / 远端名形状校验失守 / 外发文案被换成中性一句）；M104–M105 来自加固 4（cmd 元字符表 / 经 cmd 的判据分叉）；**M106–M119 来自修复批二**（T23 终端会话生命周期：接回失效 / 上限失效 / 尾部不截 / 截错头 / 不记 tail / seq 不动 / 卸载又杀会话 / 决策被绕过 / 状态通道永远答「没有」/ 硬 ask 被放宽；T24 文档页阅读位置：换文件带走旧位置 / 空路径也记 / 滚动没接上 / 读失败不忘）；M127–M128 来自修复批三（下）T30（入参上限被摘 / handler 绕开契约）。基线：本轮主提交；M193–M205 来自铺设 7（M7 定时任务：算式层拒收口径与锚点边界 · 补跑水位线 · 只跑一条 · 免审批键拒收 · 装配即启动）；M206–M211 来自优化5（R18：展开用真实高度轨道过渡 · 箭头同元素转 180° · 收起态 inert · 按压反馈覆盖可点家族）；M212–M215 来自优化6（R19：图标 aria-hidden 契约 · currentColor · 字符画/emoji 清扫）；M216 来自规整13（R20：属性门控背景规则的目标类必须存在 —— 主题背景静默失效的防复发）；**M263–M275 来自加固18（R27 审计清零批）**（T49 钩子改写后不重判 / 「总是允许」按旧 bypassable 压硬 ask；T48 JSON 形态不剔密 / HTTP 正文绕过剔密 / SSE error 原文无界；T47 失败只进 console / 装配根没接 logger；T43 手动执行退回不过契约；T44 定时事件缺窗口守卫；T46 memo 依赖丢视口；T45 监听器没装 / 告警溢出挤错方向；T50 diff 正文失败被折成空）；**M276 来自加固18 的 CI 红（T60）**（剔密键名段的无上界星号 → 长文本 O(n²)）；**M277–M295 来自接驳1（R28 终端与外部件批）**（T51 诊断条数上界 / 收集被摘 / 不进回执出口 / 回合级丢失 / 不并进 done 那一格；T58 契约里回潮的 tool_calls / length 那格改口 / 超时与关窗共用一句 / 弹窗退回三元兜底；T41 三条硬判据各摘一条 + recordGate 不透传 + 拒绝那次不记账 + 终端标成策略判定 + 覆盖范围说反；T59 审批桥不判形状；T53 自述只读的提示消失 / 不再标要先看风险；T52 规则页不再举出改写形态）；**M296–M297 来自规整17（R29 收口轮）**（T53 现状锁的两条判据源头：敏感路径表对整个 MCP 瞎掉 / 「自述只读」判定翻向另一侧）",
+  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）；M20–M21 来自扩容 3（文档查看：innerHTML 不许回来 / 链接协议白名单不许放宽）；M22–M23 来自铺设 6（记忆写入：路径守卫不许退化成拼字符串 / 写类档位不许降成读）；M26–M32 来自安全内核修复轮（外部审查 T1 只读绕过敏感判定 / T2 NTFS 备用数据流 / T3 钩子子进程环境 / T4 钩子配置写入过门）；M33–M37 来自外部审查修复 2（P1 第一批：T7 流式两条时间界限 / T5 会话闸门 / T6 落盘记账与清单串行）；M40 来自组件测试首批（错误边界的捕获状态）；M41–M44 来自外部审查修复 3（T19 硬 ask 不渲染「总是允许」/ T9 超时精准关闭与批准计划回读）；M71–M81 来自无限画布 M9a 前三步（图契约与键名扫描 · 编排层纯规则 · 豁免清单）；M82–M84 来自 M9a 接线锁（界面归属判别 · 事件归属字段 · 执行链路不许另起）；M85 来自复核 047 第二遍实验（停止被判成完成）；M86–M88 来自 M9b B1（对齐辅助线 / 命令面板 / 吸附时机）；M89 来自 CSS 版接线锁（样式规则整块失去）；M90–M92 来自 B2 局部重跑；M93–M99 来自 B3 条件分支；M100–M103 来自 M8 push 收口（推送被降成软 ask / 推送绕过权限门 / 远端名形状校验失守 / 外发文案被换成中性一句）；M104–M105 来自加固 4（cmd 元字符表 / 经 cmd 的判据分叉）；**M106–M119 来自修复批二**（T23 终端会话生命周期：接回失效 / 上限失效 / 尾部不截 / 截错头 / 不记 tail / seq 不动 / 卸载又杀会话 / 决策被绕过 / 状态通道永远答「没有」/ 硬 ask 被放宽；T24 文档页阅读位置：换文件带走旧位置 / 空路径也记 / 滚动没接上 / 读失败不忘）；M127–M128 来自修复批三（下）T30（入参上限被摘 / handler 绕开契约）。基线：本轮主提交；M193–M205 来自铺设 7（M7 定时任务：算式层拒收口径与锚点边界 · 补跑水位线 · 只跑一条 · 免审批键拒收 · 装配即启动）；M206–M211 来自优化5（R18：展开用真实高度轨道过渡 · 箭头同元素转 180° · 收起态 inert · 按压反馈覆盖可点家族）；M212–M215 来自优化6（R19：图标 aria-hidden 契约 · currentColor · 字符画/emoji 清扫）；M216 来自规整13（R20：属性门控背景规则的目标类必须存在 —— 主题背景静默失效的防复发）；**M263–M275 来自加固18（R27 审计清零批）**（T49 钩子改写后不重判 / 「总是允许」按旧 bypassable 压硬 ask；T48 JSON 形态不剔密 / HTTP 正文绕过剔密 / SSE error 原文无界；T47 失败只进 console / 装配根没接 logger；T43 手动执行退回不过契约；T44 定时事件缺窗口守卫；T46 memo 依赖丢视口；T45 监听器没装 / 告警溢出挤错方向；T50 diff 正文失败被折成空）；**M276 来自加固18 的 CI 红（T60）**（剔密键名段的无上界星号 → 长文本 O(n²)）；**M277–M295 来自接驳1（R28 终端与外部件批）**（T51 诊断条数上界 / 收集被摘 / 不进回执出口 / 回合级丢失 / 不并进 done 那一格；T58 契约里回潮的 tool_calls / length 那格改口 / 超时与关窗共用一句 / 弹窗退回三元兜底；T41 三条硬判据各摘一条 + recordGate 不透传 + 拒绝那次不记账 + 终端标成策略判定 + 覆盖范围说反；T59 审批桥不判形状；T53 自述只读的提示消失 / 不再标要先看风险；T52 规则页不再举出改写形态）；**M296–M297 来自规整17（R29 收口轮）**（T53 现状锁的两条判据源头：敏感路径表对整个 MCP 瞎掉 / 「自述只读」判定翻向另一侧）；M298–M308 来自加固19 / R31（流的结束证据两条 + 拼装器的空参数拒绝 + 循环的截断判据 + 契约那一格 + 界面那句话 + 命令的 exitCode/timedOut 三处 + 早退 cancel + 真原因文案）",
   "mutations": [
     {
       "id": "M1",
@@ -2376,6 +2376,94 @@
       "find": "  if (a.readOnlyHint === true) {",
       "replace": "  if (a.readOnlyHint === false) {",
       "test": "apps/desktop/src/main/mcp/mcp-selfdeclared-readonly.test.ts"
+    },
+    {
+      "id": "M298",
+      "desc": "收到 [DONE] 却不记\"看到过结束标记\"（T55 的证据 1）：只发 [DONE] 不发 finish_reason 的那批自建端点会被误判成断流 —— 兼容面当场红",
+      "file": "packages/agent-core/src/providers/openai-compat.ts",
+      "find": "        if (mapped.done) {\n          sawDoneMarker = true;",
+      "replace": "        if (mapped.done) {\n          // (M298: 结束证据被丢)\n          void 0;",
+      "test": "packages/agent-core/src/providers/openai-compat.test.ts"
+    },
+    {
+      "id": "M299",
+      "desc": "endOfStream() 的两行顺序调换（T56 的顺序闸）：空参数的调用 + 断流会拿到 tool_calls 这个结论，拼装器据此放行 {} —— 设计稿 §三 说\"最容易写错的一格\"就是这里",
+      "file": "packages/agent-core/src/providers/openai-compat.ts",
+      "find": "    if (!sawFinishReason && !sawDoneMarker) return 'no_end_marker';\n    if (toolCalls.hasCalls()) return 'tool_calls';",
+      "replace": "    if (toolCalls.hasCalls()) return 'tool_calls';\n    if (!sawFinishReason && !sawDoneMarker) return 'no_end_marker';",
+      "test": "packages/agent-core/src/providers/openai-compat.test.ts"
+    },
+    {
+      "id": "M300",
+      "desc": "把\"没有结束标记 + 空参数\"的拒执行分支放宽（T56 本体）：参数从未送到又当合法零参 —— 用户会看见\"工具执行成功\"",
+      "file": "packages/agent-core/src/providers/tool-call-accumulator.ts",
+      "find": "          if (end === 'no_end_marker') {",
+      "replace": "          if (end === 'never_matches_this') {",
+      "test": "packages/agent-core/src/providers/tool-call-accumulator.test.ts"
+    },
+    {
+      "id": "M301",
+      "desc": "循环退回**逐点名**（旧写法）：第四种\"没完整交出来\"安静地掉进 stop —— 本轮换判据的那条锁就是盯这个（同一环的行为证据在 agent-loop.test.ts 那条 no_end_marker 用例里）",
+      "file": "packages/agent-core/src/loop/agent-loop.ts",
+      "find": "          else if (ev.reason !== 'stop' && ev.reason !== 'tool_calls') truncated = ev.reason;",
+      "replace": "          else if (ev.reason === 'length' || ev.reason === 'content_filter') truncated = ev.reason;",
+      "test": "apps/desktop/src/main/truncation-wiring.test.ts"
+    },
+    {
+      "id": "M302",
+      "desc": "契约里摘掉 no_end_marker 这一格（T55 的传输环）：主进程的话过不了 preload 的 safeParse，界面那张表也跟着对不上账",
+      "file": "packages/shared-ipc/src/contracts.ts",
+      "find": "export const DONE_END_REASONS = ['stop', 'length', 'content_filter', 'no_end_marker', 'aborted', 'error'] as const;",
+      "replace": "export const DONE_END_REASONS = ['stop', 'length', 'content_filter', 'aborted', 'error'] as const;",
+      "test": "apps/desktop/src/renderer/src/features/chat/done-notice.test.ts"
+    },
+    {
+      "id": "M303",
+      "desc": "断流那一格给 null（修前的形状）：前面四环全对，界面上半截回答与完整回答还是一模一样 —— 这句是整条修复的落点",
+      "file": "apps/desktop/src/renderer/src/features/chat/done-notice.ts",
+      "find": "  no_end_marker:\n    '上游没有给出结束标记（既没有 [DONE]，也没有 finish_reason）就把这次回答断了：' +\n    '这一段**可能不完整**，说\"继续\"可以接着要，或直接重试一次。已经吐出来的内容都还在。',",
+      "replace": "  no_end_marker: null,",
+      "test": "apps/desktop/src/renderer/src/features/chat/done-notice.test.ts"
+    },
+    {
+      "id": "M304",
+      "desc": "命令结果不再带 exitCode/timedOut（T54 本体）：跑完与跑对又混回一格，画布与审计按 ok 判就看不见失败",
+      "file": "packages/agent-core/src/tools/builtin/exec-tool.ts",
+      "find": "        exitCode: exit.code,\n        timedOut,\n",
+      "replace": "",
+      "test": "packages/agent-core/src/tools/builtin/exec-tool.test.ts"
+    },
+    {
+      "id": "M305",
+      "desc": "画布成功那一步不再带退出码迹象（T54 的话术环）：失败的 git push 在节点卡片上又是干净的 ok",
+      "file": "packages/shared-ipc/src/canvas-run.ts",
+      "find": "  return flag === '' ? body : `${flag}｜${body}`;",
+      "replace": "  return body;",
+      "test": "packages/shared-ipc/src/canvas-run.test.ts"
+    },
+    {
+      "id": "M306",
+      "desc": "evidence 的两个字段不搬到 NodeResult（T54 的中间环）：上下游各自都有用例，断的正是这一环",
+      "file": "apps/desktop/src/main/canvas-runner.ts",
+      "find": "            ...(exitCode !== undefined ? { exitCode } : {}),\n            ...(timedOut !== undefined ? { timedOut } : {}),\n",
+      "replace": "",
+      "test": "apps/desktop/src/main/canvas-runner.test.ts"
+    },
+    {
+      "id": "M307",
+      "desc": "早退路径不再 cancel 响应流（T57①）：上游连接留在池里直到它自己关，releaseLock 不等于归还连接",
+      "file": "packages/agent-core/src/providers/openai-compat.ts",
+      "find": "    await reader.cancel().catch(() => undefined);\n",
+      "replace": "",
+      "test": "packages/agent-core/src/providers/openai-compat.test.ts"
+    },
+    {
+      "id": "M308",
+      "desc": "错误文案丢掉 cause 链（T57②）：连不上 / 证书过期 / DNS 失败 / 被池踢在界面上是同一句 fetch failed",
+      "file": "packages/agent-core/src/providers/openai-compat.ts",
+      "find": "  return chain.length === 0 ? head : `${head}（原因链：${chain.join(' → ')}）`;",
+      "replace": "  return head;",
+      "test": "packages/agent-core/src/providers/openai-compat.test.ts"
     }
   ]
 }

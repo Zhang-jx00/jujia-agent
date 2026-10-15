@@ -9,6 +9,14 @@
  * 4. 首帧通常只有 role、没有 content。
  */
 
+/**
+ * 纯类型引用（T56）：`StreamEnd` 定义在 `types.ts`，而那边也要这里的 `AssembledToolCall`。
+ * 两边都只 `import type`，编译后被完全擦除，不存在运行期循环依赖；
+ * 仓里的 eslint 也没开 `import/no-cycle`（复核 088 记过一句：把类型放一处、别为了躲环复制第二套字面量 ——
+ * 两套口径迟早只改一套，那才是真风险）。
+ */
+import type { StreamEnd } from './types';
+
 export interface ToolCallDelta {
   /**
    * OpenAI 协议里必填，但**兼容网关常省略**（外部审查 T28）。
@@ -56,8 +64,21 @@ export class ToolCallAccumulator {
     return this.slots.size > 0;
   }
 
-  /** 流结束后调用：产出可执行的完整调用列表（按 index 排序） */
-  finish(): AssembledToolCall[] {
+  /**
+   * 流结束后调用：产出可执行的完整调用列表（按 index 排序）。
+   *
+   * `end` 是**必填**的（T56 · R31）：这一格回答的是"参数到底是没送过来，还是这个工具本来就没参数"。
+   * 判据只有一条 —— **`arguments` 一个字节的分片都没收到** 且 **流没有任何结束证据**
+   * （既没有 `[DONE]` 也没有 `finish_reason`，即 `end === 'no_end_marker'`）时，
+   * 不许把 `{}` 当成合法零参交给 `run_tool`：
+   * 那种形状下用户会看见"工具执行成功"，而 `write_file` 一个字的内容都没收到。
+   *
+   * 为什么选"拒绝执行 + 说清原因"而不是"照旧当零参"：两种情况分不出来时，
+   * 选**副作用小的那边**（与本项目"说不出真相就别说谎，也更别替模型动手"同一条纪律）。
+   * 反过来，**有结束标记**时仍然按 `{}` 放行 —— 无参工具的网关常见形态就是不给 arguments，
+   * 把它们一律打回是拿兼容换清白。
+   */
+  finish(end: StreamEnd): AssembledToolCall[] {
     return [...this.slots.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([index, slot]) => {
@@ -65,7 +86,13 @@ export class ToolCallAccumulator {
         let parseError: string | null = null;
         const text = slot.args.trim();
         if (text === '') {
-          parsed = {}; // 无参工具：合法的空对象
+          if (end === 'no_end_marker') {
+            parseError =
+              '流在参数送过来之前就结束了（没收到任何 arguments 分片，也没有结束标记）—— ' +
+              '这一次调用没有执行，因为无法区分"这个工具没有参数"与"参数还没送到"。请重发一次。';
+          } else {
+            parsed = {}; // 无参工具：合法的空对象（有结束证据才敢这么判）
+          }
         } else {
           try {
             const value: unknown = JSON.parse(text);

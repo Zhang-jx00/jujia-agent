@@ -46,7 +46,26 @@ describe('truncationNotice', () => {
     expect(truncationNotice('没见过的东西' as DoneEndReason)).toBeNull();
   });
 
-  it('两条说法不共用文案（"截断"与"被拦"是两件不同的事）', () => {
+  /**
+   * T55（R31）新增的那一态。这句话是整条修复的**落点**：
+   * provider 分得出 `no_end_marker`、循环带得出 `truncated`、契约传得过来，
+   * 而如果这里给 `null`，界面上半截回答与完整回答**还是一模一样** —— 前面四环全白做。
+   * 所以这里不只要"有话说"，还要钉住它说了三件具体的事：
+   * ① 上游没给结束标记（**是谁没说清**，不是模型的错）；② 可能不完整（**别当写完用**）；
+   * ③ 已经吐出来的内容都还在（**不是报错、内容没丢** —— 少了这句，用户会以为这一轮白跑）。
+   */
+  it('no_end_marker：说清"没给结束标记 + 可能不完整 + 内容还在"（T55 的落点）', () => {
+    const notice = truncationNotice('no_end_marker');
+    expect(notice).not.toBeNull();
+    expect(notice).toContain('结束标记');
+    expect(notice).toContain('可能不完整');
+    expect(notice).toContain('已经吐出来的内容都还在');
+  });
+
+  it('三种"没完整交出来"各有各的说法（共用一句就等于没分：截断 / 被拦 / 没交代）', () => {
+    const three = ['length', 'content_filter', 'no_end_marker'] satisfies DoneEndReason[];
+    const texts = three.map((r) => truncationNotice(r));
+    expect(new Set(texts).size, '三种"没完整交出来"共用一句话就等于没分').toBe(3);
     expect(truncationNotice('length')).not.toBe(truncationNotice('content_filter'));
   });
 });

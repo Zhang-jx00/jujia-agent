@@ -328,7 +328,41 @@ const echoServer = createServer((req, res) => {
         }
         if (last.includes('上下文压缩')) content = SUMMARY_6B;
         else if (last.includes('压成**一条**记忆')) content = NOTE_6B;
-        else if (last.includes('E2E_TRUNC_LEN')) {
+        /**
+         * T55（R31）的界面级证据：上游**什么结束标记都没给**就把流关了。
+         * 这正是代理 `proxy_read_timeout` 的 `res.end()` 形状 —— 修之前它一路顶着 `stop` 出去，
+         * 半截回答在界面上与完整回答长得一模一样。
+         */
+        else if (last.includes('E2E_NOMARKER')) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          res.write(
+            `data: ${JSON.stringify({ choices: [{ delta: { content: 'E2E-NOMARKER-半截回答' } }] })}\n\n`,
+          );
+          res.end(); // 没有 finish_reason、也没有 [DONE]：结束证据一条都没有
+          return;
+        }
+        /**
+         * T56（R31）的界面级证据：网关发了一个**参数一个字节都没送到**的调用，然后断流。
+         * 用 `list_dir`（path 可选）而不是 `write_file`：后者拿到 `{}` 也会被 zod 拒掉，
+         * 两种写法都"没写出文件"，界面就分不出修没修；而 `{}` 对 `list_dir` 是一次**合法执行**。
+         */
+        else if (last.includes('E2E_EMPTYARGS') && !hasToolReply) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          res.write(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { tool_calls: [{ index: 0, id: 'e2e-empty-args-1', function: { name: 'list_dir', arguments: '' } }] } }],
+            })}\n\n`,
+          );
+          res.end(); // 同样一条结束标记都没给
+          return;
+        } else if (last.includes('E2E_EMPTYARGS') && hasToolReply) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'E2E-EMPTYARGS-FINAL' } }] })}\n\n`);
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`);
+          res.write('data: [DONE]\n\n');
+          res.end();
+          return;
+        } else if (last.includes('E2E_TRUNC_LEN')) {
           content = '这一段被长度上限掐住了';
           finishReason = 'length';
         } else if (last.includes('E2E_TRUNC_FILTER')) {
@@ -3856,6 +3890,50 @@ try {
   }
   ok('钩子没跑成 → 那一次工具结果里说得出"没生效、但不视为拒绝"；停用之后这一格跟着消失');
 
+  /**
+   * T55 + T56（R31 · provider 诚实批）的界面级证据。
+   *
+   * 这两条在单测里已经各自绿了（provider 分出 `no_end_marker`、拼装器拒空参数），
+   * 这里验的是**那句话真的到了人眼前** —— 本仓的老账："契约里挂着、界面没读"与
+   * "算出来了却没画出来"都让门禁全绿而用户被骗（见 R6 的第 4 条形态）。
+   * 所以断言取的是**语义锚点**（界面文案原文），不是"整页里找得到某个词"。
+   */
+  step('T55/T56 断流与空参数：没结束标记要说"可能不完整"，参数没送到不许当合法零参');
+  await win4.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await win4.locator('select').first().selectOption(seededEchoConnId);
+  const boxT55 = win4.locator('textarea[placeholder^="输入消息"]');
+  const newT55 = win4.locator('button', { hasText: '新会话' });
+  if ((await newT55.count()) > 0) await newT55.first().click();
+
+  await boxT55.fill('E2E_NOMARKER 请说半句话就停');
+  await win4.locator('button', { hasText: '发送' }).first().click();
+  if ((await waitText4('没有给出结束标记', 20_000)) !== true) {
+    fail(
+      '上游没给结束标记却被说成"答完了"（T55 的静默回潮：半截回答与完整回答在界面上长得一样）',
+      (await body4()).slice(-1_200),
+    );
+  }
+  const nomarkerBody = await body4();
+  // 反向也要钉住：这条不是"断流就报错、把内容丢掉"，而是"内容留下、并把不完整的判断说出来"
+  if (!nomarkerBody.includes('E2E-NOMARKER-半截回答')) {
+    fail('已经吐出来的半截内容被丢了（口径是"如实说不完整"，不是"当错误扔掉"）', nomarkerBody.slice(-800));
+  }
+
+  if ((await newT55.count()) > 0) await newT55.first().click();
+  await boxT55.fill('E2E_EMPTYARGS 列一下目录');
+  await win4.locator('button', { hasText: '发送' }).first().click();
+  if ((await waitText4('流在参数送过来之前就结束了', 20_000)) !== true) {
+    fail(
+      '参数一个字节都没送到却被当成合法零参执行了（T56 的静默：用户看见"工具执行成功"）',
+      (await body4()).slice(-1_200),
+    );
+  }
+  const emptyArgsBody = await body4();
+  if (!emptyArgsBody.includes('[invalid_args]')) {
+    fail('拒执行的那句话没走既有的 [invalid_args] 通道（等于换了个没人读的形状）', emptyArgsBody.slice(-800));
+  }
+  ok('断流会说"可能不完整"、空参数会拒执行并说清原因 —— 两件事都在真窗口里看得见，且半截内容没被丢');
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -3876,5 +3954,5 @@ try {
   }
 }
 
-console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ B3b 画布（有界循环：命中即停 / 到界失败并说明白）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 主题包背景类型真的落在画面上（渐变 / 毛玻璃）→ 运行日志真在隔离目录里落盘（概览页看得见同一份）→ 更新检查点一次查一次（有新版本说得出来）→ 干净退出');
+console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ B3b 画布（有界循环：命中即停 / 到界失败并说明白）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → T55/T56 断流与空参数在界面上说实话（没结束标记要说"可能不完整"、参数没送到就拒执行且说清原因，半截内容不丢）→ 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 主题包背景类型真的落在画面上（渐变 / 毛玻璃）→ 运行日志真在隔离目录里落盘（概览页看得见同一份）→ 更新检查点一次查一次（有新版本说得出来）→ 干净退出');
 process.exit(0);

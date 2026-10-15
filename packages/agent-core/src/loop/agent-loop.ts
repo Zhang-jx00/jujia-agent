@@ -271,8 +271,10 @@ export async function runAgentTurn(
         } else if (ev.type === 'done') {
           if (ev.reason === 'aborted') aborted = true;
           // 截断不是"正常写完"（T26）：provider 已经分出 length / content_filter，
-          // 这里再归并一次就等于把上面那条修复在这里抹掉
-          else if (ev.reason === 'length' || ev.reason === 'content_filter') truncated = ev.reason;
+          // 这里再归并一次就等于把上面那条修复在这里抹掉。
+          // T55（R31）新增的 `no_end_marker` 走同一条道：**判据写成"除这两种之外的全部"**，
+          // 而不是再点一次名字 —— 逐名列举的结局是"第三种原因加进来了，界面还在说 stop"。
+          else if (ev.reason !== 'stop' && ev.reason !== 'tool_calls') truncated = ev.reason;
         }
       }
     } catch (err) {

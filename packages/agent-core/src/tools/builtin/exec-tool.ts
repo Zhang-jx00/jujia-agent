@@ -254,11 +254,18 @@ export function execOnce(args: ExecArgs, ctx: ToolContext, deps: ExecDeps): Prom
     return {
       // 命令**跑完了**就算工具成功，非零退出码是给模型的 information，不是工具故障。
       // （把非零退出报成工具失败，模型就看不见 stdout/stderr 了，反而会瞎猜。）
+      //
+      // 但"跑完了 ≠ 跑对了"这件事**不能只留在那句给人看的正文里**（T54 · R31）：
+      // 按 `ok` 判的下游（画布节点状态 `ok: res.outcome.ok`、审计、任务步骤）会把一条
+      // 失败的 `git push` 显示成成功。所以这两个事实各占一格机器可读字段。
+      // `exit.code` 在被信号杀掉时是 null —— **照原样写 null**，不许归 0（0 是"跑对了"）。
       ok: true,
       content,
       evidence: {
         paths: [cwd],
         durationMs,
+        exitCode: exit.code,
+        timedOut,
         ...(outTruncated || errTruncated ? { truncated: true } : {}),
       },
     };

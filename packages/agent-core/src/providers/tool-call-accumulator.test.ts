@@ -10,7 +10,7 @@ describe('ToolCallAccumulator：按 index 归位', () => {
     acc.push([{ index: 0, id: 'call_1', function: { name: 'write_', arguments: '{"pa' } }]);
     acc.push([{ index: 0, function: { name: 'file', arguments: 'th":"a.txt","content":"hi"}' } }]);
 
-    const calls = acc.finish();
+    const calls = acc.finish('tool_calls');
     expect(calls).toHaveLength(1);
     expect(calls[0]?.id).toBe('call_1');
     expect(calls[0]?.name).toBe('write_file'); // 关键：name 必须串接
@@ -26,7 +26,7 @@ describe('ToolCallAccumulator：按 index 归位', () => {
     acc.push([{ index: 1, function: { arguments: ':"."}' } }]);
     acc.push([{ index: 0, function: { arguments: ':"README.md"}' } }]);
 
-    const calls = acc.finish();
+    const calls = acc.finish('tool_calls');
     expect(calls.map((c) => c.index)).toEqual([0, 1]); // 按 index 排序
     expect(calls[0]?.name).toBe('read_file');
     expect(calls[0]?.arguments).toEqual({ path: 'README.md' });
@@ -38,7 +38,7 @@ describe('ToolCallAccumulator：按 index 归位', () => {
     const acc = new ToolCallAccumulator();
     acc.push([{ index: 0, id: 'c0', function: { name: 'write_file', arguments: '{"path":"a.tx' } }]);
 
-    const calls = acc.finish();
+    const calls = acc.finish('tool_calls');
     expect(calls[0]?.arguments).toBeNull();
     expect(calls[0]?.parseError).toBeTruthy();
     expect(calls[0]?.argumentsText).toBe('{"path":"a.tx');
@@ -48,7 +48,7 @@ describe('ToolCallAccumulator：按 index 归位', () => {
     const acc = new ToolCallAccumulator();
     acc.push([{ index: 0, id: 'c0', function: { name: 'list_dir' } }]);
 
-    const calls = acc.finish();
+    const calls = acc.finish('tool_calls');
     expect(calls[0]?.arguments).toEqual({});
     expect(calls[0]?.parseError).toBeNull();
   });
@@ -56,13 +56,13 @@ describe('ToolCallAccumulator：按 index 归位', () => {
   it('arguments 是数组或标量 → 明确报「不是 JSON 对象」', () => {
     const acc = new ToolCallAccumulator();
     acc.push([{ index: 0, id: 'c0', function: { name: 'x', arguments: '[1,2]' } }]);
-    expect(acc.finish()[0]?.parseError).toContain('不是 JSON 对象');
+    expect(acc.finish('tool_calls')[0]?.parseError).toContain('不是 JSON 对象');
   });
 
   it('缺少 id 时给出稳定的兜底 id（后续 tool 消息需要它配对）', () => {
     const acc = new ToolCallAccumulator();
     acc.push([{ index: 3, function: { name: 'x', arguments: '{}' } }]);
-    expect(acc.finish()[0]?.id).toBe('call_3');
+    expect(acc.finish('tool_calls')[0]?.id).toBe('call_3');
   });
 
   it('hasCalls / reset 行为正确', () => {
@@ -83,7 +83,7 @@ describe('ToolCallAccumulator：按 index 归位', () => {
     const mid = Math.floor(json.length / 2);
     acc.push([{ index: 0, id: 'c0', function: { name: 'write_file', arguments: json.slice(0, mid) } }]);
     acc.push([{ index: 0, function: { arguments: json.slice(mid) } }]);
-    expect(acc.finish()[0]?.arguments).toEqual({ path: '文档/说明.md', content: '你好，俱佳' });
+    expect(acc.finish('tool_calls')[0]?.arguments).toEqual({ path: '文档/说明.md', content: '你好，俱佳' });
   });
 
   // 外部审查 T28：省略 index 的兼容网关若同一帧给多个调用，全并进 slot 0 就会把
@@ -95,7 +95,7 @@ describe('ToolCallAccumulator：按 index 归位', () => {
       { id: 'b', function: { name: 'list_dir', arguments: '{"path":"."}' } },
     ] as never);
 
-    const calls = acc.finish();
+    const calls = acc.finish('tool_calls');
     expect(calls.map((c) => c.id)).toEqual(['a', 'b']);
     expect(calls.map((c) => c.name)).toEqual(['read_file', 'list_dir']);
     expect(calls[0]?.arguments).toEqual({ path: 'a.md' });
@@ -105,7 +105,7 @@ describe('ToolCallAccumulator：按 index 归位', () => {
   it('不带 index 的单调用（最常见形态）→ 与带 index=0 的结果一致', () => {
     const acc = new ToolCallAccumulator();
     acc.push([{ id: 'only', function: { name: 'list_dir', arguments: '{"path":"docs"}' } }] as never);
-    const calls = acc.finish();
+    const calls = acc.finish('tool_calls');
     expect(calls).toHaveLength(1);
     expect(calls[0]?.name).toBe('list_dir');
     expect(calls[0]?.arguments).toEqual({ path: 'docs' });
@@ -114,6 +114,50 @@ describe('ToolCallAccumulator：按 index 归位', () => {
   it('index 给了非数字（网关把数字串化后又丢了）→ 同样按帧内位置归位，不猜', () => {
     const acc = new ToolCallAccumulator();
     acc.push([{ index: undefined, id: 'u', function: { name: 'x', arguments: '{}' } }] as never);
-    expect(acc.finish()[0]?.index).toBe(0);
+    expect(acc.finish('tool_calls')[0]?.index).toBe(0);
+  });
+});
+
+/* ---------------- 参数从未开始就结束（T56 · R31） ---------------- */
+
+/**
+ * 与 T55 是**同一个决定的一体两面**：拼装器以前根本不知道"流是怎么结束的"，
+ * 于是 `arguments` 为空一律当"无参工具的合法空对象"。
+ *
+ * 危险形状（外部审查原话）：网关发了 `{"name":"write_file","arguments":""}` 之后**断流**
+ * ⇒ 旧实现 `parseError` 为 null ⇒ `{}` 交给 `run_tool`，`[invalid_args]` 那条守卫不触发
+ * ⇒ **用户看见"工具执行成功"，而参数从未被传过来**。
+ *
+ * 口径：空参数只在**有结束证据**（`[DONE]` 或 `finish_reason`）时才当零参 ——
+ * 无结束标记时"这个工具本来无参"与"参数还没送到"这两种情况**分不出来**，
+ * 那就必须选副作用小的那边：拒绝执行并说清原因，而不是猜一个空参数去写文件。
+ */
+describe('参数从未开始就结束：不许当合法零参（T56）', () => {
+  it('没有结束标记 + 一条 arguments 分片都没来 → parseError 说清"参数没送到"，arguments 给 null', () => {
+    const acc = new ToolCallAccumulator();
+    acc.push([{ index: 0, id: 'c0', function: { name: 'write_file', arguments: '' } }]);
+
+    const calls = acc.finish('no_end_marker');
+    expect(calls[0]?.arguments).toBeNull();
+    expect(calls[0]?.parseError).toContain('参数');
+    expect(calls[0]?.parseError).toContain('结束');
+  });
+
+  it('有结束标记时空参数仍是合法零参（无参工具不能被冤枉 —— 兼容面）', () => {
+    const acc = new ToolCallAccumulator();
+    acc.push([{ index: 0, id: 'c0', function: { name: 'list_dir' } }]);
+
+    const calls = acc.finish('tool_calls');
+    expect(calls[0]?.arguments).toEqual({});
+    expect(calls[0]?.parseError).toBeNull();
+  });
+
+  it('参数本来就完整、只是没收到结束标记 → 照常解析（不冤枉网关，也不执行假的零参）', () => {
+    const acc = new ToolCallAccumulator();
+    acc.push([{ index: 0, id: 'c0', function: { name: 'read_file', arguments: '{"path":"a.md"}' } }]);
+
+    const calls = acc.finish('no_end_marker');
+    expect(calls[0]?.arguments).toEqual({ path: 'a.md' });
+    expect(calls[0]?.parseError).toBeNull();
   });
 });

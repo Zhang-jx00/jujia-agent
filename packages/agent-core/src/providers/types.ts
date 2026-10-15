@@ -65,12 +65,27 @@ export interface ChatParams {
 export type FinishReason = 'stop' | 'length' | 'content_filter';
 
 /**
- * "这一轮的文本被上游掐了"的两种原因（= 除 stop 之外的结束原因）。
+ * 这一轮**实际的结束方式**（T55 · R31 定的口径，设计见 `docs/DESIGN-T55-STREAM-END.md`）。
  *
- * 用 `Exclude` 从 `FinishReason` 推出来而不是另写一遍字面量：将来这里加第三种原因，
+ * `FinishReason` 是"上游自己说它为什么结束"，而这一格是"我们看到它是怎么结束的"——
+ * 两者不是一回事：代理的 `proxy_read_timeout` 会 `res.end()` 把流掐了，
+ * 上游什么都没说过，而旧实现把"没听说结束"当成"说完了"（`finishReason` 的初值就是 `'stop'`）。
+ *
+ * `no_end_marker` 的判定口径（**两个结束证据有一个就算写完**）：
+ * - 收到 `[DONE]` —— OpenAI 协议规定的收尾标记，**自建端点与网关常常只发这个、从不发 finish_reason**，
+ *   把它一律判成截断会让这批厂商直接不可用；
+ * - 收到任何 `finish_reason`（含厂商自造的未知值，按 `stop` 收尾，T26 的口径不推翻）；
+ * - 两个都没有 → `no_end_marker`：**不许**说成"答完了"，但已经吐出来的字一个字不丢。
+ */
+export type StreamEnd = FinishReason | 'tool_calls' | 'aborted' | 'no_end_marker';
+
+/**
+ * "这一轮的文本没完整交出来"的几种原因（= 除"写完 / 停在工具处 / 用户中止"之外的那些）。
+ *
+ * 用 `Exclude` 从 `StreamEnd` 推出来而不是另写一遍字面量：将来这里加第三种原因，
  * 循环与界面会自动跟上，不会出现"provider 认得了、界面还在说 stop"的分叉。
  */
-export type TruncationReason = Exclude<FinishReason, 'stop'>;
+export type TruncationReason = Exclude<StreamEnd, 'stop' | 'tool_calls' | 'aborted'>;
 
 /** provider 层面的流式事件（与渲染层的 StreamEvent 解耦，便于单测） */
 export type ProviderEvent =
@@ -78,7 +93,7 @@ export type ProviderEvent =
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   /** 流结束时（且已拼装完成）一次性给出：分片拼装细节见 tool-call-accumulator.ts */
   | { type: 'tool_calls'; calls: AssembledToolCall[] }
-  | { type: 'done'; reason: FinishReason | 'aborted' | 'tool_calls' };
+  | { type: 'done'; reason: StreamEnd };
 
 export interface ProviderError extends Error {
   code: 'http_error' | 'network_error' | 'bad_response' | 'timeout';

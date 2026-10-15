@@ -162,8 +162,12 @@ export type TestResult = z.infer<typeof testResultSchema>;
  *
  * **刻意不收 `tool_calls`**：provider 那一层会产，但它止步于 Agent Loop（循环自己执行工具并继续），
  * 永远不会成为"这一轮的结束原因"。界面读到它就等于相信一条不存在的路径。
+ *
+ * `no_end_marker` 是 R31（T55）新增的一态：**上游既没给 `[DONE]` 也没给 `finish_reason` 就把流关了**。
+ * 它不是错误（已经吐出来的字全部保留、任务照常落盘），但也不是"答完了" ——
+ * 修之前这种形状一路顶着 `stop` 出去，代理超时掐掉的半截回答看起来就是一次完整回答。
  */
-export const DONE_END_REASONS = ['stop', 'length', 'content_filter', 'aborted', 'error'] as const;
+export const DONE_END_REASONS = ['stop', 'length', 'content_filter', 'no_end_marker', 'aborted', 'error'] as const;
 
 /**
  * 审批请求在主进程侧作废的原因（T58 同形第二条）。

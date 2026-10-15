@@ -132,10 +132,17 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
           if (res.decision === 'timeout') {
             return { ok: false, output: '', error: `等待确认超时（${toolName}），这一步没有执行` };
           }
+          const exitCode = res.outcome.evidence?.exitCode;
+          const timedOut = res.outcome.evidence?.timedOut;
           return {
             ok: res.outcome.ok,
             output: res.outcome.ok ? res.outcome.content : '',
             error: res.outcome.ok ? '' : res.outcome.content,
+            // T54（R31）：把"跑完 ≠ 跑对"这两个机器可读事实搬到节点结果上。
+            // **判定一行没动**（`ok` 还是 res.outcome.ok），动的是那句话说不说谎；
+            // 不搬的话 exec 工具记的 exitCode 在画布这条链上就没人接 —— 这正是 T54 的病根。
+            ...(exitCode !== undefined ? { exitCode } : {}),
+            ...(timedOut !== undefined ? { timedOut } : {}),
           };
         }
 

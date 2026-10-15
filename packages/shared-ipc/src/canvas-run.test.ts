@@ -132,6 +132,59 @@ describe('runGraph：取消要传下去，剩下的标成 cancelled', () => {
   });
 });
 
+/* ---------------- 命令的退出码要说出口（T54 · R31） ---------------- */
+
+/**
+ * 画布里的工具节点此前只看 `res.outcome.ok`，而 exec 工具的口径是"跑完了就算 ok"
+ * （非零退出是给模型的 information）—— 于是**一条失败的 `git push` 在画布上显示成成功**，
+ * 那个"退出码 128"只活在正文里，谁也没往状态上看。
+ *
+ * 这一组钉的是**记账**，不是判定：状态仍是 `ok`（改了判定就会动摇活路传播与分支语义，
+ * 那是另一件事），但那一步的一句话必须把失败迹象带出来，界面上的节点卡片才不是假绿。
+ */
+describe('runGraph：成功那一步不许把"跑完"说成"跑对"（T54）', () => {
+  it('工具节点退出码非 0 → 状态仍是 ok，但那一步的 note 里有退出码', async () => {
+    const { execute } = recorder({
+      b: { ok: true, output: 'error: failed to push some refs', error: '', exitCode: 128, timedOut: false },
+    });
+    const events: RunEvent[] = [];
+    const outcome = await runGraph(three(), { maxSteps: 50, execute, onEvent: (e) => events.push(e) });
+    expect(outcome.states['b']).toBe('ok');
+    const note = events.find((e) => e.nodeId === 'b' && e.status === 'ok')?.note ?? '';
+    expect(note).toContain('退出码 128');
+  });
+
+  it('超时被强制结束 → note 说的是超时，不是"跑对了"', async () => {
+    const { execute } = recorder({
+      b: { ok: true, output: 'half', error: '', exitCode: null, timedOut: true },
+    });
+    const events: RunEvent[] = [];
+    await runGraph(three(), { maxSteps: 50, execute, onEvent: (e) => events.push(e) });
+    const note = events.find((e) => e.nodeId === 'b' && e.status === 'ok')?.note ?? '';
+    expect(note).toContain('超时');
+  });
+
+  it('被信号结束、退出码未知（null）→ note 说"未知"，不许归 0 也不许不提', async () => {
+    const { execute } = recorder({
+      b: { ok: true, output: 'x', error: '', exitCode: null, timedOut: false },
+    });
+    const events: RunEvent[] = [];
+    await runGraph(three(), { maxSteps: 50, execute, onEvent: (e) => events.push(e) });
+    const note = events.find((e) => e.nodeId === 'b' && e.status === 'ok')?.note ?? '';
+    expect(note).toContain('未知');
+  });
+
+  it('反面对照：退出码 0 的节点不许被加一句噪声（提示词节点同样不受影响）', async () => {
+    const { execute } = recorder({
+      b: { ok: true, output: 'clean', error: '', exitCode: 0, timedOut: false },
+    });
+    const events: RunEvent[] = [];
+    await runGraph(three(), { maxSteps: 50, execute, onEvent: (e) => events.push(e) });
+    expect(events.find((e) => e.nodeId === 'b' && e.status === 'ok')?.note).toBe('clean');
+    expect(events.find((e) => e.nodeId === 'a' && e.status === 'ok')?.note).toBe('a-ok');
+  });
+});
+
 describe('runGraph：步数上界', () => {
   it('节点数超过上限 → 整体拒绝，不跑一半', async () => {
     const { calls, execute } = recorder();

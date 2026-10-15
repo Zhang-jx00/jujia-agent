@@ -372,6 +372,39 @@ describe('结果如何如实呈现', () => {
   });
 });
 
+/* ---------------- 命令结果的机器可读字段（T54 · R31） ---------------- */
+
+/**
+ * 为什么要这三条：**"命令跑完了就算工具成功"这条口径本身不动**（非零退出是 information，
+ * 报成工具失败反而让模型看不见 stdout/stderr 去瞎猜）。动的是**另一头** ——
+ * 这个事实此前只活在那句给人看的正文里（`退出码 128`），任何按 `ok` 判的下游都会把它当成功：
+ * 画布节点状态就是 `ok: res.outcome.ok`，于是画布里一条失败的 `git push` 显示成 ok。
+ * 补两个字段的目的是**让"跑完了"与"跑对了"在数据里分成两格**，不是改判定。
+ */
+describe('命令结果的机器可读字段（T54）', () => {
+  it('非零退出码进 evidence.exitCode（判定仍是 ok，这条只补记账）', async () => {
+    const fake = makeFake({ exitCode: 128, stdout: 'x' });
+    const r = await execOnce({ command: 'git push' }, ctx(), fake.deps);
+    expect(r.ok).toBe(true);
+    expect(r.evidence?.exitCode).toBe(128);
+    expect(r.evidence?.timedOut).toBe(false);
+  });
+
+  it('退出码 0 要写成 0，不能"干脆没这个字段"（0 与"未知"必须分得开）', async () => {
+    const fake = makeFake({ exitCode: 0, stdout: 'ok' });
+    const r = await execOnce({ command: 'echo ok' }, ctx(), fake.deps);
+    expect(r.evidence?.exitCode).toBe(0);
+    expect('exitCode' in (r.evidence ?? {})).toBe(true);
+  });
+
+  it('被超时杀掉：exitCode 是 null（真的不知道）而 timedOut 为 true —— 两格各说各的事', async () => {
+    const fake = makeFake({ hang: true });
+    const r = await execOnce({ command: 'sleep 999', timeoutMs: 200 }, ctx(), fake.deps);
+    expect(r.evidence?.timedOut).toBe(true);
+    expect(r.evidence?.exitCode).toBeNull();
+  });
+});
+
 /* ---------------- 与权限门的接合（本轮核心验收点） ---------------- */
 
 describe('run_command 走的是与文件工具同一套权限门', () => {

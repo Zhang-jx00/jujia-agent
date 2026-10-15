@@ -23,7 +23,7 @@
  * 用法：`npm run verify:pack`（根目录）—— 它会先构建再打包（--dir，不出安装包），然后跑这里。
  * 退出码：0 = 通过；1 = 失败（打印失败在哪一步与当时的界面文本）。
  */
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright-core';
@@ -186,18 +186,37 @@ try {
   const canvasDir = join(dataDir, 'canvas');
   mkdirSync(canvasDir, { recursive: true });
   const packGraphId = `verify-pack-canvas-${RUN_ID}`;
+  /**
+   * 写在**第一次真跑**时被抓出来（R31 之前这条门禁因本机句柄问题从未跑到，这一步也就从没执行过）：
+   * 图文件不是裸图对象，而是 `JsonStore` 的**信封**（`{ version, updatedAt, data }`，见下面那层注释）——
+   * `canvas-store.list()` 走 `readEnvelope`，`data` 取不到就当这张图坏了、**不进列表**（也不删它）。
+   * 于是脚本写完点「画布」页签，"运行这张图"照样在（那是按钮，不是列表项），
+   * 而 `button[data-graph-id=…]` 永远等不到 —— **症状长得像"打包后 React Flow 的 chunk 没取到"**，
+   * 真相是夹具不像真的（R10 那条纪律的同族：夹具一旦不像真的，红起来会指错方向）。
+   */
   writeFileSync(
     join(canvasDir, `${packGraphId}.json`),
     JSON.stringify(
       {
+        /**
+         * 信封是 `{ version, updatedAt, data }` **三层**（与 `e2e-ui.mjs` 的 `writeGraph` 一字同形）。
+         * 第一次真跑红了两回：先少写整个信封（`list()` 解不出 `data`，图根本不进列表），
+         * 补上 `updatedAt`+`data` 之后又少写**信封自己的 `version`** ——
+         * `list()` 只读 `updatedAt`/`data` 所以列表是好的，`load()` 走 `JsonStore` 才判"形状不合法"，
+         * 于是症状是"列表里看得见、点开报字段不对"，看着像打包产物的问题，其实是夹具不像真的。
+         */
         version: 1,
-        connectionId: 'no-connection-needed-for-tools',
-        nodes: [
-          { id: 'a', kind: 'tool', x: 40, y: 40, config: { toolName: 'list_dir', argsText: '{"path":"."}' } },
-          { id: 'b', kind: 'tool', x: 300, y: 40, config: { toolName: 'read_file', argsText: '{"path":"README.txt"}' } },
-        ],
-        edges: [{ id: 'e1', from: 'a', to: 'b' }],
-        viewport: { x: 0, y: 0, zoom: 1 },
+        updatedAt: new Date().toISOString(),
+        data: {
+          version: 1,
+          connectionId: 'no-connection-needed-for-tools',
+          nodes: [
+            { id: 'a', kind: 'tool', x: 40, y: 40, config: { toolName: 'list_dir', argsText: '{"path":"."}' } },
+            { id: 'b', kind: 'tool', x: 300, y: 40, config: { toolName: 'read_file', argsText: '{"path":"README.txt"}' } },
+          ],
+          edges: [{ id: 'e1', from: 'a', to: 'b' }],
+          viewport: { x: 0, y: 0, zoom: 1 },
+        },
       },
       null,
       2,
@@ -208,9 +227,18 @@ try {
   if ((await waitText('运行这张图', 20_000)) !== true) {
     fail('画布页没渲染出来（React Flow 的懒加载 chunk 在打包产物里没取到？）', (await body()).slice(0, 700));
   }
-  await win.locator(`button[data-graph-id="${packGraphId}"]`).first().click();
+  // 列表项没出现有两种原因，必须分得开：① 信封写错了（夹具的问题）② 打包后读不到那个目录（产物的问题）。
+  // 所以先把磁盘真值取一遍：文件在、且能解出 data，才算"应用该看得见它"。
+  const graphFileRaw = readFileSync(join(canvasDir, `${packGraphId}.json`), 'utf8');
+  if (!graphFileRaw.includes('"data"')) {
+    fail('脚本自己写的图文件没有 data 那一层（夹具不像真的，与打包产物无关）');
+  }
+  await win.locator(`button[data-graph-id="${packGraphId}"]`).first().click({ timeout: 20_000 });
   if ((await waitText(`已打开 ${packGraphId}`, 15_000)) !== true) {
-    fail('从磁盘打开那张两节点图失败（图文件的读取路径在打包后不对？）', (await body()).slice(0, 700));
+    fail(
+      '从磁盘打开那张两节点图失败（图文件的读取路径或信封格式在打包后不对？）',
+      (await body()).slice(0, 700),
+    );
   }
   const packNodes = await win.locator('[data-node-status]').count();
   if (packNodes !== 2) fail(`画布上应该有两个节点（实际 ${String(packNodes)} 个）`);

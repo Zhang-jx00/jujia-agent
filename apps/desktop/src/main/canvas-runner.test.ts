@@ -208,3 +208,71 @@ describe('createCanvasRunner：B3 条件分支（同一条补全路径 + 跳过�
     expect(statuses('fn')).toEqual(['skipped']);
   }, 30_000);
 });
+
+/* ---------------- 工具节点的退出码要搬到节点上（T54 · R31） ---------------- */
+
+/**
+ * 这一条钉的是**链条的中间那一环**（本仓的老账：接线锁只钉中间一环，上下游断了照样绿）。
+ * 上下游各自都有用例了 —— exec 工具把 `exitCode` 写进 `evidence`（`exec-tool.test.ts`）、
+ * 编排层把非零退出说出来（`canvas-run.test.ts`）—— 但如果 `canvas-runner.ts` 里那句
+ * `ok: res.outcome.ok` 没把 evidence 的两个字段搬过来，**画布仍然会把失败的命令显示成成功**，
+ * 而那两个文件各自全绿。所以这里用真 `runTool` + 假工具走一遍完整链路。
+ */
+describe('createCanvasRunner：工具节点搬运 evidence 里的机器可读事实（T54）', () => {
+  /** 假命令工具：跑完（ok:true），但退出码 128 —— 正是 `git push` 失败那个形状 */
+  const failingExecTool = {
+    name: 'fake_exec',
+    description: '测试用：一条跑完但失败的命令',
+    kind: 'exec',
+    parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    parse: () => ({}),
+    run: async () => ({
+      ok: true,
+      content: 'error: failed to push some refs',
+      evidence: { paths: [], durationMs: 1, exitCode: 128, timedOut: false },
+    }),
+  };
+
+  const toolGraph = (): CanvasGraph => ({
+    version: 1,
+    connectionId: 'conn-1',
+    viewport: { x: 0, y: 0, zoom: 1 },
+    nodes: [{ id: 't-1', kind: 'tool', x: 0, y: 0, config: { toolName: 'fake_exec', argsText: '{}' } }],
+    edges: [],
+  });
+
+  it('evidence.exitCode 必须出现在节点的那句话里（判定仍是 ok 不变）', async () => {
+    const baseUrl = await slowSseServer(); // 工具节点不碰网络，给个合法值即可
+    const events: CanvasEventPayload[] = [];
+    const deps: CanvasRunnerDeps = {
+      ...makeDeps(baseUrl, events),
+      // 执行类是硬 ask：这里给"这一次允许"，让链路真的走到 run（不是绕开权限门）
+      permission: async () => 'allow_once' as const,
+      registry: {
+        get: (name: string) => (name === 'fake_exec' ? (failingExecTool as never) : undefined),
+      } as unknown as CanvasRunnerDeps['registry'],
+      // 工具节点必经五处钩子调用（PreToolUse / PermissionRequest / Post…），
+      // 而 `makeDeps` 里那个 `{} as HookRunner` 是给提示词节点用的（它们碰不到钩子，
+      // 碰到了就抛错当断言）—— 走到工具这一支就必须给一个真的空结果。
+      hooks: {
+        run: async () => ({
+          blocked: false,
+          reason: null,
+          additionalContext: [],
+          updatedInput: null,
+          permissionDecision: null,
+          permissionReason: null,
+          continueTurn: false,
+          diagnostics: [],
+          ranCount: 0,
+        }),
+      } as unknown as CanvasRunnerDeps['hooks'],
+    };
+    const runner = createCanvasRunner(deps);
+    const r = await runner.run('g-exit-code', toolGraph());
+
+    expect(r.ok).toBe(true); // **判定一行没动**：这条只验"那句话有没有说实话"
+    const note = events.find((e) => e.nodeId === 't-1' && e.status === 'ok')?.note ?? '';
+    expect(note).toContain('退出码 128');
+  }, 30_000);
+});

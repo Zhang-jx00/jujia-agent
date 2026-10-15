@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDefaultRegistry } from '../tools/registry';
 import type { PermissionDecision, PermissionRequest } from '../tools/executor';
-import type { ChatParams, ChatMessage, ProviderEvent } from '../providers/types';
+import type { ChatParams, ChatMessage, ProviderEvent, TruncationReason } from '../providers/types';
 import { HANDOFF_TOOL_NAME, runAgentTurn, type AgentLoopDeps, type LoopEvent } from './agent-loop';
 
 /**
@@ -46,8 +46,12 @@ function scriptedChat(
      * 这一轮被上游掐断的原因（外部审查 T26）。
      * 只影响最后那个 `done` 的 reason —— 循环的 `reason`（为什么结束）不该被它污染，
      * 两件事分别落在 `result.reason` 与 `result.truncated` 上。
+     *
+     * 类型取 `TruncationReason` 而不是在这里再抄一份 `'length' | 'content_filter'`：
+     * R31 加第四种（`no_end_marker`）时，抄出来的那份清单会让新原因**在测试夹具里就进不来** ——
+     * 于是"循环认不认得它"这条根本没被验过（本仓"写死清单被合法增长养瞎"的同一形状）。
      */
-    truncate?: 'length' | 'content_filter';
+    truncate?: TruncationReason;
   }>,
 ) {
   const seenMessages: ChatMessage[][] = [];
@@ -691,7 +695,7 @@ describe('回合级钩子接入（W5d-b）：拦提示词、注入上下文、�
 });
 
 describe('T26：被上游截断要作为独立事实传出去', () => {
-  async function runWith(truncate?: 'length' | 'content_filter') {
+  async function runWith(truncate?: TruncationReason) {
     const { chat } = scriptedChat([{ text: '写到一半', ...(truncate ? { truncate } : {}) }]);
     return runAgentTurn(
       {
@@ -715,6 +719,19 @@ describe('T26：被上游截断要作为独立事实传出去', () => {
     const res = await runWith('content_filter');
     expect(res.reason).toBe('final');
     expect(res.truncated).toBe('content_filter');
+  });
+
+  /**
+   * T55（R31）新增的那一态在**循环这一环**的证据。
+   * 这一环以前是逐点名（`=== 'length' || === 'content_filter'`），
+   * 加第四种原因时会安静地掉进"没截断"那一侧 —— 上面两条用例照样绿。
+   * 所以这条不是补覆盖率，是**这一环自己持有那条断言**（跨层测试不能替模块代言，本仓的老账）。
+   */
+  it('no_end_marker 也独立成格（循环判的是"除这两种之外的全部"，不是点名清单）', async () => {
+    const res = await runWith('no_end_marker');
+    expect(res.reason).toBe('final');
+    expect(res.truncated).toBe('no_end_marker');
+    expect(res.text).toBe('写到一半'); // 判出"没结束标记"不等于把这半截丢掉
   });
 
   it('正常收尾 → truncated 是 null，不是 undefined（"确实没截"与"没查"必须是两件事）', async () => {

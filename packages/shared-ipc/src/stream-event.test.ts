@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   DONE_END_REASONS,
@@ -6,6 +9,9 @@ import {
   permissionExpiredSchema,
   streamEventSchema,
 } from './index';
+
+/** 仓库根（本文件在 packages/shared-ipc/src 下，往上三层）—— 出处对账要读主进程与 agent-core 的源码 */
+const repoRoot = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
 
 /**
  * 流式事件契约（R8.7 加了一类：`tool_output`）。
@@ -89,10 +95,58 @@ describe('结束原因的枚举里不许有"运行期永不产生"的成员（T5
     expect(streamEventSchema.safeParse({ ...base, type: 'done', reason: 'tool_calls' }).success).toBe(false);
   });
 
-  it('契约成员清单就是那五个，一个不多（新增成员必须同时改主进程与界面那张表）', () => {
-    expect([...DONE_END_REASONS].sort()).toEqual(
-      ['aborted', 'content_filter', 'error', 'length', 'stop'].sort(),
+  /**
+   * 这一条在 R31 被**换了判据**（不是放宽）。
+   *
+   * 旧写法是"成员清单就是那五个"的字面量对账 —— 于是本轮合法地新增 `no_end_marker` 时它当堂红，
+   * 而这正是本仓**第五次**撞见同一个形状（写死现状清单的锁会被合法增长养瞎：CSS 接线锁、
+   * check:docs 段落 indexOf、ipc-wiring 生命周期 slice、`sendMessage(` 计数、`.toBe(6)` 事件种类数）。
+   * 更糟的是这种红**教人去做错事**：照旧清单删掉新增成员，或者把清单改成六个 ——
+   * 后者恰好就是"改阈值不改判据"。
+   *
+   * 继任的判据是**出处**：契约里的每一个成员，都必须能在真实来源里指出"谁会把这个值发出来" ——
+   * ① 主进程 `chat-service.ts` 里有 `resolved = '它'` 这条赋值，或
+   * ② agent-core 的 `StreamEnd` 里有它，且循环确实会把它带进 `truncated`（`stop` / `tool_calls` / `aborted`
+   *    除外：前两个不进这一格，第三个走的是"用户中止"那条独立的格子）。
+   * 这样 T58 治的那个病（**契约里有、运行期永不产生**）照样会被抓住 ——
+   * `tool_calls` 既不在出处①（主进程从不赋它），又被出处②的排除项点名，两条都过不了。
+   */
+  it('契约的每个成员都必须在源码里有出处（谁发这个值说不出来 = 死成员）', () => {
+    const main = readFileSync(join(repoRoot, 'apps', 'desktop', 'src', 'main', 'chat-service.ts'), 'utf8');
+    const core = readFileSync(
+      join(repoRoot, 'packages', 'agent-core', 'src', 'providers', 'types.ts'),
+      'utf8',
     );
+
+    const assigned = new Set(
+      [...main.matchAll(/resolved\s*=\s*'([a-z_]+)'/g)].map((m) => m[1] as string),
+    );
+    /**
+     * `StreamEnd` 的成员**不是全写在这一行上的**：`export type StreamEnd = FinishReason | 'tool_calls' | ...`
+     * —— 只扫这一行会漏掉 `length` / `content_filter` / `stop`（它们来自 `FinishReason`）。
+     * 上一版就栽在这儿：扫到 3 个成员，防失焦那格当场把锁判红（这正是这条下限断言存在的意义）。
+     * 所以取**两个声明的并集**，而不是把字面量补回清单。
+     */
+    const declOf = (name: string): string =>
+      new RegExp(`export type ${name} =([^;]+);`, 's').exec(core)?.[1] ?? '';
+    const streamEnd = new Set([
+      ...`${declOf('StreamEnd')} ${declOf('FinishReason')}`.matchAll(/'([a-z_]+)'/g),
+    ].map((m) => m[1] as string));
+    // 循环吞掉的三个（见 agent-loop 的 done 分支）：它们不会成为 `result.truncated`
+    const swallowedByLoop = new Set(['stop', 'tool_calls', 'aborted']);
+
+    // 防失焦：两个解析任一个空转，这条锁就什么都没量到（本仓"扫得太少就等于全过"的老账）
+    expect(assigned.size, '主进程里一条 resolved 赋值都没扫到 —— 定位器失效了').toBeGreaterThanOrEqual(3);
+    expect(streamEnd.size, 'StreamEnd 的定义没扫到 —— 定位器失效了').toBeGreaterThanOrEqual(4);
+
+    for (const reason of DONE_END_REASONS) {
+      const produced =
+        assigned.has(reason) || (streamEnd.has(reason) && !swallowedByLoop.has(reason));
+      expect(produced, `done 的结束原因 "${reason}" 在源码里没有任何出处（死成员）`).toBe(true);
+    }
+    // 反向钉住 T58 的那个具体病灶：provider 会产、但止步于循环
+    expect(streamEnd.has('tool_calls'), 'StreamEnd 里应当还有 tool_calls（provider 那一层确实会产）').toBe(true);
+    expect(DONE_END_REASONS).not.toContain('tool_calls');
   });
 
   it('审批作废原因不再收 cancelled：桥里只有超时与窗口关闭两条出口', () => {

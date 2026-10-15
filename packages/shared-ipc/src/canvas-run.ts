@@ -33,6 +33,40 @@ export interface NodeResult {
   error: string;
   /** 是否"用户拒绝"而不是"执行出错"（界面上是两种状态） */
   denied?: boolean;
+  /**
+   * 命令的退出码（T54 · 由接线层从 `outcome.evidence.exitCode` 原样搬过来）。
+   * `null` = 被信号结束、真的不知道；`undefined` = 这一步根本不是命令（提示词节点）。
+   * **它不参与判定**（`ok` 才是判定结果），只用来让成功那一步的一句话不说谎。
+   */
+  exitCode?: number | null;
+  /** 命令是被超时强制结束的（T54） */
+  timedOut?: boolean;
+}
+
+/**
+ * 成功那一步给人看的一句话（T54 · R31）。
+ *
+ * 为什么要有它：exec 工具的口径是"**命令跑完了**就算工具成功"（非零退出是给模型的
+ * information，报成工具失败反而让模型看不见 stdout/stderr 去瞎猜）。这条口径本身不动，
+ * 但画布此前只看 `ok`，于是**一条失败的 `git push` 在节点卡片上显示成成功**，
+ * 那句"退出码 128"只活在正文里。这里把机器可读的失败迹象**接到话术上**：
+ * 状态仍是 `ok`（改判定会动摇分支与活路传播那三套既有语义，那是另一件事），
+ * 但 note 不许把"跑完"说成"跑对"。
+ *
+ * 三种情况各一句话，**退出码 0 与提示词节点一律不加噪声** ——
+ * 每次都出现的一句废话，三次之后就没有人看了（本仓"误报三次的判据最后都是被人删掉"同一形状）。
+ */
+function successNote(result: NodeResult): string {
+  const body = result.output.slice(0, 200);
+  const flag =
+    result.timedOut === true
+      ? '命令超时被强制结束'
+      : result.exitCode === null
+        ? '命令被信号结束，退出码未知'
+        : typeof result.exitCode === 'number' && result.exitCode !== 0
+          ? `命令退出码 ${String(result.exitCode)}`
+          : '';
+  return flag === '' ? body : `${flag}｜${body}`;
 }
 
 export interface RunEvent {
@@ -284,7 +318,7 @@ export async function runGraph(graph: CanvasGraph, options: RunOptions): Promise
           branch === 'true' ? `命中关键词「${keyword}」→ 走 true 口` : `没命中关键词「${keyword}」→ 走 false 口`,
         );
       } else {
-        emit(id, 'ok', step, result.output.slice(0, 200));
+        emit(id, 'ok', step, successNote(result));
       }
     } catch (err) {
       // 被取消与真失败要分开：前者不是错，不该让人以为工具坏了

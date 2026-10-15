@@ -20,6 +20,11 @@ export const DONE_REASON_NOTICE: Record<DoneEndReason, string | null> = {
   stop: null,
   length: '回答达到长度上限被截断了：这一段是不完整的。可说"继续"接着写，或在设置里调大 max_tokens。',
   content_filter: '回答被上游的内容过滤拦下一部分：这一段是不完整的，不是模型写完了。',
+  // T55（R31）新增的一态：上游**什么结束标记都没给**就把流关了（代理超时 `res.end()` 是这个形状）。
+  // 这句话是本条的全部意义 —— 没有它，半截回答与完整回答在界面上长得一模一样。
+  no_end_marker:
+    '上游没有给出结束标记（既没有 [DONE]，也没有 finish_reason）就把这次回答断了：' +
+    '这一段**可能不完整**，说"继续"可以接着要，或直接重试一次。已经吐出来的内容都还在。',
   // 用户按停止 / 出错：各有各的格子（气泡上的"已停止"与错误行），在这里重复说会互相盖
   aborted: null,
   error: null,

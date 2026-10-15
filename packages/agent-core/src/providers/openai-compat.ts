@@ -1,7 +1,14 @@
 import { maskSecrets } from '../audit/redact';
 import { createSseParser } from './sse';
 import { ToolCallAccumulator, type AssembledToolCall } from './tool-call-accumulator';
-import type { ChatMessage, ChatParams, FinishReason, ProviderError, ProviderEvent } from './types';
+import type {
+  ChatMessage,
+  ChatParams,
+  FinishReason,
+  ProviderError,
+  ProviderEvent,
+  StreamEnd,
+} from './types';
 
 /** 可注入的依赖，便于单测打桩（默认用全局 fetch） */
 export interface ProviderDeps {
@@ -142,7 +149,7 @@ export async function* streamChat(
     if (isTimeout(err)) {
       throw makeError('timeout', '上游在超时时间内没有响应（可在设置中调大超时）');
     }
-    throw makeError('network_error', `连接失败：${errText(err)}`);
+    throw makeError('network_error', `连接失败：${presentable(causeText(err), 300)}`);
   }
 
   if (!res.ok) {
@@ -160,6 +167,30 @@ export async function* streamChat(
   const ledger: StreamLedger = { deltas: 0, garbage: 0, answered: 0, usage: 0 };
   let finishReason: FinishReason = 'stop';
   let wantsTools = false;
+  /**
+   * 两个**结束证据**（T55 · R31）。旧实现只有上面那行 `finishReason = 'stop'` 的初值，
+   * 全文没有任何一处记录"到底有没有收到过结束标记" —— 于是代理 `res.end()` 掐掉的半截回答
+   * 一路顶着 `'stop'` 出去，界面显示成"答完了"（这就是 T55 的病根）。
+   *
+   * 为什么是**两个**布尔而不是一个：`[DONE]` 与 `finish_reason` 是两个独立的收尾约定，
+   * 自建端点常只发前者、也有网关发完 finish_reason 就直接关连接。
+   * 口径见 `types.ts` 的 `StreamEnd` 注释与 `docs/DESIGN-T55-STREAM-END.md`。
+   */
+  let sawFinishReason = false;
+  let sawDoneMarker = false;
+
+  /**
+   * 这一轮到底是怎么结束的（判定收在**一处**，两条收尾路径共用 —— 写两遍迟早只改一遍）。
+   *
+   * 顺序有讲究（T56 的接缝）：**先问"有没有结束证据"，再问"有没有工具调用"**。
+   * 反过来写会让 `hasCalls()` 抢先把结论定成 `tool_calls`，于是"网关发了个空参数的调用就断流"
+   * 这一种形状又拿到了"有结束标记"的待遇 —— 拼装器据此放行 `{}`，T56 的洞原样留着。
+   */
+  const endOfStream = (): StreamEnd => {
+    if (!sawFinishReason && !sawDoneMarker) return 'no_end_marker';
+    if (toolCalls.hasCalls()) return 'tool_calls';
+    return finishReason;
+  };
 
   try {
     for (;;) {
@@ -174,23 +205,23 @@ export async function* streamChat(
           ledger,
           (r) => {
             finishReason = r;
+            sawFinishReason = true;
           },
           toolCalls,
           () => {
             wantsTools = true;
+            sawFinishReason = true; // `finish_reason:'tool_calls'` 同样是一个结束标记
           },
         );
         // 一帧里可以同时有正文与 usage（T27）：逐个产出，不能只取第一个
         for (const ev of mapped.events) yield ev;
         if (mapped.done) {
+          sawDoneMarker = true;
           // 先判"这一轮到底有没有产出"（T25），再收尾
           assertProduced(ledger, toolCalls);
           // 先吐出拼装好的工具调用，再结束：顺序对调用方很重要
-          for (const ev of emitToolCallsIfAny(toolCalls, wantsTools)) yield ev;
-          yield {
-            type: 'done',
-            reason: toolCalls.hasCalls() ? 'tool_calls' : finishReason,
-          };
+          for (const ev of emitToolCallsIfAny(toolCalls, wantsTools, endOfStream())) yield ev;
+          yield { type: 'done', reason: endOfStream() };
           return;
         }
       }
@@ -203,20 +234,25 @@ export async function* streamChat(
         ledger,
         (r) => {
           finishReason = r;
+          sawFinishReason = true;
         },
         toolCalls,
         () => {
           wantsTools = true;
+          sawFinishReason = true;
         },
       );
       for (const ev of mapped.events) yield ev;
-      if (mapped.done) break;
+      if (mapped.done) {
+        sawDoneMarker = true;
+        break;
+      }
     }
 
     // 与 [DONE] 那条路**同一个判据**（T25）：两条收尾路径不能各写一份"算不算成功"
     assertProduced(ledger, toolCalls);
-    for (const ev of emitToolCallsIfAny(toolCalls, wantsTools)) yield ev;
-    yield { type: 'done', reason: toolCalls.hasCalls() ? 'tool_calls' : finishReason };
+    for (const ev of emitToolCallsIfAny(toolCalls, wantsTools, endOfStream())) yield ev;
+    yield { type: 'done', reason: endOfStream() };
   } catch (err) {
     // 顺序有讲究：两种超时**必须判在 isAbort 之前**（三者都是 AbortError，混了就等于误报）
     const stuck = stuckError(clock, idleMs, totalMs);
@@ -229,8 +265,13 @@ export async function* streamChat(
       throw makeError('timeout', '上游在超时时间内没有响应（可在设置中调大超时）');
     }
     if (isProviderError(err)) throw err;
-    throw makeError('network_error', `流读取中断：${errText(err)}`);
+    throw makeError('network_error', `流读取中断：${presentable(causeText(err), 300)}`);
   } finally {
+    // T57①：三条早退路径（[DONE] 收尾 / 中止 / 抛错）以前都只 `releaseLock()`，
+    // 上游连接留在池里直到它自己关。`releaseLock()` 只是"我不再读"，
+    // **cancel() 才是"这条流我不要了"**；已经读完的流上 cancel 是空操作，所以放 finally 一处收口。
+    // 失败不许盖掉真正的退出原因（清理动作报错从来不是本轮要告诉用户的那件事）。
+    await reader.cancel().catch(() => undefined);
     reader.releaseLock?.();
     clock.dispose();
   }
@@ -263,9 +304,12 @@ function serializeMessage(m: ChatMessage): Record<string, unknown> {
 function* emitToolCallsIfAny(
   acc: ToolCallAccumulator,
   wantsTools: boolean,
+  end: StreamEnd,
 ): Generator<ProviderEvent> {
   if (!acc.hasCalls()) return;
-  const calls: AssembledToolCall[] = acc.finish();
+  // T56：把"流到底是怎么结束的"交给拼装器 —— 它以前什么都不知道，
+  // 于是"参数还没送到"与"这个工具本来无参"两种情况被当成同一件事。
+  const calls: AssembledToolCall[] = acc.finish(end);
   if (calls.length > 0 || wantsTools) {
     yield { type: 'tool_calls', calls };
   }
@@ -431,6 +475,42 @@ function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * 错误的**可展示文本**（T57② · R31）。
+ *
+ * 为什么不是 `errText`：Node/undici 在网络层给的是包装错误 —— `TypeError: fetch failed`，
+ * 而**真原因在 `cause` 上**（`ECONNREFUSED` / `CERT_HAS_EXPIRED` / `ENOTFOUND` / `SocketError`）。
+ * 判定链早就顺着 `cause` 走四层（`nameChain` / `codeChain`），**文案却没走** ——
+ * 于是连不上、证书过期、DNS 失败、被连接池踢这在界面上是同一句"连接失败：fetch failed"，
+ * 用户完全无法据此排查（这是"后果盖掉事实"的同族：**判对了却没说出来**）。
+ *
+ * 三条克制：① 原话一个字不丢（真原因**追加**在括号里，不是替换）；
+ * ② 去重（`cause.message` 常常就是 head 那句）；③ 仍然过 `presentable`（剔密 + 截上界），
+ * 与上游正文同一道闸 —— 密钥不进渲染层是第一条红线，不因"这是本地错误"而豁免。
+ */
+function causeText(err: unknown): string {
+  const head = errText(err);
+  const seen = new Set<string>([head]);
+  const chain: string[] = [];
+  let cur: unknown = err;
+  for (let i = 0; i < 4 && cur !== null && typeof cur === 'object'; i += 1) {
+    const node = cur as { code?: unknown; message?: unknown; cause?: unknown };
+    const code = typeof node.code === 'string' || typeof node.code === 'number' ? String(node.code) : null;
+    // '23' 是 Node 的 TimeoutError 标记，已经被 `isTimeout` 那条分支单独说过了，不再重复
+    if (code !== null && code !== '' && code !== '23' && !seen.has(code)) {
+      chain.push(code);
+      seen.add(code);
+    }
+    const message = typeof node.message === 'string' ? node.message.trim() : '';
+    if (message !== '' && !seen.has(message)) {
+      chain.push(message);
+      seen.add(message);
+    }
+    cur = node.cause;
+  }
+  return chain.length === 0 ? head : `${head}（原因链：${chain.join(' → ')}）`;
+}
+
 async function safeText(res: Response): Promise<string> {
   try {
     const text = await res.text();
@@ -474,7 +554,7 @@ export async function listModels(
   } catch (err) {
     if (isAbort(err)) throw makeError('network_error', '请求被取消');
     if (isTimeout(err)) throw makeError('timeout', '上游在超时时间内没有响应');
-    throw makeError('network_error', `连接失败：${errText(err)}`);
+    throw makeError('network_error', `连接失败：${presentable(causeText(err), 300)}`);
   }
 
   if (!res.ok) {
