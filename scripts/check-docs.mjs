@@ -1400,6 +1400,93 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 21. 在库文本文件行尾必须是 LF（规整17 撞出来的 T62 同族，R30 立 · 2026-10-15）
+ *
+ * 为什么立它：改 `docs/TEST-POLICY.md` 时把**整份文件转成了 CRLF**，而
+ * `git diff --numstat` 报的是干净的 `15/0` —— git 在 diff 时就做了行尾归一化，
+ * 上一轮刚立的"改完核对 diff 行数"这条**救不了这一种**。暴露它的只有
+ * `git diff --name-only` 附带的那句 `CRLF will be replaced by LF` 警告 ——
+ * 靠人看见警告不是判据（§七 那条老规矩第三次应用）。
+ *
+ * 判据：**按字节读**，出现 `\r\n` 就违规。范围沿用 walkLiveFiles（排除依赖/产物/回收站/临时/归档）。
+ * 现扫基线：444 个在库文本文件 0 命中 ⇒ 从零命中起步，**没有豁免清单**。
+ * ------------------------------------------------------------------ */
+{
+  const TEXT_EXTS = [
+    '.md', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.yml', '.yaml',
+    '.css', '.html', '.py', '.txt', '.svg',
+  ];
+  const hits = [];
+  let scanned = 0;
+  for (const rel of walkLiveFiles(TEXT_EXTS)) {
+    if (rel === 'package-lock.json') continue; // npm 生成，与第 9 条同豁免口径
+    const buf = readFileSync(join(repoRoot, rel));
+    scanned += 1;
+    const at = buf.indexOf('\r\n');
+    if (at >= 0) {
+      const text = buf.toString('utf8');
+      const line = text.slice(0, at).split('\n').length;
+      const count = text.split('\r\n').length - 1;
+      hits.push(`${rel}:${String(line)} 行起是 CRLF（整文件 ${String(count)} 处）`);
+    }
+  }
+  report(
+    `在库文本文件行尾统一 LF（现扫 ${String(scanned)} 个；CRLF 会把按 '\\n' 切行的护栏整批打红）`,
+    scanned > 300 && hits.length === 0,
+    [
+      scanned <= 300 ? `只扫了 ${String(scanned)} 个文件 —— 定位器可能失效（防失焦先红）` : '',
+      hits.length > 0 ? hits.join('\n     ') : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 22. Markdown 表格行必须自封闭（R30 立 · 2026-10-15）
+ *
+ * 为什么立它：本轮往 PROGRESS / ROADMAP 追加交付行时**把一行表格写成了两行**（`awk` 现扫才发现）。
+ * Markdown 的表格行不跨物理行 —— 断了之后渲染出的表格在那里直接收摊，续写的正文变成表外的散装文本，
+ * **看起来像"多写了几行说明"**，读的人会以为那一格的内容就是前半句。
+ * 立闸前已把现存 6 处断行全部合并回单行（内容一字不改，只接掉换行；复扫 0 命中）。
+ *
+ * 判据取**窄**：以 `|` 开头的行必须以 `|` 收尾（跳过围栏代码块）。
+ * 刻意不去数"每行列数是否一致" —— 正文里出现竖线（`A | B`、表格里的斜杠竖杠混排）就误报，
+ * 而**误报三次的判据最后都是被人删掉**，比不立更坏（本仓 §七 的教训）。
+ * ------------------------------------------------------------------ */
+{
+  const bad = [];
+  let rows = 0;
+  for (const rel of walkLiveFiles(['.md'])) {
+    const lines = read(rel).split('\n');
+    let fence = false;
+    for (let i = 0; i < lines.length; i += 1) {
+      const l = lines[i];
+      if (/^\s*```/.test(l)) {
+        fence = !fence;
+        continue;
+      }
+      if (fence) continue;
+      if (!/^\s*\|/.test(l)) continue;
+      rows += 1;
+      if (!/\|\s*$/.test(l)) {
+        bad.push(`${rel}:${String(i + 1)} 以 | 开头却不以 | 收尾（表格行被写成两行）：${l.slice(0, 46)}…`);
+      }
+    }
+  }
+  report(
+    `Markdown 表格行自封闭（现扫 ${String(rows)} 行；断行会让渲染出的表格当场收摊）`,
+    rows > 100 && bad.length === 0,
+    [
+      rows <= 100 ? `只认到 ${String(rows)} 行表格 —— 定位器可能失效（防失焦先红）` : '',
+      bad.length > 0 ? bad.join('\n     ') : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

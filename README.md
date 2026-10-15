@@ -259,6 +259,7 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 | `review/TRACK-SWEEP-1.md` | **全项目排查报告**（轨道排查计划 1：问题清单与证据） |
 | `review/REVIEW-LOG.md` | 每轮复核台账（更早在 `review/REVIEW-LOG-ARCHIVE.md`） |
 | `docs/CHANGELOG-ARCHIVE.md` | 变更记录归档（主 `CHANGELOG.md` 只留最近若干条） |
+| `docs/RELEASE-PREP.md` | **发布准备**：Release 文案草案 + 切公开检查单逐项演练（发布动作本身等所有者点头） |
 | `docs/PERF-BUDGET.md` | **性能预算与实测**（含采样铁律） |
 | `docs/UX-AUDIT.md` | **体验细节排查表**（动效/加载/响应/反馈/可达性/稳定性） |
 | `docs/PLAN.md` | **开发计划**：目标与范围、选型、架构、模块、阶段任务与验收、风险 |
