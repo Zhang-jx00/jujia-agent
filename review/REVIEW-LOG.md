@@ -4824,12 +4824,14 @@ CHANGELOG + 轮换 · 本条）。**零新依赖**；权限映射表 / 模式含
 （tag 对象 `01d0e84`）。**回填提交 `98fe973`（复核 085 + PROGRESS 变异真值）推送时网络两次失败**
 （`Failed to connect to github.com:443` / `Recv failure: Connection was reset`，而同一时刻
 `api.github.com` 仍可访问 ⇒ 是到 git 端点的链路问题，不是凭据问题；凭据本轮未改动、git config 未动）。
-**这一笔因此是"本地已提交、远端待推"** —— 记在这里而不是等推成功后再写，账上才看得出真实状态。
-**推送最终状态（如实，收口时定稿）**：`github.com:443` 从本机持续不可达（`git push` / `git ls-remote`
-共试 **5 次**，全部 `Failed to connect to github.com:443`；`api.github.com` 同期可访问，
-故不是凭据问题 —— 本轮凭据未改、`git config` 未动）。
-**已推且核对过的**：`9e2bc7e`（main 当时指向它）+ 标签 `v0.87.0-接驳1`（`ls-remote` peel 校验通过、CI success）。
-**待推的**：标签之后的全部台账提交（复核 085 · CI 一笔 · 推送状态定稿 · 本条更正，都只动 `review/` 与 `docs/`，
-零产品源码、零门禁影响）—— **清单以 `git log --oneline v0.87.0-接驳1..main` 为准，不靠手数**（手数会漂）。
-**下一轮开工第一件事**：`git push origin main` 补推并用 `git ls-remote` 核对（**不改写已推送历史与标签**，
-不重打标签；若远端 main 仍停在 `9e2bc7e`，直接快进即可）。
+**推送最终状态（定稿：第六次成功，远端已核对）**：中间 5 次 `git push` / `git ls-remote` 全部
+`Failed to connect to github.com:443`（同期 `api.github.com` 可访问 ⇒ **不是凭据问题**，
+本轮凭据未改、`git config` 未动），收口收尾后**第 6 次重试成功**：
+`9e2bc7e..753fc4e main -> main`（`PUSH_EXIT=0`），`git ls-remote` 核对
+`refs/heads/main = 753fc4e`、`refs/tags/v0.87.0-接驳1{}` peel 到 `9e2bc7e` —— **本地与远端一致，零待推**。
+**已推且核对过的**：主体提交 `9e2bc7e` + 标签 `v0.87.0-接驳1`（CI run `38683714787` **success**）·
+其后的台账提交（复核 085 · CI 一笔 · 推送状态记 · 本条定稿）都只动 `review/` 与 `docs/`，零产品源码。
+**留下的口径**（这条才是可复用的）：**"待推"是一种瞬时状态，写进台账时必须同时写"以
+`git log <标签>..main` 为准"并记核对时间** —— 手数的次数与清单都会漂，而网络断这类状态
+在收口和定稿之间就会变（本轮正是：定稿写"5 次全失败"，几分钟后第 6 次成功）。
+**下一轮开工第一件事**：仍然先 `git ls-remote` 对一次 main（不为补推，为确认没有别的会话推过）。
