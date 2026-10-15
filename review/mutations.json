@@ -1147,11 +1147,12 @@
     },
     {
       "id": "M144",
-      "desc": "循环不记截断这一格（T26 传播断在中间）：provider 分出了 length / content_filter，到这里被丢掉，界面拿不到事实",
+      "desc": "循环不记截断这一格（T26 传播断在中间）：provider 分出了 length / content_filter，到这里被丢掉，界面拿不到事实（R31 重新对准靶心：加固19 把这一行从\"逐点名\"换成了\"除两种之外的全部\"，意图与判据一字未改 —— 只搬位置）",
       "file": "packages/agent-core/src/loop/agent-loop.ts",
-      "find": "          else if (ev.reason === 'length' || ev.reason === 'content_filter') truncated = ev.reason;",
+      "find": "          else if (ev.reason !== 'stop' && ev.reason !== 'tool_calls') truncated = ev.reason;",
       "replace": "          else truncated = null;",
-      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
+      "test": "packages/agent-core/src/loop/agent-loop.test.ts",
+      "note": "R31 重新对准：靶文本随加固19 搬家（判据不变）"
     },
     {
       "id": "M145",
@@ -2251,11 +2252,12 @@
     },
     {
       "id": "M282",
-      "desc": "把运行期永不产生的 tool_calls 加回结束原因（T58 病原样回潮）：契约又多了个界面读得到、上游不发的成员",
+      "desc": "把运行期永不产生的 tool_calls 加回结束原因（T58 病原样回潮）：契约又多了个界面读得到、上游不发的成员（R31 重新对准靶心：数组里多了 no_end_marker 一格，本条的判据仍是\"不许把运行期不产生的 tool_calls 加回来\"）",
       "file": "packages/shared-ipc/src/contracts.ts",
-      "find": "export const DONE_END_REASONS = ['stop', 'length', 'content_filter', 'aborted', 'error'] as const;",
+      "find": "export const DONE_END_REASONS = ['stop', 'length', 'content_filter', 'no_end_marker', 'aborted', 'error'] as const;",
       "replace": "export const DONE_END_REASONS = ['stop', 'length', 'content_filter', 'aborted', 'error', 'tool_calls'] as const;",
-      "test": "packages/shared-ipc/src/stream-event.test.ts"
+      "test": "packages/shared-ipc/src/stream-event.test.ts",
+      "note": "R31 重新对准：靶文本随加固19 搬家（判据不变）"
     },
     {
       "id": "M283",
