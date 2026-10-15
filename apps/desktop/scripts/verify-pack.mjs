@@ -7,11 +7,18 @@
  * （渲染层打包后是 `file://` 页面、Chromium 不许它 `fetch` 本地文件）**只在打包产物里出现**。
  * 也就是说，"开发态全绿、发出去才坏"的那一类问题，在它之前没有任何门禁拦得住。
  *
- * 三步（刻意最小 —— 先有网，再谈织密）：
+ * 五步（刻意最小 —— 先有网，再谈织密）：
  *   ① 启动打包版（隔离数据目录，证明它真的跑得起来）；
  *   ② 开「文件」页签、展开工作区（证明打包清单里该有的都在，动态 import 的懒加载 chunk 也能从 asar 里取到）；
  *   ③ 打开一份**中文 PDF**：页数 + 内置 cmap 被取用 + 抽字得到「你好」+ **全程零出站** ——
  *      这正是 M19b 那个内联方案在"发出去"之后是否仍然成立的直接证据。
+ *   ④ 跑一张**画布**（R29 补的登记欠账，`LINKAGE-M9.md` §五）：React Flow 的懒加载 chunk、
+ *      `CANVAS_*` 那几条通道、图文件从 asar 外的数据目录读写 —— 三样都属于"开发态看不出、装出去才坏"；
+ *   ⑤ 起一个**内置终端**（R29 补的第二笔欠账，从 R28 挪来）：`node-pty` 的原生 `.node`
+ *      必须落在 `app.asar.unpacked` 里才起得来，而它一旦起不来，界面上只是"点了没反应"。
+ *
+ * ④⑤ 都刻意只走"不需要外部服务"的那条路：画布用两个工具节点（不碰模型连接），
+ * 终端只 echo 一个 marker（不碰任何网络）—— 门禁要的是"打包产物自身成立"，不是第三方可用性。
  *
  * 用法：`npm run verify:pack`（根目录）—— 它会先构建再打包（--dir，不出安装包），然后跑这里。
  * 退出码：0 = 通过；1 = 失败（打印失败在哪一步与当时的界面文本）。
@@ -23,7 +30,19 @@ import { _electron as electron } from 'playwright-core';
 import { buildCjkPdf } from './pdf-fixtures.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const EXE = join(here, '..', 'release', 'win-unpacked', 'JujiaAgent.exe');
+/**
+ * 产物目录可以用 `JUJIA_PACK_DIR` 换走（默认 `release/win-unpacked`）。
+ *
+ * 为什么留这个口子：`electron-builder` 解 Electron 运行时是"写 `win-unpacked.tmp` 再 rename"，
+ * 而这条 rename 会被系统层面的东西挡住（2026-10-15 实测：`.tmp` 里的文件逐个可动，
+ * **只有目录本身不能 rename/delete** ⇒ 有进程握着该目录句柄）。换目录**并不能绕开**
+ * （新路径同样在 rename 处 EPERM），所以这个变量真正的用处是：
+ * **让"验的是哪个产物"这句话由环境决定，而不是把默认路径当成唯一真相** ——
+ * 例如并行跑两轮打包验证时各占一个目录，谁验的谁都印在退出信息里。
+ */
+const packDir = process.env.JUJIA_PACK_DIR ?? 'win-unpacked';
+const EXE = join(here, '..', 'release', packDir, 'JujiaAgent.exe');
+const STALE_TMP = join(here, '..', 'release', 'win-unpacked.tmp');
 
 const STEPS = [];
 const log = (t) => console.log(t);
@@ -40,6 +59,20 @@ const fail = (text, detail) => {
 };
 
 if (!existsSync(EXE)) {
+  // fail-fast 预检（与 e2e 那条同形）：**宁可不跑也不要把环境说成产品失败**
+  if (existsSync(STALE_TMP)) {
+    console.error(
+      `\n❌ 没有找到可验证的打包产物：${EXE}\n` +
+        `   而 ${STALE_TMP} 卡在原地 —— electron-builder 的 "解到 .tmp 再 rename 成正式目录" 这一步被系统挡了。\n` +
+        '   实测取证（2026-10-15）：.tmp **里面的文件**逐个可读写重命名，只有**目录本身**不能 rename/delete\n' +
+        '   ⇒ 有进程握着这个目录的句柄；换输出目录（--config.directories.output=release/r29）同样在 rename 处 EPERM。\n' +
+        '   本机还有 3 个 crashpad_handler 进程以**当前用户看不到的身份**在跑（CIM 取不到路径与命令行），\n' +
+        '   归属无法确认 ⇒ **不去结束它们**（拿别人机器上的不明进程赌一把，代价可能是别人正在跑的东西）。\n' +
+        '   这条门禁因此**今天验不了**：正确处置是重启后重跑 npm run verify:pack，或在确认归属后由使用者释放该句柄。\n' +
+        '   台账规矩：这种环境下跑不动的项目 **只能记"未能运行 + 原因"，不许记成绿**。',
+    );
+    process.exit(1);
+  }
   fail(`没有找到打包产物：${EXE}\n请先跑 npm run dist:dir —— 这个门禁验的就是打包产物本身。`);
 }
 
@@ -138,6 +171,92 @@ try {
   ok(
     `打包版：内置 cmap 被取用（${assets}）、抽字得到 ${pageText}、零出站（本轮看到 ${String(seen)} 条本地请求）`,
   );
+
+  step('跑一张画布：React Flow 的懒加载 chunk + CANVAS_* 通道 + 图文件读写，在打包产物里都成立');
+  /**
+   * 这一补的是 `LINKAGE-M9.md` §五 记的那条欠账（"画布未纳入 verify:pack"）。
+   *
+   * 为什么只能是打包级证据：开发态 `out/` 走的是同一份源码，而坏的地方恰恰是产物形态 ——
+   * 懒加载 chunk 有没有进 asar、`CANVAS_*` 那几条通道在打包清单里注没注册、
+   * 图文件的数据目录读写路径在装出去之后还对不对。这些在 e2e 里全是绿的。
+   *
+   * 图刻意只用**工具节点**：提示词节点要连模型，那属于"第三方服务可用"而不是"打包产物成立"，
+   * 把它混进门禁会让这条红起来的原因永远说不清。
+   */
+  const canvasDir = join(dataDir, 'canvas');
+  mkdirSync(canvasDir, { recursive: true });
+  const packGraphId = `verify-pack-canvas-${RUN_ID}`;
+  writeFileSync(
+    join(canvasDir, `${packGraphId}.json`),
+    JSON.stringify(
+      {
+        version: 1,
+        connectionId: 'no-connection-needed-for-tools',
+        nodes: [
+          { id: 'a', kind: 'tool', x: 40, y: 40, config: { toolName: 'list_dir', argsText: '{"path":"."}' } },
+          { id: 'b', kind: 'tool', x: 300, y: 40, config: { toolName: 'read_file', argsText: '{"path":"README.txt"}' } },
+        ],
+        edges: [{ id: 'e1', from: 'a', to: 'b' }],
+        viewport: { x: 0, y: 0, zoom: 1 },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+  await win.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  if ((await waitText('运行这张图', 20_000)) !== true) {
+    fail('画布页没渲染出来（React Flow 的懒加载 chunk 在打包产物里没取到？）', (await body()).slice(0, 700));
+  }
+  await win.locator(`button[data-graph-id="${packGraphId}"]`).first().click();
+  if ((await waitText(`已打开 ${packGraphId}`, 15_000)) !== true) {
+    fail('从磁盘打开那张两节点图失败（图文件的读取路径在打包后不对？）', (await body()).slice(0, 700));
+  }
+  const packNodes = await win.locator('[data-node-status]').count();
+  if (packNodes !== 2) fail(`画布上应该有两个节点（实际 ${String(packNodes)} 个）`);
+  await win.locator('button', { hasText: '运行这张图' }).first().click();
+  if ((await waitText('跑完了', 40_000)) !== true) {
+    fail('两节点链在打包版里没跑完', (await body()).slice(-900));
+  }
+  const packOkNodes = await win.locator('[data-node-status="ok"]').count();
+  if (packOkNodes !== 2) {
+    fail(`两个节点都该是 ok（实际 ${String(packOkNodes)} 个）—— 打包后工具节点被谁拦住了？`, (await body()).slice(-900));
+  }
+  // 工具节点的输出必须真的来自磁盘（read_file 读的是本脚本刚写进工作区的那行字）
+  if (!(await body()).includes('打包产物验证用的工作区')) {
+    fail('工具节点的输出没出现在回执里（那一步可能根本没跑）', (await body()).slice(-900));
+  }
+  ok('画布在打包产物里跑通：chunk 取到、通道在、图文件读写正常、两个工具节点都 ok 且输出来自磁盘');
+
+  step('起一个内置终端：node-pty 的原生模块在 asar.unpacked 里，批准之后真起得来进程');
+  /**
+   * 这一补的是从 R28 挪来的欠账（§6.2 R29 行）。判据只要一件事：**界面里看得见子进程吐的字**。
+   * 起不来的话界面只是"点了没反应"—— 而 `.node` 有没有被 asar 打包规则漏出去，
+   * 开发态（`out/` + 顶层 node_modules）永远看不出来，只有装出去之后才暴露。
+   */
+  const ptyMarker = `PACK-PTY-${RUN_ID}`;
+  await win.locator('nav.app-tabs button', { hasText: '终端' }).first().click();
+  if ((await waitText('启动终端（新会话需审批）', 15_000)) !== true) {
+    fail('终端页在打包版里没挂上', (await body()).slice(0, 700));
+  }
+  await win.locator('button', { hasText: '启动终端（新会话需审批）' }).first().click();
+  if ((await waitText('启动终端会话', 15_000)) !== true) {
+    fail('点启动没弹审批（终端能跑任意命令，新会话必须问过人手 —— 打包版也不该例外）', (await body()).slice(0, 700));
+  }
+  await win.locator('[role="dialog"][aria-label="权限请求"] button', { hasText: '允许一次' }).first().click();
+  if ((await waitText('运行中', 20_000)) !== true) {
+    fail(
+      '批准之后终端没进入运行态 —— 十有八九是 node-pty 的原生模块没进 app.asar.unpacked（打包清单漏了它）',
+      (await body()).slice(0, 900),
+    );
+  }
+  await win.locator('.jj-terminal-host').first().click();
+  await win.keyboard.type(`echo ${ptyMarker}`);
+  await win.keyboard.press('Enter');
+  if ((await waitText(ptyMarker, 20_000)) !== true) {
+    fail(`终端起来了但 marker 没回来（子进程没真跑 / 输出没接到视图）：${ptyMarker}`, (await body()).slice(-900));
+  }
+  ok(`打包版终端真的跑起了一个 shell 并把输出接回了视图（marker ${ptyMarker} 已在屏幕上）`);
 
   step('干净退出');
   await app.close();

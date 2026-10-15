@@ -31,14 +31,29 @@ function runCheck() {
   });
 }
 
+/**
+ * 失败出口。**规整17 改过一次**（2026-10-15，做红证实验时当场撞出来）：
+ * 原来这里直接 `process.exit(1)` —— 而 `exit` **不会跑 await 之后的 finally**，
+ * 于是"某条用例没拦住"这类中止会把**已注入的文件留在工作树里**，
+ * 下一次 `check:docs` 就报一条看起来像文档漂移的真红（本轮实测留在 `json-store.ts`）。
+ * 改成抛哨兵异常：注入循环的 `finally` 一定先把原文写回，再由外层统一收场。
+ */
+class SelftestAbort extends Error {}
+
 const fail = (msg) => {
+  console.error(`❌ ${msg}`);
+  throw new SelftestAbort(msg);
+};
+
+/** 注入**开始前/全部还原之后**的失败：此时工作树是干净的，直接退出即可（不需要那套还原） */
+const die = (msg) => {
   console.error(`❌ ${msg}`);
   process.exit(1);
 };
 
 const base = await runCheck();
 if (base.code !== 0) {
-  fail('基线状态下检查器就已经失败 —— 请先修好文档再跑这个验证');
+  die('基线状态下检查器就已经失败 —— 请先修好文档再跑这个验证');
 }
 
 /**
@@ -65,7 +80,7 @@ const TOOL_SENTINEL = 'no_such_tool__selftest';
     readFileSync(join(repoRoot, f), 'utf8').includes(TOOL_SENTINEL),
   );
   if (taken.length > 0) {
-    fail(
+    die(
       `保留哨兵名「${TOOL_SENTINEL}」已被 ${taken.join('、')} 占用 —— ` +
       '自检靶子会静默失效。请换一个仍以 __selftest 结尾的名字，并同步下面那条用例。',
     );
@@ -85,7 +100,7 @@ const realSteps = [...readFileSync(join(repoRoot, e2eScriptPath), 'utf8').matchA
 const readmeText = readFileSync(join(repoRoot, 'README.md'), 'utf8');
 const readmeSteps = Number(/e2e[^\n]*?(\d+) 步/.exec(readmeText)?.[1] ?? 'NaN');
 if (!Number.isInteger(readmeSteps) || readmeSteps !== realSteps) {
-  fail(
+  die(
     `README 写的 e2e 步数（${String(readmeSteps)}）与脚本实际（${realSteps}）不一致 —— ` +
     '自检的靶子立在坏基线上，先把文档改一致再跑这个验证',
   );
@@ -103,7 +118,7 @@ const clHeadIdx = clLines.map((l, i) => (/^## \[v/.test(l) ? i : -1)).filter((i)
 const headLine = clHeadIdx.length > 1 ? (clLines[clHeadIdx[1]] ?? '') : '';
 const headStated = / — (\d{4}-\d{2}-\d{2} \d{2}:\d{2})$/.exec(headLine)?.[1] ?? '';
 if (headStated === '') {
-  fail(
+  die(
     '自检锚点失效：CHANGELOG 里找不到"第二条带 ` — YYYY-MM-DD HH:MM` 的标题" —— ' +
       '第 17 条护栏的靶子立在坏基线上，先看标题格式有没有漂移',
   );
@@ -172,6 +187,26 @@ const cases = [
     from: 'export interface Envelope<T> {',
     to: `// 把本机路径写进代码 = 别人 clone 下来跑不了：${repoRoot}\nexport interface Envelope<T> {`,
     expect: '本机绝对路径',
+  },
+  {
+    // **规整17 补的靶子（2026-10-15）**：上一那条用的是"正斜杠形态"，旧判据也能咬；
+    // 真实逃逸的是**转义形态** —— TS/JS 源码里的 Windows 路径写成 `D:\\…`，
+    // 旧判据把 `\`→`/` 之后得到 `D://…`，与运行时算出的 `D:/…` 对不上 ⇒ 门禁一直 ✅。
+    // 这条用例把"转义形态"钉住：判据要是退回旧的归一化写法，它立刻红。
+    name: '代码里写死本机绝对路径（转义形态，旧判据看不见）',
+    file: 'packages/shared/src/json-store.ts',
+    from: 'export interface Envelope<T> {',
+    to: `// 反斜杠转义形态的本机路径：${repoRoot.split('\\').join('\\\\')}\nexport interface Envelope<T> {`,
+    expect: '写死了本机仓库绝对路径',
+  },
+  {
+    // 同一条护栏补的第二件事：只比"仓库根那一串"会漏掉**它的上级目录** ——
+    // `mcp-real-server.test.ts` 当年写死的正是上级（换台机器同样不存在）。
+    name: '代码里写死本机仓库的上级目录',
+    file: 'packages/shared/src/json-store.ts',
+    from: 'export interface Envelope<T> {',
+    to: `// 仓库根上一层也是本机路径：${resolve(repoRoot, '..').split('\\').join('\\\\')}\nexport interface Envelope<T> {`,
+    expect: '上级目录',
   },
   {
     // 第 9 条只扫代码与配置；这条扫活文档里的**家目录全路径**（隐私类，含用户名那一层）。
@@ -338,26 +373,45 @@ const cases = [
   },
 ];
 
-for (const c of cases) {
-  const path = join(repoRoot, c.file);
-  const original = readFileSync(path, 'utf8'); // 内存备份，不落盘
-  if (!original.includes(c.from)) {
-    fail(`用例「${c.name}」的锚点未命中 —— 请更新本脚本的锚点`);
-  }
-  try {
-    writeFileSync(path, original.replace(c.from, c.to), 'utf8');
-    const r = await runCheck();
-    if (r.code !== 1) fail(`用例「${c.name}」没有被拦住（检查器退出码 ${String(r.code)}，应为 1）`);
-    if (!r.out.includes(c.expect)) {
-      fail(`用例「${c.name}」虽然失败，但不是期望的那条检查（期望包含「${c.expect}」）`);
+/**
+ * 中止也要还原（**规整17 改的**，见上面 `fail` 的注释）：`fail()` 抛哨兵异常 ⇒
+ * 每一次注入的 `finally` 都会先把原文写回，再由这里统一收场；
+ * 最后**再跑一次检查器**，把"注入到底清干净了没有"当成一条真值说出来，而不是让人 `git status` 才发现。
+ */
+let aborted = false;
+try {
+  for (const c of cases) {
+    const path = join(repoRoot, c.file);
+    const original = readFileSync(path, 'utf8'); // 内存备份，不落盘
+    if (!original.includes(c.from)) {
+      fail(`用例「${c.name}」的锚点未命中 —— 请更新本脚本的锚点`);
     }
-    console.log(`  ✅ 被拦住：${c.name}`);
-  } finally {
-    writeFileSync(path, original, 'utf8');
+    try {
+      writeFileSync(path, original.replace(c.from, c.to), 'utf8');
+      const r = await runCheck();
+      if (r.code !== 1) fail(`用例「${c.name}」没有被拦住（检查器退出码 ${String(r.code)}，应为 1）`);
+      if (!r.out.includes(c.expect)) {
+        fail(`用例「${c.name}」虽然失败，但不是期望的那条检查（期望包含「${c.expect}」）`);
+      }
+      console.log(`  ✅ 被拦住：${c.name}`);
+    } finally {
+      writeFileSync(path, original, 'utf8');
+    }
   }
+} catch (err) {
+  if (!(err instanceof SelftestAbort)) throw err;
+  aborted = true;
 }
 
 const after = await runCheck();
-if (after.code !== 0) fail('还原后检查器仍失败 —— 基线已被污染，请人工检查');
+if (aborted) {
+  console.error(
+    after.code === 0
+      ? '\n❌ 自检中止（原因见上）。已复跑检查器确认**注入没有留在工作树里**（还原成功）。'
+      : '\n❌ 自检中止（原因见上），且**还原后检查器仍失败** —— 工作树可能被注入污染，请对照 `git diff` 手工清掉残留。',
+  );
+  process.exit(1);
+}
+if (after.code !== 0) die('还原后检查器仍失败 —— 基线已被污染，请人工检查');
 
 console.log(`\nDOCS-CHECK SELFTEST OK：${cases.length} 处注入的漂移全部被拦住，还原后检查器恢复通过。`);

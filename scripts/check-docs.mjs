@@ -704,18 +704,37 @@ const walkLiveFiles = (exts) => {
  * ------------------------------------------------------------------ */
 
 {
-  const norm = (s) => s.split('\\').join('/');
-  const repoRootLit = norm(repoRoot);
-  const homeLit = norm(homedir());
+  /**
+   * 判据要点（**规整17 补的两个洞**，2026-10-15 开源预演复跑抓到）：
+   *
+   * ① 源码里的 Windows 路径是**转义过的**（写成 `D:\\MiMo\\…`），旧判据把 `\`→`/` 之后再比，
+   *    得到的是 `D://MiMo//…` —— 与运行时算出的 `D:/MiMo/…` **对不上**。
+   *    结果：`mcp-real-server.test.ts` 里那处写死的本机路径在门禁里**隐身了好几轮**，
+   *    这条一直报 ✅。典型的"锁读不到真值"：判据的归一化方式与真实写法不一致。
+   * ② 只比"仓库根"这一层也不够。同一处写的是**仓库根的上级目录**，
+   *    换台机器同样不存在（新克隆的人开了 `JUJIA_NET_TEST` 就跑不通），但字面量永远咬不到它。
+   *
+   * 修法：**比较前把所有分隔符摘掉**（`\` 与 `/` 都不参与判断），任何转义形态都归一到同一串；
+   *      needle 取**运行时真值的三层**：仓库根、仓库根的上级、用户主目录。
+   *      摘掉分隔符后仍是一段这台机器特有的长串（含盘符与用户名），误报空间可忽略 ——
+   *      判据仍然全部运行时算出，脚本自身不落任何本机路径字面量（§7 的同一条道理）。
+   */
+  const stripSep = (s) => s.split('\\').join('').split('/').join('');
+  const needles = [
+    { label: '写死了本机仓库绝对路径', value: stripSep(repoRoot) },
+    { label: '写死了本机仓库的上级目录（换台机器同样不存在）', value: stripSep(resolve(repoRoot, '..')) },
+    { label: '写死了本机用户主目录（连用户名一起泄漏进公开仓库）', value: stripSep(homedir()) },
+  ].filter((n) => n.value.length > 3);
   const CODE_EXTS = ['.ts', '.tsx', '.js', '.mjs', '.cjs', '.py', '.json', '.yml', '.yaml', '.css', '.html'];
   const hits = [];
   for (const rel of walkLiveFiles(CODE_EXTS)) {
     if (rel === 'package-lock.json') continue; // 依赖锁由 npm 生成，不在本规则范围内
-    const text = norm(read(rel));
-    if (repoRootLit !== '' && text.includes(repoRootLit)) {
-      hits.push(`${rel}：写死了本机仓库绝对路径`);
-    } else if (homeLit !== '' && homeLit !== '/' && text.includes(homeLit)) {
-      hits.push(`${rel}：写死了本机用户主目录（连用户名一起泄漏进公开仓库）`);
+    const hay = stripSep(read(rel));
+    for (const n of needles) {
+      if (hay.includes(n.value)) {
+        hits.push(`${rel}：${n.label}`);
+        break;
+      }
     }
   }
   report(

@@ -1,3 +1,5 @@
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ToolRegistry, runTool } from '@jujia/agent-core';
 import { McpService } from './mcp-service';
@@ -15,14 +17,24 @@ import { createRealTransport } from './real-transport';
  *
  * 覆盖到的链路：保存配置 → 起真子进程 → 握手 → 列工具 → **部分批准** →
  * 未批准的工具无调用路径 → 经真实权限门真调用取回目录内容 → 断开后摘工具。
- * 不覆盖：界面点击，以及"模型是否愿意调用"（那取决于模型本身）。
+ * 不覆盖：界面点击，以及"模型是否愿意调用"（那取决于模型本身）——
+ * 这两项已按规整17 的口径写进 `docs/CHECKLIST.md` §3.5 的手工清单（**不计入门禁全绿**）。
  *
  * 手动运行：
  *   JUJIA_NET_TEST=1 npx vitest run apps/desktop/src/main/mcp/mcp-real-server.test.ts
  */
 
 const ENABLED = process.env['JUJIA_NET_TEST'] === '1';
-const WORKSPACE = 'D:\\MiMo\\ProjectOne';
+/**
+ * 工作区 = **本仓库根**，由本文件位置反推。
+ *
+ * 这里原来写死过一台机器上的绝对路径（还是仓库根的**上级**目录），换台机器就指向一个不存在的目录。
+ * 而 `check:docs` 第 9 条（专抓写死的本机路径）当时照样报 ✅ —— 两个原因都记在护栏的注释里：
+ * 源码里的反斜杠是**转义形态**（`\\`），旧判据归一化后变成 `//` 与运行时真值对不上；
+ * 而它比的是"仓库根那一串"，上级目录的字面量根本不在比较范围内。**规整17 两处都补了**（2026-10-15）。
+ */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..');
+const WORKSPACE = REPO_ROOT;
 const SERVER = 'npx';
 const SERVER_ARGS = ['-y', '@modelcontextprotocol/server-filesystem', WORKSPACE];
 
