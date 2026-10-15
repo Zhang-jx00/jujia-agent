@@ -4825,3 +4825,10 @@ CHANGELOG + 轮换 · 本条）。**零新依赖**；权限映射表 / 模式含
 （`Failed to connect to github.com:443` / `Recv failure: Connection was reset`，而同一时刻
 `api.github.com` 仍可访问 ⇒ 是到 git 端点的链路问题，不是凭据问题；凭据本轮未改动、git config 未动）。
 **这一笔因此是"本地已提交、远端待推"** —— 记在这里而不是等推成功后再写，账上才看得出真实状态。
+**推送最终状态（如实，收口时定稿）**：`github.com:443` 从本机持续不可达（`git push` / `git ls-remote`
+共试 **4 次**，全部 `Failed to connect to github.com:443`；`api.github.com` 同期可访问，
+故不是凭据问题 —— 本轮凭据未改、`git config` 未动）。
+**已推且核对过的**：`9e2bc7e`（main 当时指向它）+ 标签 `v0.87.0-接驳1`（`ls-remote` peel 校验通过、CI success）。
+**待推的**：`98fe973` 与其后的 CI 回填提交（都只动 `review/` 与 `docs/`，零产品源码、零门禁影响）。
+**下一轮开工第一件事**：`git push origin main` 补推并用 `git ls-remote` 核对（**不改写已推送历史与标签**，
+不重打标签；若远端 main 仍停在 `9e2bc7e`，直接快进即可）。
