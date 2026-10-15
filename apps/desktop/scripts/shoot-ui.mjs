@@ -383,7 +383,24 @@ try {
   if ((await waitText('数据不出本机', 30_000)) !== true) {
     fail('假服务的回答没到界面上（那这张图拍的是空会话，等于白拍）', await win.evaluate(() => document.body.innerText.slice(0, 600)));
   }
-  const chat = await shot('chat.png', '对话', '数据不出本机', '回答文本在锚点前已等到，此处不应失败');
+  /**
+   * **等到正文 ≠ 流已收尾**。第一版拍完回头看图，发现「停止」按钮还挂着、气泡末尾带着光标 ——
+   * 那是"正在说"的一帧，而 README 的图注写的是"一次真流式回答**之后**"（对外声称与像素不符，
+   * 属于本轮立这条护栏最想防的那类事）。所以等发送态真的结束再拍：
+   * 判据取 `.w2-chat` 里那颗「发送」按钮的 `disabled`（流式期间它是禁用的，`ChatPanel` 里写的是
+   * `disabled={pendingBusy || sending}`），**限定在对话面板内** —— 别的页签是 KeepAlive 挂着的隐藏面板，
+   * 全页扫 `hasText:'停止'` 会被它们骗住。等不到就 fail-fast：宁可不出图，也不出一张与图注不符的图。
+   */
+  const sendBtn = win.locator('.w2-chat button', { hasText: '发送' }).first();
+  const closed = async () => !(await sendBtn.isDisabled());
+  const closeDeadline = Date.now() + 20_000;
+  while (Date.now() < closeDeadline && !(await closed())) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  if (!(await closed())) {
+    fail('回答的流没收尾（「发送」仍是禁用态），这张图拍的是"正在说"而不是"说完"，与图注不符');
+  }
+  const chat = await shot('chat.png', '对话', '数据不出本机', '回答文本与收尾都在拍前验过，此处不应失败');
 
   step('拍「画布」页（先真的跑一遍两节点链，让节点状态是真值）');
   await tab('画布').click();
