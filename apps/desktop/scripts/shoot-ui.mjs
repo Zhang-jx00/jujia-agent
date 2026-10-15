@@ -278,6 +278,29 @@ const port = server.address().port;
 let app;
 try {
   step('准备隔离目录与演示工作区（中性路径，拍完清场）');
+  /**
+   * **在任何写入之前**取工作区的干净程度，并且**排除 `docs/screenshots/`**（本脚本自己的产物）。
+   *
+   * 为什么要改这一手（复核 089 自己抓自己）：第一版把这件事写在最后一步，于是"重拍一次"这件事
+   * 本身就把四张已提交的 PNG 改成未提交状态 ⇒ `dirtyAtCapture` **永远是 true** ——
+   * 一个恒真的字段等于没有字段，还会让人以为"每次重拍都不干净"，把真信号磨成背景噪声。
+   * 取"进产物之前"的状态才是这里真正要说的：**打包用的那份代码是不是那一次提交**。
+   */
+  const repoRootForGit = join(here, '..', '..', '..');
+  const dirtyRes = await runGit(
+    'git',
+    ['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)docs/screenshots'],
+    { cwd: repoRootForGit },
+  );
+  const dirtyAtStart = dirtyRes.stdout.trim() !== '';
+  const dirtyFiles = dirtyRes.stdout
+    .trim()
+    .split('\n')
+    .filter((l) => l !== '')
+    .slice(0, 6)
+    .map((l) => l.slice(0, 60))
+    .join(' | ');
+  ok(`拍前工作区：${dirtyAtStart ? `有未提交改动 —— ${dirtyFiles}` : '干净（产物将记 dirtyAtCapture:false）'}`);
   mkdirSync(profileDir, { recursive: true });
   if (!makeDemoWorkspace()) fail('演示工作区没建起来');
   seedConfig();
@@ -431,8 +454,9 @@ try {
    * `dirty` 是这张清单的诚实性所在：`commit` 只说"基于哪一笔"，而打包产物里可能混着**未提交**的改动 ——
    * 第一版就是这样（图里已经带上本轮新加的离屏开关，而 manifest 记的提交里还没有它）。
    * 与其让读者以为图与那次提交一一对应，不如把"当时工作区不干净"直接写进清单。
+   * 值取**拍之前**那次（并排除本脚本自己的产物 `docs/screenshots/`），理由见上面那段注释。
    */
-  const dirty = (await runGit('git', ['status', '--porcelain', '--untracked-files=no'])).stdout.trim() !== '';
+  const dirty = dirtyAtStart;
   writeFileSync(
     join(OUT_DIR, 'manifest.json'),
     JSON.stringify(
