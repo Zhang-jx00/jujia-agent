@@ -46,6 +46,22 @@ describe('工作区提示与淘汰话术（chat-service 源锁）', () => {
     );
     expect(panel).toContain('setHistoryHint(event.notice)');
   });
+
+  /**
+   * **第三环的锁（规整17 补，M261 的现场）**：上面那条锁住的是"这句话在不在源码里 / 契约有没有这一格 /
+   * 渲染层读不读"，而中间那一环 —— **emit 的那一次到底传没传** —— 此前没人认领。
+   * 于是把 `notice:` 换成 `notice: null` 时全套断言照样绿：句子还在、通道还在，
+   * **就是没人把它送出去**，落盘失败与钩子诊断一起被咽掉（正是 T26 那条"算出来了却不挂到气泡上"的同一环）。
+   */
+  it('done 那一次 emit 必须把攒好的提示段真交给 notice（不许只写不传）', () => {
+    const emitAt = src.indexOf("type: 'done',");
+    expect(emitAt, '找不到 done 那一次 emit —— chat-service 的收口段被改过就请一并跟改这条锁').toBeGreaterThan(-1);
+    const emitBlock = src.slice(emitAt, emitAt + 320);
+    expect(
+      emitBlock,
+      'done 的 notice 必须引用 noticeParts —— 换成 null 等于把落盘失败与钩子诊断一起咽掉（M261）',
+    ).toMatch(/notice:\s*noticeParts\.length === 0 \? null : noticeParts\.join\(/);
+  });
 });
 
 /**

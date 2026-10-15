@@ -100,6 +100,41 @@ async function main() {
   if (spec.note) console.log(`说明：${spec.note}`);
   console.log(`共 ${mutations.length} 项\n`);
 
+  /**
+   * **跑之前先把所有锚点在各自文件里数一遍**（规整17 加的预检，2026-10-15）。
+   *
+   * 为什么要预检：本轮全量跑抓出 **6 条"锚点命中 0 次"**（M46 / M148 / M163 / M181 / M256 / M261），
+   * 逐条查下来全是"合法改动把靶文本搬走、改写、或多缩进一层"：文案从弹窗挪进穷举表、
+   * 三元式改成多段拼接、替换那趟被包进线性预检的 `if` 里……**产品没坏，是靶面漂了**。
+   * 真正的教训在跑序：交付轮只跑**新增子集**，旧靶面的锚点没人复扫 ⇒ 漂移要等到收口轮的全量跑才现形，
+   * 而中间每一轮那几条变异报的都是"注入失败"（**不是"拦住了"**——它根本没注入）。
+   * 所以这件事不能靠"记得跑全量"，要变成**任何一次运行都先过的闸门**：
+   * 命中数不等于 1 就当场列名并以退出码 2 收场，**一条变异都不注入**（半跑的状态最难查）。
+   */
+  const stale = [];
+  const missing = [];
+  for (const m of mutations) {
+    const file = resolve(repoRoot, m.file);
+    if (!existsSync(file)) {
+      missing.push(`${m.id} → ${m.file}`);
+      continue;
+    }
+    const text = readFileSync(file, 'utf8');
+    const hits = text.split(m.find).length - 1;
+    if (hits !== 1) stale.push(`${m.id}（命中 ${String(hits)} 次）→ ${m.file}`);
+  }
+  if (missing.length > 0 || stale.length > 0) {
+    console.error(`❌ 锚点预检未通过 —— 共 ${mutations.length} 项里：文件不存在 ${missing.length} 条 / 锚点命中数不是 1 ${stale.length} 条`);
+    for (const s of missing) console.error(`   [文件不存在] ${s}`);
+    for (const s of stale) console.error(`   [锚点漂移] ${s}`);
+    console.error(
+      '   这不是"变异没打中"，是**这条变异根本没注入** —— 先按当前源码重新对准靶心（内容一字不改地搬过去），' +
+        '再重跑；判据放宽或删条目都等于承认这条防线不要了。',
+    );
+    process.exit(2);
+  }
+  console.log(`锚点预检通过：${mutations.length} 条靶文本在各自文件里都恰好命中 1 次\n`);
+
   const results = [];
 
   for (const m of mutations) {

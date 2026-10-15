@@ -363,11 +363,11 @@
     },
     {
       "id": "M46",
-      "desc": "超时收尾不留一句说明（卡片悄悄不见 = 静默失败复活）",
-      "file": "apps/desktop/src/renderer/src/features/permission/PermissionDialog.tsx",
-      "find": "          ? '有一个审批请求在主进程等待超时，已自动关闭 —— 那一步没有执行，需要的话请重新发起'",
-      "replace": "          ? ''",
-      "test": "apps/desktop/src/renderer/src/features/permission/permission-dialog.test.tsx"
+      "desc": "超时收尾不留一句说明（卡片悄悄不见 = 静默失败复活）。锚点随接驳1 的 T58 搬家重新对准：那句文案从 PermissionDialog 的三元挪进了这张穷举表（规整17 全量跑抓到它命中 0 次）",
+      "file": "apps/desktop/src/renderer/src/features/permission/expired-notice.ts",
+      "find": "  timeout: '有一个审批请求在主进程等待超时，已自动关闭 —— 那一步没有执行，需要的话请重新发起',",
+      "replace": "  timeout: '',",
+      "test": "apps/desktop/src/renderer/src/features/permission/expired-notice.test.ts"
     },
     {
       "id": "M47",
@@ -1179,10 +1179,10 @@
     },
     {
       "id": "M148",
-      "desc": "算出了截断那句话却不挂到气泡上（T26 的最后一环）：接线锁只锁「调用了 + 画了」时看不见这一环掉链子，所以第三环也得钉",
+      "desc": "算出了截断那句话却不挂到气泡上（T26 的最后一环）。锚点缩进随接驳1 的 ChatPanel 改动跟准（规整17 全量跑抓到命中 0 次）",
       "file": "apps/desktop/src/renderer/src/features/chat/ChatPanel.tsx",
-      "find": "              ? { ...b, streaming: false, ...(truncation === null ? {} : { notice: truncation }) }",
-      "replace": "              ? { ...b, streaming: false }",
+      "find": "            ? { ...b, streaming: false, ...(truncation === null ? {} : { notice: truncation }) }",
+      "replace": "            ? { ...b, streaming: false }",
       "test": "apps/desktop/src/main/truncation-wiring.test.ts"
     },
     {
@@ -1299,10 +1299,10 @@
     },
     {
       "id": "M163",
-      "desc": "命令行里 KEY=值 形态的令牌不再遮（审计文件变成密钥的副本）",
+      "desc": "命令行里 KEY=值 形态的令牌不再遮（审计文件变成密钥的副本）。锚点随加固18 的 T48 跟准：那趟替换被包进 mayHaveKeyNamedSecret 预检，缩进多一层",
       "file": "packages/agent-core/src/audit/redact.ts",
-      "find": "  out = out.replace(KV_SECRET_RE, (_m, key: string, gap: string, _value: string) => {\n    hits.push(key);",
-      "replace": "  out = out.replace(KV_SECRET_RE, (_m, key: string, gap: string, _value: string) => {\n    return _m;\n    hits.push(key);",
+      "find": "    out = out.replace(KV_SECRET_RE, (_m, key: string, gap: string, _value: string) => {\n      hits.push(key);",
+      "replace": "    out = out.replace(KV_SECRET_RE, (_m, key: string, gap: string, _value: string) => {\n      return _m;\n      hits.push(key);",
       "test": "packages/agent-core/src/audit/redact.test.ts"
     },
     {
@@ -1443,10 +1443,10 @@
     },
     {
       "id": "M181",
-      "desc": "界面把\"内置终端不在账里\"这句删掉：一本缺页的账重新宣称自己是全账",
+      "desc": "覆盖范围那一格把内置终端删掉：一本缺页的账重新宣称自己是全账。锚点随接驳1 的 T41 改写 —— 原句\"不在本账里\"已按事实改成\"入账但不受规则管\"，故这一条改测\"这一格整个不提终端\"（与 M295 测\"说反\"不重叠）",
       "file": "apps/desktop/src/renderer/src/features/permissions/PermissionRulesPanel.tsx",
-      "find": "          钩子配置改动。<strong>用户手驱动的内置终端</strong>不在本账里 —— 它不经过策略判定，\n          每次启动都当面问，所以没有\"判定\"可记（要纳入得先给它定义判定形状，已登记待排）。",
-      "replace": "          钩子配置改动 —— 每一次判定都能在这一页查到。",
+      "find": "          钩子配置改动 · <b>内置终端的新起会话</b>。",
+      "replace": "          钩子配置改动。",
       "test": "apps/desktop/src/renderer/src/features/permissions/permission-rules-panel.test.tsx"
     },
     {
@@ -2043,9 +2043,9 @@
     },
     {
       "id": "M256",
-      "desc": "画布视口回放被摘（T40 被回退）：只写 ref 不 setViewport，「存而不用」回来",
+      "desc": "画布视口回放被摘（T40 被回退）：只写 state 不 setViewport，「存而不用」回来。锚点随加固18 的 T46 跟准（回放在装载分支里直接喂 parsed.data.viewport）",
       "file": "apps/desktop/src/renderer/src/features/canvas/CanvasPanel.tsx",
-      "find": "      requestAnimationFrame(() => rfRef.current?.setViewport(viewportRef.current));",
+      "find": "      requestAnimationFrame(() => rfRef.current?.setViewport(parsed.data.viewport));",
       "replace": "      void rfRef.current;",
       "test": "apps/desktop/src/renderer/src/wiring-r22.test.ts"
     },
@@ -2083,9 +2083,9 @@
     },
     {
       "id": "M261",
-      "desc": "落盘失败又只进 console（R25 被回退）：重启后「这段怎么没了」没人解释",
+      "desc": "落盘失败又只进 console（R25 被回退）：重启后「这段怎么没了」没人解释。锚点随接驳1 的 T51 跟准 —— notice 从三元式改成\"多段并起来\"，落盘失败那句现在是数组里的一段",
       "file": "apps/desktop/src/main/chat-service.ts",
-      "find": "        notice:\n          persistError === null\n            ? null\n            : `这一轮没能写进磁盘历史（重启后这一段会消失）：${persistError}`,",
+      "find": "        notice: noticeParts.length === 0 ? null : noticeParts.join('\\n'),",
       "replace": "        notice: null,",
       "test": "apps/desktop/src/main/chat-honesty-wiring.test.ts"
     },
