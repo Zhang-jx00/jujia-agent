@@ -10,6 +10,7 @@ import {
   splitChunks,
   TERMINAL_LIMITS,
   trimTail,
+  type AuditAnswer,
   type PermissionResolver,
   type TerminalSize,
 } from '@jujia/agent-core';
@@ -35,6 +36,30 @@ export type TerminalEvent =
   | { type: 'exit'; sessionId: string; exitCode: number };
 
 export type TerminalEmitter = (event: TerminalEvent) => void;
+
+/**
+ * 记账出口（T41 · 2026-10-15）：内置终端进执行审计的**那一类**记录。
+ *
+ * 为什么由服务自己交、而不是让接线层去问一遍：判定只在这里发生过一次（`this.permission(...)`），
+ * 第二处推导就是"两处各说各话"的老病（与 `runTool` 的 `onDecision` 同一条理由）。
+ * 这里也**只交事实**：`outcome` 恒为 ask 与 `decidedBy:'person'` 由接线层标，
+ * 因为那是"这一类账"的定义，不是这一次运行的观测值 —— 定义写在一处，观测值写在一处。
+ *
+ * 只有**真的问过**才走这个出口：接回已有会话（adopt）与超出上限（refuse）一个新进程都没起、
+ * 一次也没问，凭空记一条等于伪造判定（与"参数校验没过不进审计"同一条口径）。
+ */
+export interface TerminalGateFacts {
+  /** 人答了什么（deny / timeout 也要有 —— 记了问过就必须记答复） */
+  answer: AuditAnswer;
+  /** 这件事最后做没做成：被拒、超时、spawn 失败都是 false */
+  executed: boolean;
+  durationMs: number;
+  /** 当面问过（恒 true；留成一格是为了让 `makeRecord` 的判据有机会拦谎） */
+  asked: boolean;
+  args: Record<string, unknown>;
+}
+
+export type TerminalGateRecorder = (facts: TerminalGateFacts) => void;
 
 export interface StartParams {
   /** 工作区根目录（也是终端的初始 cwd） */
@@ -79,6 +104,8 @@ export class TerminalService {
   constructor(
     private readonly emit: TerminalEmitter,
     private readonly permission: PermissionResolver,
+    /** 记账出口（T41）；不传 = 不记账（单测与"审计还没装配起来"的启动窗口） */
+    private readonly recordGate: TerminalGateRecorder = () => undefined,
   ) {}
 
   /** 当前活跃会话数（供 smoke / 诊断使用） */
@@ -119,12 +146,15 @@ export class TerminalService {
     const size = clampSize(params);
 
     // ---- 权限门：exec 类，必须用户确认（仅新起进程时）----
+    // T41：这一次当面问的**事实**要进账（问过什么、人答了什么、做没做成）
+    const gateStarted = Date.now();
+    const gateArgs = { cwd: params.workspaceRoot, cols: size.cols, rows: size.rows };
     const answer = await this.permission({
       id: randomUUID(),
       toolName: 'terminal',
       kind: 'exec',
       summary: describeTerminalPermission(shell, params.workspaceRoot),
-      args: { cwd: params.workspaceRoot, cols: size.cols, rows: size.rows },
+      args: gateArgs,
       paths: [params.workspaceRoot],
       // 启动终端 = 执行类，永远是硬 ask：给 false，弹窗就不会显示一个只兑现一次的「总是允许」
       bypassable: false,
@@ -133,6 +163,14 @@ export class TerminalService {
     // normalizeAnswer 在 executor 内部；这里只认字符串决策（权限桥返回的也是字符串）
     const verdict = typeof answer === 'string' ? answer : answer.decision;
     if (verdict === 'deny' || verdict === 'timeout') {
+      this.recordGate({
+        answer: verdict,
+        asked: true,
+        // 被拒与超时都是"没起进程"：这一格不许留 true（"批过"与"做过"是两格）
+        executed: false,
+        durationMs: Date.now() - gateStarted,
+        args: gateArgs,
+      });
       return { ok: false, error: verdict === 'deny' ? '你拒绝了启动终端' : '审批超时，未启动终端' };
     }
 
@@ -148,8 +186,24 @@ export class TerminalService {
         env: buildTerminalEnv(process.env, { workspaceRoot: params.workspaceRoot }),
       });
     } catch (err) {
+      // 人批了却起不来：答复照常记（问过、答了），但 executed=false ——
+      // 少了这一格，"没做成"与"做成了"在账上就长一样了
+      this.recordGate({
+        answer: verdict,
+        asked: true,
+        executed: false,
+        durationMs: Date.now() - gateStarted,
+        args: gateArgs,
+      });
       return { ok: false, error: `终端启动失败：${err instanceof Error ? err.message : String(err)}` };
     }
+    this.recordGate({
+      answer: verdict,
+      asked: true,
+      executed: true,
+      durationMs: Date.now() - gateStarted,
+      args: gateArgs,
+    });
 
     const session: Session = {
       id: randomUUID(),

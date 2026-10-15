@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { DIALOG_PREVIEW_MAX_LINES, type PermissionRequestPayload } from '@jujia/shared-ipc';
+import { expiredNotice } from './expired-notice';
 
 const KIND_LABEL: Record<PermissionRequestPayload['kind'], string> = {
   read: '读取',
@@ -65,11 +66,8 @@ export function PermissionDialog(): ReactElement | null {
     const unsubscribeExpired = window.jujia.onPermissionExpired(({ id, reason }) => {
       // 按 id 精确关闭：同一时刻可能还有别的请求在排队，一把全清等于把别人的选择权也关掉
       setQueue((prev) => prev.filter((r) => r.id !== id));
-      setNotice(
-        reason === 'timeout'
-          ? '有一个审批请求在主进程等待超时，已自动关闭 —— 那一步没有执行，需要的话请重新发起'
-          : '窗口已关闭，未答复的审批请求全部作废（没有任何操作被执行）',
-      );
+      // T58：那句话由穷举表给，不由三元兜底 —— 旧写法会把任何非 timeout 的原因说成"窗口已关闭"
+      setNotice(expiredNotice(reason));
     });
     return () => {
       unsubscribe();

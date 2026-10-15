@@ -591,6 +591,90 @@ describe('回合级钩子接入（W5d-b）：拦提示词、注入上下文、�
     expect(res.messages.filter((m) => m.role === 'assistant')).toHaveLength(1);
   });
 
+  /**
+   * T51：回合级钩子的诊断必须**活着走出循环**。
+   *
+   * 工具那一侧有工具结果可以挂（见 executor.test.ts），回合级没有工具结果 ——
+   * 于是这一段诊断曾在这里被就地丢弃：`Stop` 钩子超时 ⇒ "再走一步"的要求没来 ⇒
+   * 界面显示"正常收尾"，而没人知道那道"不许提前收工"的关今天没上班。
+   */
+  it('UserPromptSubmit 的诊断随结果一起交出去（拦下提示词时也不许丢）', async () => {
+    const { chat, turnsUsed } = scriptedChat([{ text: '不该出现' }]);
+    const { runner } = fakeHooks({
+      UserPromptSubmit: {
+        blocked: true,
+        reason: '禁止该提示词',
+        diagnostics: ['合规钩子: 启动失败 ENOENT node'],
+      },
+    });
+
+    const res = await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: '危险请求' }],
+        emit: () => undefined,
+      },
+      { ...makeDeps(chat, allow().resolver), hooks: runner },
+    );
+
+    expect(turnsUsed()).toBe(0);
+    expect(res.hookDiagnostics).toContain('合规钩子: 启动失败 ENOENT node');
+  });
+
+  it('Stop 钩子超时（本次没生效）→ 回合结果要能说出这句话', async () => {
+    const { chat } = scriptedChat([{ text: '完成' }]);
+    const { runner } = fakeHooks({
+      Stop: { diagnostics: ['收工检查钩子: 超时 60000ms 已被终止 —— **本次钩子没有生效**'] },
+    });
+
+    const res = await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: '做件事' }],
+        emit: () => undefined,
+      },
+      { ...makeDeps(chat, allow().resolver), hooks: runner },
+    );
+
+    expect(res.reason).toBe('final');
+    expect(res.hookDiagnostics.join('|')).toContain('本次钩子没有生效');
+  });
+
+  it('两处都有诊断时按发生顺序都留下（不覆盖、不去重到只剩一条）', async () => {
+    const { chat } = scriptedChat([{ text: '完成' }]);
+    const { runner } = fakeHooks({
+      UserPromptSubmit: { diagnostics: ['第一处: stderr —— boom'] },
+      Stop: { diagnostics: ['第二处: 输出超过 32768 字节，已截断'] },
+    });
+
+    const res = await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: '做件事' }],
+        emit: () => undefined,
+      },
+      { ...makeDeps(chat, allow().resolver), hooks: runner },
+    );
+
+    expect(res.hookDiagnostics).toEqual(['第一处: stderr —— boom', '第二处: 输出超过 32768 字节，已截断']);
+  });
+
+  it('反向对照：钩子都跑成了 → hookDiagnostics 是空数组（界面不该天天喊）', async () => {
+    const { chat } = scriptedChat([{ text: '完成' }]);
+    const { runner } = fakeHooks();
+
+    const res = await runAgentTurn(
+      {
+        connection: { baseUrl: 'http://x', apiKey: 'k', model: 'm' },
+        messages: [{ role: 'user', content: '做件事' }],
+        emit: () => undefined,
+      },
+      { ...makeDeps(chat, allow().resolver), hooks: runner },
+    );
+
+    expect(res.hookDiagnostics).toEqual([]);
+  });
+
   it('不传 hooks 时完全不碰钩子（默认空运行器）', async () => {
     const { chat } = scriptedChat([{ text: 'ok' }]);
     const res = await runAgentTurn(
@@ -602,6 +686,7 @@ describe('回合级钩子接入（W5d-b）：拦提示词、注入上下文、�
       makeDeps(chat, allow().resolver),
     );
     expect(res.reason).toBe('final');
+    expect(res.hookDiagnostics).toEqual([]);
   });
 });
 

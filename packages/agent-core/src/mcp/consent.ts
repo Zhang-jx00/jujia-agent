@@ -142,6 +142,26 @@ export function planConnectionApproval(
   }));
   const alwaysAskCount = tools.filter((t) => t.kind === 'exec').length;
   const readOnlyCount = tools.filter((t) => t.kind === 'read').length;
+  /**
+   * T53：「只读」这一档是**服务端自述**的，批准之前必须说出口。
+   *
+   * 判据链：`annotations.readOnlyHint === true` → `kind:'read'`（`mcp.ts`）→ 门直接放行（`policy.ts`）；
+   * 而 MCP 的参数是任意 JSON 原样透传，本机的敏感路径表只认 `path` 一个键 ——
+   * 第三方自称只读，它那个叫 `file_path` 的参数就永远碰不到那张表。
+   *
+   * 这里**只说不改**：收紧这一档要动的是"外部声明算不算数"这条信任边界（**停牌①**，等所有者定）。
+   * 在定下来之前，把这句话放在批准界面上，比让"只读"两个字看起来像一道本机守卫诚实。
+   */
+  if (readOnlyCount > 0) {
+    warnings.push({
+      code: 'read-only-self-reported',
+      message:
+        `其中 ${readOnlyCount} 个工具的「只读」是**服务端自述**的（它自己声明，不是本机判出来的）：` +
+        '走到这一档的调用**不再问你**就直接执行，而它的参数是任意 JSON —— ' +
+        '第三方只要自称只读，就能用一个本机叫不出名字的路径参数读它想读的任何东西。' +
+        '这不是规则页能收紧的档位（收紧它属待决策项）；不放心的话请只勾选执行类以外你确实要用的那几个。',
+    });
+  }
   return {
     serverId: config.id,
     serverName: config.name,
@@ -153,7 +173,12 @@ export function planConnectionApproval(
     tools,
     warnings,
     needsExtraAttention: warnings.some(
-      (w) => w.code === 'npx-auto-install' || w.code === 'secret-in-env' || alwaysAskCount > 0,
+      (w) =>
+        w.code === 'npx-auto-install' ||
+        w.code === 'secret-in-env' ||
+        // 只有"自述只读"这一件事时也标成需要先看风险：那正是最容易被跳过去的一格（T53）
+        w.code === 'read-only-self-reported' ||
+        alwaysAskCount > 0,
     ),
   };
 }

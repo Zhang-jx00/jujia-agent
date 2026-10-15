@@ -10,6 +10,7 @@ import {
   capSummary,
   createDefaultRegistry,
   decideCompactPrompt,
+  hookDiagnosticsNotice,
   loadNotes,
   loadProjectContext,
   measureContext,
@@ -32,6 +33,7 @@ import {
   TOOL_OUTPUT_QUIET_MS,
   TOOL_OUTPUT_TAIL_CHARS,
   type ChatTaskView,
+  type DoneEndReason,
   type StreamEvent,
 } from '@jujia/shared-ipc';
 import { resolveConnection } from './connections-store';
@@ -450,7 +452,10 @@ export function sendMessage(
   // 后台跑，不阻塞 IPC 返回
   void (async () => {
     let seq = 0;
-    let resolved: 'stop' | 'length' | 'content_filter' | 'aborted' | 'error' | 'tool_calls' = 'stop';
+    // 结束原因的类型**取自契约**（T58）：以前这里手抄一份字面量并多抄了一个 `tool_calls` ——
+    // 抄出来的那个成员主进程永远不会赋值，界面却有一条活分支读它。
+    // 现在契约是唯一出处：加一个原因不改这里，改契约后界面的穷举表会编译不过。
+    let resolved: DoneEndReason = 'stop';
     /**
      * M17 批一：本轮的**任务记录**（在内存里随步进更新，落盘由 persistTask 负责）。
      * 置 null 的两种时序：起轮前就抛（校验没过）→ finally 里跳过收口，不写一条假记录。
@@ -469,6 +474,16 @@ export function sendMessage(
         emit({ type: 'tool_output', sessionId: session.id, callId, name, tail });
       },
     });
+
+    /**
+     * 这一轮的钩子诊断（T51）。
+     *
+     * **每轮新建**而不是挂在 session 上：这是"这一轮有件事该知道"的一格提示，
+     * 上一轮的诊断漂到下一轮等于让界面说谎（外部审查 T5 的跨会话污染同一个形状）。
+     * 两个来源：SessionStart（只在本会话第一轮真有）与循环交回来的 UserPromptSubmit / Stop。
+     * 声明在 `try` **外面** —— 与上面 `outputStreams` 同一个理由：`finally` 里那一格要说它。
+     */
+    const turnHookDiagnostics: string[] = [];
 
     try {
       /**
@@ -605,6 +620,8 @@ export function sendMessage(
               session.messages.unshift({ role: 'system', content: started.context });
             }
           }
+          // T51：会话开始钩子**没跑成**也要说（"注入的上下文没来"是用户会察觉的沉默）
+          turnHookDiagnostics.push(...started.diagnostics);
         } catch (err) {
           // 钩子失败不能让对话挂掉（钩子契约里也是 fail-open），但必须留下痕迹
           fail('hooks', 'SessionStart 失败', err);
@@ -698,6 +715,8 @@ export function sendMessage(
       // 用 loop 返回的部分**只接回本轮新增**（含 assistant 的 tool_calls 与 tool 结果）。
       // 直接整体赋值等于把窗口当成历史 —— 被压缩掉的旧消息会从内存里消失，journal 的按条数记账随之错位。
       session.messages = mergeTurnResult(session.messages, outbound, result.messages);
+      // T51：循环把 UserPromptSubmit / Stop 的诊断活着交出来，这里接进本轮那一格
+      turnHookDiagnostics.push(...result.hookDiagnostics);
 
       if (result.reason === 'error' && result.error) {
         resolved = 'error';
@@ -748,15 +767,20 @@ export function sendMessage(
         taskRec = finishTask(taskRec, outcome, new Date());
         await persistTask(session.id, taskRec);
       }
+      // 这一轮的"能继续，但有件事该知道"（R25 + T51 共用这一格，两件事各说各的、都要说全）：
+      // ① 落盘失败要说给用户听（旧行为只进 console —— 重启后"这段怎么没了"没人解释）；
+      // ② 钩子没跑成要说给用户听（契约 fail-open，界面不说就等于那道关在上班）。
+      const noticeParts: string[] = [];
+      if (persistError !== null) {
+        noticeParts.push(`这一轮没能写进磁盘历史（重启后这一段会消失）：${persistError}`);
+      }
+      const hookNotice = hookDiagnosticsNotice(turnHookDiagnostics);
+      if (hookNotice !== '') noticeParts.push(hookNotice);
       emit({
         type: 'done',
         sessionId: session.id,
         reason: resolved,
-        // R25：落盘失败要说给用户听（旧行为只进 console —— 重启后"这段怎么没了"没人解释）
-        notice:
-          persistError === null
-            ? null
-            : `这一轮没能写进磁盘历史（重启后这一段会消失）：${persistError}`,
+        notice: noticeParts.length === 0 ? null : noticeParts.join('\n'),
       });
     }
   })();

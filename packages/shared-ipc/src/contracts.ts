@@ -152,6 +152,34 @@ export type TestResult = z.infer<typeof testResultSchema>;
 
 /* ---------------------------- 流式事件 ---------------------------- */
 
+/**
+ * 一轮结束的原因（T58）。
+ *
+ * 为什么单列成常量而不是写在 `z.enum` 里：这张表要当**两头的锚**用 ——
+ * 主进程 `resolved` 的联合类型从这里推，界面那张"每个原因怎么说"的说明表以它为键。
+ * 写成字面量清单就只能靠人记住"加一个成员要改三处"，而本仓两次都是这么漂的
+ * （`tool_calls` 在契约里躺了一年多，主进程从没发过它，界面却有一条活分支在读）。
+ *
+ * **刻意不收 `tool_calls`**：provider 那一层会产，但它止步于 Agent Loop（循环自己执行工具并继续），
+ * 永远不会成为"这一轮的结束原因"。界面读到它就等于相信一条不存在的路径。
+ */
+export const DONE_END_REASONS = ['stop', 'length', 'content_filter', 'aborted', 'error'] as const;
+
+/**
+ * 审批请求在主进程侧作废的原因（T58 同形第二条）。
+ *
+ * 同样**刻意不收 `cancelled`**：桥里只有超时与窗口关闭两条出口，而弹窗以前写的是
+ * `reason === 'timeout' ? A : B` —— 若哪天补一个 cancelled，它会被说成"窗口已关闭"。
+ * 现在界面那张表是穷举 `Record`，新增成员不补文案就编译不过。
+ */
+export const PERMISSION_EXPIRED_REASONS = ['timeout', 'window-closed'] as const;
+
+/** 一轮结束原因的类型（主进程的 `resolved` 与界面的说明表都用它，不从两处各抄一遍） */
+export type DoneEndReason = (typeof DONE_END_REASONS)[number];
+
+/** 审批作废原因的类型 */
+export type PermissionExpiredReason = (typeof PERMISSION_EXPIRED_REASONS)[number];
+
 export const streamEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('text_delta'),
@@ -206,7 +234,7 @@ export const streamEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('done'),
     sessionId: z.string(),
-    reason: z.enum(['stop', 'length', 'content_filter', 'aborted', 'error', 'tool_calls']),
+    reason: z.enum(DONE_END_REASONS),
     /**
      * 本轮没能写进磁盘历史时的一句话（R25：flush 失败不再只进 main 控制台）——
      * null = 一切正常；渲染层看到它就把话说出来（"重启后这一段会消失"）。
@@ -515,7 +543,7 @@ export type PermissionRequestPayload = z.infer<typeof permissionRequestSchema>;
 /** 主进程侧审批请求结束的通知（按 id 精确关闭对应弹窗，见 `IPC.PERMISSION_EXPIRED`） */
 export const permissionExpiredSchema = z.object({
   id: z.string(),
-  reason: z.enum(['timeout', 'window-closed', 'cancelled']),
+  reason: z.enum(PERMISSION_EXPIRED_REASONS),
 });
 export type PermissionExpiredPayload = z.infer<typeof permissionExpiredSchema>;
 

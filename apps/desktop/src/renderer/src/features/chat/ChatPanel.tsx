@@ -262,33 +262,21 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
       // done
       // 被上游截断要说得出来（T26）：不说，半截回答看起来就是"模型答完了"
       const truncation = truncationNotice(event.reason);
-      if (event.reason === 'tool_calls') {
-        /**
-         * 说明（轨道回归计划 1 修 M7）：这里**曾经**写着"对话页尚未启用工具执行（W5 起支持）"，
-         * 而 W5b 起工具执行早已打通 —— 那句话变成了对用户的能力误导。
-         * 现在按事实写：正常流程下 Agent Loop 会自己执行工具并继续，
-         * 走到这里说明循环**没有继续**（例如预算/上限到达），于是如实告知"还可以继续"。
-         */
-        setBubbles((prev) =>
-          prev.map((b) =>
-            b.streaming
-              ? {
-                  ...b,
-                  streaming: false,
-                  error: '本轮在工具调用处结束了（工具已执行）；你可以继续说"继续"让它接着往下做。',
-                }
-              : b,
-          ),
-        );
-      } else {
-        setBubbles((prev) =>
-          prev.map((b) =>
-            b.streaming
-              ? { ...b, streaming: false, ...(truncation === null ? {} : { notice: truncation }) }
-              : b,
-          ),
-        );
-      }
+      /**
+       * T58（2026-10-15）：这里**曾经**有一条 `event.reason === 'tool_calls'` 的活分支
+       * （"本轮在工具调用处结束了……"）。它永远不会执行 —— 主进程的 `resolved` 从不赋这个值，
+       * Agent Loop 自己执行完工具就继续，不会把它当成一轮的结束原因。
+       * 契约里那个成员是 provider 层的词汇漏进了 IPC 层。删掉分支 + 收紧枚举之后，
+       * 界面这张说明表改成穷举 `Record`（见 done-notice.ts）：将来真加一个结束原因，
+       * **不补文案就编译不过**，而不是再多一条读不到的分支。
+       */
+      setBubbles((prev) =>
+        prev.map((b) =>
+          b.streaming
+            ? { ...b, streaming: false, ...(truncation === null ? {} : { notice: truncation }) }
+            : b,
+        ),
+      );
       if (event.notice !== null) {
         // R25：落盘失败要说在明处（旧行为只进 main 控制台）——
         // 这一条不是"回答有问题"，是"这段不会被记住"

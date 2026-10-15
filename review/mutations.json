@@ -2208,6 +2208,158 @@
       "find": "[A-Za-z0-9_.-]{0,64}(?:${SECRET_KEY_WORD})[A-Za-z0-9_.-]{0,64})([=:]?",
       "replace": "[A-Za-z0-9_.-]*(?:${SECRET_KEY_WORD})[A-Za-z0-9_.-]*)([=:]?",
       "test": "packages/agent-core/src/audit/redact.test.ts"
+    },
+    {
+      "id": "M277",
+      "desc": "诊断条数上界失效（T51 的可读性判据被回退）：多个钩子一起失败时那一格铺成一面墙，用户整条折叠掉 —— 看不见等于没发生",
+      "file": "packages/agent-core/src/hooks/notice.ts",
+      "find": "  if (diagnostics.length <= HOOK_DIAGNOSTIC_MAX_LINES) return [...diagnostics];",
+      "replace": "  if (diagnostics.length >= 0) return [...diagnostics];",
+      "test": "packages/agent-core/src/hooks/notice.test.ts"
+    },
+    {
+      "id": "M278",
+      "desc": "摘掉钩子诊断的收集（T51 主靶）：包一层的运行器不再把 diagnostics 交出去，界面重新回到「钩子没跑成而没人知道」",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "      if (res.diagnostics.length > 0) sink.diagnostics.push(...res.diagnostics);",
+      "replace": "      if (res.diagnostics.length > 999) sink.diagnostics.push(...res.diagnostics);",
+      "test": "packages/agent-core/src/tools/executor.test.ts"
+    },
+    {
+      "id": "M279",
+      "desc": "诊断不进工具结果那一道出口（T51）：收集到了也不接进 content，模型与工具卡都看不见 —— 与登记时的原病一字不差",
+      "file": "packages/agent-core/src/tools/executor.ts",
+      "find": "    if (sink.diagnostics.length === 0) return res;",
+      "replace": "    if (sink.diagnostics.length >= 0) return res;",
+      "test": "packages/agent-core/src/tools/executor.test.ts"
+    },
+    {
+      "id": "M280",
+      "desc": "UserPromptSubmit 的诊断被丢掉（T51 回合级那一半）：提示词钩子没跑成时 LoopResult 说「一切正常」",
+      "file": "packages/agent-core/src/loop/agent-loop.ts",
+      "find": "  hookDiagnostics.push(...submit.diagnostics);",
+      "replace": "  hookDiagnostics.push();",
+      "test": "packages/agent-core/src/loop/agent-loop.test.ts"
+    },
+    {
+      "id": "M281",
+      "desc": "钩子诊断不并进 done 那一格（T51 接线）：只留落盘失败那句话，回合级诊断回到「进了内存、没进界面」",
+      "file": "apps/desktop/src/main/chat-service.ts",
+      "find": "      const hookNotice = hookDiagnosticsNotice(turnHookDiagnostics);",
+      "replace": "      const hookNotice = '';",
+      "test": "apps/desktop/src/main/chat-honesty-wiring.test.ts"
+    },
+    {
+      "id": "M282",
+      "desc": "把运行期永不产生的 tool_calls 加回结束原因（T58 病原样回潮）：契约又多了个界面读得到、上游不发的成员",
+      "file": "packages/shared-ipc/src/contracts.ts",
+      "find": "export const DONE_END_REASONS = ['stop', 'length', 'content_filter', 'aborted', 'error'] as const;",
+      "replace": "export const DONE_END_REASONS = ['stop', 'length', 'content_filter', 'aborted', 'error', 'tool_calls'] as const;",
+      "test": "packages/shared-ipc/src/stream-event.test.ts"
+    },
+    {
+      "id": "M283",
+      "desc": "穷举表里 length 那一格改口成「不说话的」（T58）：被上游按长度掐断的半截回答重新看起来像写完了",
+      "file": "apps/desktop/src/renderer/src/features/chat/done-notice.ts",
+      "find": "  length: '回答达到长度上限被截断了：这一段是不完整的。可说\"继续\"接着写，或在设置里调大 max_tokens。',",
+      "replace": "  length: null,",
+      "test": "apps/desktop/src/renderer/src/features/chat/done-notice.test.ts"
+    },
+    {
+      "id": "M284",
+      "desc": "超时与窗口关闭共用一句说法（T58 的兜底形状）：等待超时被说成「窗口已关闭」，两个不同的事实挤进一句话",
+      "file": "apps/desktop/src/renderer/src/features/permission/expired-notice.ts",
+      "find": "  timeout: '有一个审批请求在主进程等待超时，已自动关闭 —— 那一步没有执行，需要的话请重新发起',",
+      "replace": "  timeout: '窗口已关闭，未答复的审批请求全部作废（没有任何操作被执行）',",
+      "test": "apps/desktop/src/renderer/src/features/permission/expired-notice.test.ts"
+    },
+    {
+      "id": "M285",
+      "desc": "弹窗退回三元兜底而不用穷举表（T58 源锁）：表还在，但说话的地方又变成「非 timeout 一律算窗口关闭」",
+      "file": "apps/desktop/src/renderer/src/features/permission/PermissionDialog.tsx",
+      "find": "      setNotice(expiredNotice(reason));",
+      "replace": "      setNotice(reason === 'timeout' ? expiredNotice('timeout') : expiredNotice('window-closed'));",
+      "test": "apps/desktop/src/renderer/src/wiring-r22.test.ts"
+    },
+    {
+      "id": "M286",
+      "desc": "摘掉「当面批准这一类 outcome 只能是 ask」这条判据（T41）：凭空造出一份 allow 判定也能写进账本",
+      "file": "packages/agent-core/src/audit/record.ts",
+      "find": "    if (input.outcome !== 'ask') {\n      throw new Error(\n        `当面批准这一类没有策略判定，outcome 只能是 ask（现在写的是 ${input.outcome}）—— 凭空造一份 allow 就是伪造判定`,\n      );\n    }",
+      "replace": "    if (input.outcome !== 'ask' && input.asked !== true) {\n      throw new Error('不该这样');\n    }",
+      "test": "packages/agent-core/src/audit/record.test.ts"
+    },
+    {
+      "id": "M287",
+      "desc": "摘掉「这一类没有可压掉的档位」判据（T41）：账上能出现一条「总是允许压得掉」的终端记录，与 T19 那条纪律正面对撞",
+      "file": "packages/agent-core/src/audit/record.ts",
+      "find": "    if (input.bypassable === true) {",
+      "replace": "    if (input.bypassable === true && input.outcome === 0) {",
+      "test": "packages/agent-core/src/audit/record.test.ts"
+    },
+    {
+      "id": "M288",
+      "desc": "recordGate 不透传 decidedBy（T41 出口）：终端那一笔记出来与三扇策略门长得一模一样",
+      "file": "apps/desktop/src/main/audit-service.ts",
+      "find": "          ...(input.decidedBy !== undefined ? { decidedBy: input.decidedBy } : {}),",
+      "replace": "          ...(false ? { decidedBy: input.decidedBy } : {}),",
+      "test": "apps/desktop/src/main/audit-service.test.ts"
+    },
+    {
+      "id": "M289",
+      "desc": "被拒/超时那一次不记账（T41 计数锁的靶）：账上只剩「批准并且真起起来了」那种，拒绝与放行重新分不开",
+      "file": "apps/desktop/src/main/terminal-service.ts",
+      "find": "      this.recordGate({\n        answer: verdict,\n        asked: true,\n        // 被拒与超时都是\"没起进程\"：这一格不许留 true（\"批过\"与\"做过\"是两格）\n        executed: false,\n        durationMs: Date.now() - gateStarted,\n        args: gateArgs,\n      });\n      return { ok: false, error: verdict === 'deny' ? '你拒绝了启动终端' : '审批超时，未启动终端' };",
+      "replace": "      return { ok: false, error: verdict === 'deny' ? '你拒绝了启动终端' : '审批超时，未启动终端' };",
+      "test": "apps/desktop/src/main/terminal-lifecycle-wiring.test.ts"
+    },
+    {
+      "id": "M290",
+      "desc": "终端那一笔标成策略判定（T41 接线）：账本反过来替规则页撒「你的 terminal 规则管得住它」这个谎",
+      "file": "apps/desktop/src/main/ipc/terminal.ts",
+      "find": "        decidedBy: 'person',",
+      "replace": "        decidedBy: 'policy',",
+      "test": "apps/desktop/src/main/terminal-lifecycle-wiring.test.ts"
+    },
+    {
+      "id": "M291",
+      "desc": "审批桥不再当场判形状（T59）：不合契约的请求照样出门，由 preload 丢掉，症状回到「点了没反应 + 干等界面上限」",
+      "file": "apps/desktop/src/main/permission-bridge.ts",
+      "find": "      if (!parsed.success) {",
+      "replace": "      if (!parsed.success && parsed.error.issues.length > 99) {",
+      "test": "apps/desktop/src/main/permission-request-consistency.test.ts"
+    },
+    {
+      "id": "M292",
+      "desc": "「只读是服务端自述」那条提示消失（T53）：批准界面重新只剩一句「N 个是服务端声明的只读」，不说它意味着不再询问",
+      "file": "packages/agent-core/src/mcp/consent.ts",
+      "find": "  if (readOnlyCount > 0) {",
+      "replace": "  if (readOnlyCount > 999) {",
+      "test": "packages/agent-core/src/mcp/consent.test.ts"
+    },
+    {
+      "id": "M293",
+      "desc": "自述只读不再标成「要先看风险」（T53）：只有只读工具的服务走绿色通道，而那正是最容易跳过去的一格",
+      "file": "packages/agent-core/src/mcp/consent.ts",
+      "find": "        w.code === 'read-only-self-reported' ||",
+      "replace": "        w.code === 'read-only-self-reported-absent' ||",
+      "test": "packages/agent-core/src/mcp/consent.test.ts"
+    },
+    {
+      "id": "M294",
+      "desc": "规则页不再举出具体的改写形态（T52 界面那句）：只剩一句抽象的「按字面比对」，用户照样以为 deny git push 拦得住推送",
+      "file": "apps/desktop/src/renderer/src/features/permissions/PermissionRulesPanel.tsx",
+      "find": "            <code>git.exe push</code>、<code>\"git\" push</code>、<code>C:\\...\\git\\cmd\\git.exe push</code>",
+      "replace": "            <code>某种写法</code>",
+      "test": "apps/desktop/src/renderer/src/features/permissions/permission-rules-panel.test.tsx"
+    },
+    {
+      "id": "M295",
+      "desc": "覆盖范围那一格说反（T41 界面那句）：终端已经入账却仍写「不在本账里」—— 把事实说反比留白更坏",
+      "file": "apps/desktop/src/renderer/src/features/permissions/PermissionRulesPanel.tsx",
+      "find": "          <b>但\"记了账\"不等于\"规则管得住它\"</b>：终端不经过策略判定，",
+      "replace": "          <b>内置终端</b>不在本账里：它不经过策略判定，",
+      "test": "apps/desktop/src/renderer/src/features/permissions/permission-rules-panel.test.tsx"
     }
   ]
 }

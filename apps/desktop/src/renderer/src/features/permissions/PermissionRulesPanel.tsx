@@ -274,6 +274,20 @@ export function PermissionRulesPanel(): ReactElement {
             前缀没匹配上、或命令里带了 <code>|</code> <code>&amp;</code> <code>;</code>
             这类组合符时，规则一律<b>不生效</b>，执行类命令仍会照常问你一次（少拦住一次不等于多放行一次）。
           </p>
+          {/*
+            T52（2026-10-15）：这一格到底管多大范围，界面要自己说出口。
+            "字面匹配开头"意味着一次改写形态就绕得开 —— 这是**当下真实的行为**，
+            不是悲观假设（收紧到按 argv 逐词比对要动"用户写下的承诺算不算数"，属待决策项）。
+            不写这句话的代价很具体：用户以为 `deny git push` 拦得住推送，于是别再检查。
+          */}
+          <p className="p0-warn">
+            <b>但请看清这一格的边界</b>：前缀是按<b>字面</b>比对的，所以
+            <code>git.exe push</code>、<code>"git" push</code>、<code>C:\...\git\cmd\git.exe push</code>
+            这类<b>改写形态</b>不会被 <code>deny git push</code> 命中 —— 写得越具体，越容易被绕开一步。
+            组合符（<code>|</code> <code>&amp;</code> <code>;</code>）那条虽然让规则<b>不生效</b>，
+            执行类命令<b>还是会问你</b>一次；真正会漏的只有上面这种"同一条命令换了个写法"。
+            把匹配收紧到逐词比对会改动既有规则的范围（收紧侧保守、放行侧就是放行），这条还没定。
+          </p>
         </div>
 
         {rules.length === 0 ? (
@@ -315,8 +329,15 @@ export function PermissionRulesPanel(): ReactElement {
         </p>
         <p className="p0-warn">
           覆盖范围：工具调用（内置 / MCP / 技能 / 画布）· git 暂存 / 提交 / 推送 · 交给外部程序（系统与自选）·
-          钩子配置改动。<strong>用户手驱动的内置终端</strong>不在本账里 —— 它不经过策略判定，
-          每次启动都当面问，所以没有"判定"可记（要纳入得先给它定义判定形状，已登记待排）。
+          钩子配置改动 · <b>内置终端的新起会话</b>。
+          {/*
+            T41（2026-10-15）：终端这一格改了口径 —— 它现在<b>入账</b>了，
+            但记的是「没有策略判定、只有当面答复」那一类（账上的 decidedBy:'person'）。
+            原来那句"不在本账里"必须先绝迹：账上真有一行，还说没有就是把事实说反。
+          */}
+          <b>但"记了账"不等于"规则管得住它"</b>：终端不经过策略判定，
+          每次新起会话都<b>当面问</b>一次，所以你在这一页写的 <code>terminal</code> 规则<b>对它无效</b>
+          （想让它也按规则判，改的是这台机器的门怎么判 —— 这条还没定）。
         </p>
         {auditMsg && (
           <p className={auditMsg.kind === 'ok' ? 'p0-ok' : 'p0-err'} role={auditMsg.kind === 'ok' ? 'status' : 'alert'}>

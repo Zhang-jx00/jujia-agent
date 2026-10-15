@@ -94,6 +94,63 @@ describe('detectRisks：风险提示（确定性规则 + 人话）', () => {
   });
 });
 
+/**
+ * T53（终端与外部件批 · 2026-10-15）：**「只读」这一档是服务端自己说的**，批准界面上必须这么说。
+ *
+ * 判据在 `mcp.ts` 与 `policy.ts`：`annotations.readOnlyHint === true` → `kind:'read'` → 门直接放行。
+ * 而 MCP 工具的参数是**任意 JSON 原样透传**，本机的敏感路径表只认 `path` 这一个键 ——
+ * 第三方服务只要自称只读，它那个叫 `file_path` / `target` 的参数就永远碰不到那张表，
+ * 于是"读什么都不会问你"是**真实可达**的状态。
+ *
+ * 收紧这一档（外部工具一律询问，或给档案加 `pathArg` 声明）**改的是信任边界 → 停牌①**，
+ * 不由我自行改判定。在所有者定下来之前，界面上不许留"外部工具跟内置工具一样有门"的错觉，
+ * 所以这条提示进 `warnings`（批准弹窗本来就渲染这一栏，措辞只有一处定义）。
+ */
+describe('只读档来自服务端自述，批准前要说出口（T53）', () => {
+  const onlyRead = toToolProfiles('fs', [
+    { name: 'read_file', description: '读文件', annotations: { readOnlyHint: true } },
+  ]);
+
+  it('有只读工具时，warnings 里要有一条说得清"自述"与"不再询问"', () => {
+    const p = plan(cfg({ command: 'mcp-server', args: [] }), onlyRead);
+    const hit = p.warnings.find((w) => w.code === 'read-only-self-reported');
+
+    expect(hit, JSON.stringify(p.warnings.map((w) => w.code))).toBeDefined();
+    expect(hit?.message).toContain('自述');
+    expect(hit?.message).toContain('不再问你');
+    expect(hit?.message).toContain('1');
+  });
+
+  it('反向对照：一个只读工具都没有时不许冒出这条噪声', () => {
+    const noRead = toToolProfiles('fs', [
+      { name: 'delete_file', description: '删文件', annotations: { destructiveHint: true } },
+    ]);
+    const p = plan(cfg({ command: 'mcp-server', args: [] }), noRead);
+
+    expect(p.readOnlyCount).toBe(0);
+    expect(p.warnings.map((w) => w.code)).not.toContain('read-only-self-reported');
+  });
+
+  it('只有"自述只读"这一件事时也要标成需要先看风险（这正是它最容易被跳过去的时候）', () => {
+    const p = plan(cfg({ command: 'mcp-server', args: [] }), onlyRead);
+
+    expect(p.alwaysAskCount).toBe(0);
+    expect(p.needsExtraAttention).toBe(true);
+  });
+
+  it('计数说的是**这一个服务**的只读工具数，不是笼统的一句提醒', () => {
+    const two = toToolProfiles('fs', [
+      { name: 'read_file', description: '读', annotations: { readOnlyHint: true } },
+      { name: 'list_dir', description: '列', annotations: { readOnlyHint: true } },
+      { name: 'write_file', description: '写' },
+    ]);
+    const p = plan(cfg({ command: 'mcp-server', args: [] }), two);
+
+    expect(p.readOnlyCount).toBe(2);
+    expect(p.warnings.find((w) => w.code === 'read-only-self-reported')?.message).toContain('2');
+  });
+});
+
 describe('planConnectionApproval：给 UI 的批准计划', () => {
   it('统计 exec / 只读数量（exec 类要每次询问）', () => {
     const p = plan();

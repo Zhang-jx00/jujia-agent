@@ -3035,9 +3035,10 @@ try {
   }
   if (!ledgerText.includes('digests')) fail('账本没留指纹，事后无法核对"是不是同一份内容"', ledgerText.slice(0, 400));
 
-  /* 三扇**非工具门**（R8.6）：它们不走 runTool，最容易出"某一扇忘了接"——
-   * 而缺页的账看起来完全正常，所以这里拿整跑下来已经动过的那些门做真值。 */
-  const GATE_SUBJECTS = ['git_stage', 'git_commit', 'git_push', 'open_with_system', 'open_with_custom', 'hooks:modify'];
+  /* 三扇**非工具门**（R8.6）+ 内置终端（T41）：它们都不走 runTool，最容易出"某一扇忘了接"——
+   * 而缺页的账看起来完全正常，所以这里拿整跑下来已经动过的那些门做真值。
+   * `terminal_start` 排在这里的理由：本跑前面（T23 那一步）真的当面批过一次终端启动。 */
+  const GATE_SUBJECTS = ['git_stage', 'git_commit', 'git_push', 'open_with_system', 'open_with_custom', 'hooks:modify', 'terminal_start'];
   const gateLines = ledgerText.split('\n').filter((l) => l.includes('"kind":"gate"'));
   for (const subject of GATE_SUBJECTS) {
     if (!ledgerText.includes(`"subject":"${subject}"`)) {
@@ -3059,11 +3060,34 @@ try {
   if (!gateLines.some((l) => l.includes('JUJIA_E2E_HOOK_MARKER'))) {
     fail('钩子配置那笔没留下将要执行的命令（看不见内容的审批等于没有审批）');
   }
+  /**
+   * T41（2026-10-15）：内置终端这一笔必须是**另一类账** —— 它没有策略判定。
+   *
+   * 只断言"有这一行"是不够的：把它记成一份普通的 `ask` 会让规则页那句"你的规则管得住它"
+   * 变成谎言，而账目看起来完全正常。所以这里钉三格：`decidedBy:'person'`（来源）、
+   * `bypassable:false`（这一类没有"总是允许"能压掉的档位）、`executed:true`（那次会话真起来了）。
+   */
+  const terminalLines = gateLines.filter((l) => l.includes('"subject":"terminal_start"'));
+  if (terminalLines.length === 0) fail('账上没有内置终端那一笔（T41 说好了要入账）');
+  for (const line of terminalLines) {
+    if (!line.includes('"decidedBy":"person"')) {
+      fail('终端那一笔没标"没有策略判定"这一类（记成普通 ask 就等于说规则页管得住它）', line.slice(0, 300));
+    }
+    if (!line.includes('"bypassable":false')) {
+      fail('终端那一笔没标压不掉：这一类没有「总是允许」的档位', line.slice(0, 300));
+    }
+  }
+  if (!terminalLines.some((l) => l.includes('"executed":true'))) {
+    fail('账上没有"终端真的起来了"那一笔（本跑前面已经批准并接回过会话）', terminalLines.join('\n').slice(0, 400));
+  }
+  if (!terminalLines.some((l) => l.includes('不查策略表'))) {
+    fail('终端那一笔的 reason 没说出"不查策略表"（事后翻账的人要知道规则为什么没生效）', terminalLines[0]?.slice(0, 300));
+  }
   // 反过来：git 的提交信息属**正文**，这一格刻意不给可读形态，只该留下长度与指纹
   if (ledgerText.includes('e2e：接上了 git')) {
     fail('git 提交信息被原文抄进账本（这一格不该有可读形态）', ledgerText.slice(0, 500));
   }
-  ok(`审计：工具与三扇非工具门都在账上（gate 行 ${String(gateLines.length)} 条），有指纹有长度；正文进不去，该看得见的一条没少`);
+  ok(`审计：工具与四扇非工具门（含内置终端那一类"没有策略判定"）都在账上（gate 行 ${String(gateLines.length)} 条），有指纹有长度；正文进不去，该看得见的一条没少`);
 
   step('R8.7 长命令实时输出：先吐的那行在命令跑完之前就得看得见（不是跑完一次性给出）');
   /**
@@ -3750,6 +3774,87 @@ try {
     fail('点 × 之后那条还留着（关不掉 = 变成常驻噪声，界面会被它压住）');
   }
   ok('拒绝被说出来（并写明"没有地方接住它"），关得掉，role=alert 可被读屏播');
+
+  /**
+   * T51（终端与外部件批 · 2026-10-15）：钩子**没跑成**必须在这一次工具结果里说出口。
+   *
+   * 这一幕只能是界面级证据：单测能证明"诊断从钩子引擎走到结果字符串"，
+   * 证明不了"人正在看的那一格真的多了一句话"。而这一条的坏情况恰好是**什么都不发生**：
+   * 契约是 fail-open，一道拦危险操作的 PreToolUse 钩子的二进制被卸载 ⇒ `blocked:false`
+   * ⇒ 工具照常执行、界面一片空白 —— 用户以为那道关还在上班。
+   *
+   * 现场是真的：装一个**每次都失败**的 PreToolUse 钩子（`node -e process.exit(3)`，
+   * 退出码 3 按契约"不视为拒绝"），然后在概览页点一次 list_dir。
+   * 判据取钩子自己那句话里的两段（`[钩子诊断]` 与 `不视为拒绝`），不依赖我这边拼的措辞。
+   */
+  step('T51 钩子诊断：没跑成的那道关要说得出声（真弹窗、真钩子进程、真工具结果）');
+  /**
+   * 助手**绑在当前窗口**（win4）而不是复用前面那一段的 `saveHooksFromEditor` / `clickDialog2`：
+   * 那几个闭包绑的是**已经销毁的旧窗口**（本脚本中途重启过应用，1509 行那条注释说的就是这件事），
+   * 首跑正是红在这里 —— `locator.click: Target page, context or browser has been closed`。
+   * 红在判据写法而不是产品，这条如实记进复核 085。
+   */
+  const saveHooks4 = async (text) => {
+    await win4.locator('nav.app-tabs button', { hasText: '钩子' }).first().click();
+    await win4.locator('textarea.jj-hooks-editor').fill(text);
+    await win4.locator('button', { hasText: '保存并校验' }).first().click();
+  };
+  const clickDialog4 = async (label) => {
+    await win4.locator('button', { hasText: label }).first().click();
+    await win4.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
+  };
+  const diagHooksJson = JSON.stringify(
+    {
+      enabled: true,
+      timeoutMs: 5_000,
+      maxOutputBytes: 4_096,
+      events: {
+        PreToolUse: [{ matcher: '', hooks: [{ type: 'process', command: 'node', args: ['-e', 'process.exit(3)'] }] }],
+      },
+    },
+    null,
+    2,
+  );
+  await saveHooks4(diagHooksJson);
+  if ((await waitText4('需要你确认：修改钩子配置')) !== true) {
+    fail('启用钩子没有弹确认（钩子会以宿主环境执行命令，改一次必须问一次）', (await body4()).slice(0, 800));
+  }
+  await clickDialog4('允许一次');
+  if ((await waitText4('已保存')) !== true) {
+    fail('批准之后钩子配置没保存成功（那这一场面试的是空气）', (await body4()).slice(0, 800));
+  }
+  // 真值仍以磁盘为准：enabled 必须是 true，否则后面那句"没跑成"根本没机会出现
+  const diagDisk = hooksOnDisk() ?? '';
+  if (!diagDisk.includes('"enabled": true')) {
+    fail('盘上的钩子配置不是启用态（写进去了却没启用，界面那步就失去意义）', diagDisk.slice(0, 400));
+  }
+
+  await win4.locator('nav.app-tabs button', { hasText: '概览' }).first().click();
+  await win4.locator('button', { hasText: 'list_dir' }).first().click();
+  if ((await waitText4('[钩子诊断]')) !== true) {
+    fail(
+      '钩子没跑成而界面上没有任何地方说（T51 的静默回潮：诊断又被丢在执行器里了）',
+      (await body4()).slice(-1_200),
+    );
+  }
+  const diagBody = await body4();
+  if (!diagBody.includes('不视为拒绝')) {
+    fail('那一格只说了"有诊断"，没说清**没跑成不等于拒绝**（人会被误导成钩子拦下了）', diagBody.slice(-1_200));
+  }
+  // 反向对照（同一条纪律）：钩子跑成了就不许冒出这一格，否则它三遍之后就变成背景纹
+  await saveHooks4(JSON.stringify({ enabled: false, timeoutMs: 5_000, maxOutputBytes: 4_096, events: {} }, null, 2));
+  if ((await waitText4('需要你确认：修改钩子配置')) !== true) {
+    fail('第二次改钩子配置没有再弹确认（改一次问一次不许因为"刚改过"而免问）', (await body4()).slice(0, 800));
+  }
+  await clickDialog4('允许一次');
+  await win4.locator('nav.app-tabs button', { hasText: '概览' }).first().click();
+  await win4.locator('button', { hasText: 'list_dir' }).first().click();
+  await win4.waitForTimeout(1_200);
+  const offBody = await body4();
+  if (offBody.includes('[钩子诊断]')) {
+    fail('钩子已经停用，界面上还挂着"钩子诊断"（说不清什么时候该闭嘴的提示就是噪声）', offBody.slice(-1_200));
+  }
+  ok('钩子没跑成 → 那一次工具结果里说得出"没生效、但不视为拒绝"；停用之后这一格跟着消失');
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();

@@ -1,5 +1,5 @@
 import { app } from 'electron';
-import { TERMINAL_LIMITS } from '@jujia/agent-core';
+import { TERMINAL_GATE_REASON, TERMINAL_LIMITS } from '@jujia/agent-core';
 import {
   IPC,
   terminalInputSchema,
@@ -46,6 +46,30 @@ export function registerTerminalIpc(ctx: IpcContext): void {
       const resolver = deps.permission?.resolve;
       if (!resolver) return Promise.resolve('deny' as const);
       return resolver(req);
+    },
+    /**
+     * 记账出口（T41）：内置终端进执行审计，作为**没有策略判定的那一类**（`decidedBy:'person'`）。
+     *
+     * `outcome` 恒为 `ask`、`bypassable` 恒为 false —— 这不是"这一次的观察值"而是这一类的定义：
+     * 终端不查策略表，只有真的新起进程才当面问，且那道「总是允许」压不掉它。
+     * 记账走的是与非工具门同一个出口（`recordGate`），不另开第二份 JSON。
+     *
+     * 本轮**没有**动权限映射：用户在规则页写的 `terminal` 规则对它仍然无效（停牌①，待所有者定）。
+     */
+    (facts) => {
+      void ctx.audit.recordGate({
+        subject: 'terminal_start',
+        outcome: 'ask',
+        asked: facts.asked,
+        answer: facts.answer,
+        bypassable: false,
+        decidedBy: 'person',
+        reason: TERMINAL_GATE_REASON,
+        args: facts.args,
+        sessionId: 'manual',
+        durationMs: facts.durationMs,
+        executed: facts.executed,
+      });
     },
   );
   // 应用退出时杀掉所有 PTY，避免留下僵尸子进程

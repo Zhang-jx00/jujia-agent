@@ -105,3 +105,41 @@ describe('落盘与降级失败要进结构化日志（T47 源锁）', () => {
     expect(src).toMatch(/void flushSession\(doomed\)/);
   });
 });
+
+/**
+ * T51（终端与外部件批 · 2026-10-15）：钩子**没跑成**这件事要走到界面上那一格。
+ *
+ * 与 T47 是同一个病的另一半：落盘失败进了日志（T47），而钩子失败停在"没人知道"。
+ * 契约是 fail-open（见 `hooks/types.ts` 要点 5），代价就是这一格必须可见 ——
+ * 一道拒收危险操作的 PreToolUse 钩子的二进制被卸载 ⇒ `blocked:false` ⇒ 工具照常执行，
+ * 修改前没有任何地方说过"那道关今天没上班"。
+ *
+ * 出口选型（**不新开一条通道**）：
+ * - 工具级：并进工具结果本身（`executor.ts` 的 sink，模型与工具卡读同一份话）；
+ * - 回合级：并进 `done.notice` —— R25 已经为"这一轮能继续但有件事该知道"开了这一格，
+ *   钩子诊断正是同一语义，另造第二个"怎么说失败"迟早与第一个说法不一致。
+ *
+ * 覆盖面如实：**这是源锁，不是运行期真值**。工具级那一半由 `executor.test.ts` 的行为用例守住，
+ * 回合级那一半由 `agent-loop.test.ts` 守住"诊断活着走出循环"，界面真的显示由 e2e 的第 [64] 步守住。
+ */
+describe('钩子诊断接进 done 那一格（T51 源锁）', () => {
+  const code = src.replace(/^\s*\/\/.*$/gm, '');
+
+  it('三个接入点都在：SessionStart 收、循环结果收、done 那句合成', () => {
+    expect(code).toMatch(/turnHookDiagnostics\.push\(\.\.\.started\.diagnostics\)/);
+    expect(code).toMatch(/turnHookDiagnostics\.push\(\.\.\.result\.hookDiagnostics\)/);
+    expect(code).toMatch(/hookDiagnosticsNotice\(turnHookDiagnostics\)/);
+  });
+
+  it('回合级数组每轮新建（上一轮的诊断不许漂到下一轮的提示里）', () => {
+    // 声明点必须在起轮函数体内，而不是模块级 —— 模块级等于跨会话串台（外部审查 T5 同形）
+    expect(code).toMatch(/const turnHookDiagnostics: string\[\] = \[\]/);
+    expect(code).not.toMatch(/^const turnHookDiagnostics: string\[\] = \[\]/m);
+  });
+
+  it('反向对照：诊断不是"只写日志不上界面"，也不把 T47 那句挤掉', () => {
+    // SessionStart **抛异常**才走 fail()（日志）；正常吐出的诊断必须走 notice
+    expect(code).not.toMatch(/fail\('hooks',.*diagnostics/i);
+    expect(src).toContain('这一轮没能写进磁盘历史');
+  });
+});

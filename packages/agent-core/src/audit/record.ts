@@ -12,6 +12,19 @@ export type AuditOutcome = 'allow' | 'ask' | 'deny';
 export type AuditAnswer = 'allow_once' | 'allow_always' | 'deny' | 'timeout' | 'expired' | 'edit';
 
 /**
+ * 这一格的结论**从哪儿来**（T41）。
+ *
+ * - `'policy'`（缺省，不必写进账）：`decideGate` 判出来的 —— 模式、规则表、敏感路径都参与过；
+ * - `'person'`：**没有策略判定这一步**，机上只有人的当面答复。今天只有内置终端属于这一类
+ *   （`terminal-service.ts` 不走 `decideGate`：只有真的新起进程才当面问，`bypassable` 硬写 false）。
+ *
+ * 为什么要专门立这一格而不是让终端也记成 `ask`：账本里"判定为 ask"与"当面问过"是两件事 ——
+ * 前者意味着"策略表管过它、你写的规则对它有效"，后者意味着"这台机器只信这一次点头"。
+ * 混成一格，用户就会以为规则页里那条 `deny terminal` 拦得住终端（拦不住，见 T41/T52）。
+ */
+export type AuditDecidedBy = 'policy' | 'person';
+
+/**
  * 执行器（`runTool`）交出来的**判定事实**。
  *
  * 为什么由 agent-core 给、而不是让调用方自己再去问一遍策略层：判定只在 `decideGate` 发生过一次，
@@ -87,6 +100,11 @@ export interface AuditRecord {
   durationMs?: number | undefined;
   /** 规则表健康度（T37：读坏了要在账上看得见；调用方没给就不写这一格） */
   rules?: AuditRecordRules | undefined;
+  /**
+   * 这一格结论的**来源**（T41）。缺省不写 = 策略表判出来的；
+   * 只有 `'person'`（没有策略判定、只有当面答复）才占这一格。
+   */
+  decidedBy?: AuditDecidedBy | undefined;
 }
 
 export interface MakeRecordInput {
@@ -111,6 +129,8 @@ export interface MakeRecordInput {
   durationMs?: number | undefined;
   args?: ArgSummary;
   rules?: AuditRulesHealth | undefined;
+  /** 结论来源（T41）：不写 = 策略表那类；`'person'` 必须满足下面 makeRecord 里的四条 */
+  decidedBy?: AuditDecidedBy | undefined;
 }
 
 const EMPTY_ARGS: ArgSummary = { keys: [], lengths: {}, digests: {}, paths: [], redacted: [] };
@@ -132,6 +152,29 @@ export function makeRecord(input: MakeRecordInput): AuditRecord {
     throw new Error('审计记录必须写明这件事做没做成（executed）—— "没做"与"做了但失败"在账上不能长一样');
   }
   if (input.sessionId.trim() === '') throw new Error('审计记录必须写明会话（没有会话就写 manual）');
+  /**
+   * T41 新增的那一类（**没有策略判定、只有当面答复**）的三条硬判据。
+   * 为什么要在这里拦：这一类的存在理由正是"账上不许凭空长出一份策略判定"，
+   * 那它自己的组合就必须窄到不可能撒谎 —— 写得越宽，越容易把"没查过规则"记成"查过且判为 ask"。
+   * 非法组合一律抛，而不是悄悄修好：一条会误导人的账比写不进去更坏。
+   *
+   * 排在通用那条 `asked/outcome` 检查**之前**：同一件错事，说清"是哪一类的规则被破了"
+   * 比甩一句通用的"判定是 allow 不该记成经过人的手"更有用 —— 后者会让人以为
+   * 把 asked 改成 false 就对了，而那一改等于把"有人当面批过"这件事整个抹掉。
+   */
+  if (input.decidedBy === 'person') {
+    if (input.outcome !== 'ask') {
+      throw new Error(
+        `当面批准这一类没有策略判定，outcome 只能是 ask（现在写的是 ${input.outcome}）—— 凭空造一份 allow 就是伪造判定`,
+      );
+    }
+    if (input.asked !== true) {
+      throw new Error('当面批准这一类必须真的问过（asked=true）—— 没问过却记成有人批过，是最坏的一种记法');
+    }
+    if (input.bypassable === true) {
+      throw new Error('当面批准这一类没有"可被『总是允许』压掉"的档位：能压掉的那些一律来自策略表（T19）');
+    }
+  }
   // "拒了却记成问过了"是最坏的一种记法：它把没做的事记成有人做过决定
   if (input.asked === true && input.outcome !== 'ask') {
     throw new Error(`判定是 ${input.outcome}，不该记成"经过人的手"（asked=true 只允许配 outcome=ask）`);
@@ -153,6 +196,10 @@ export function makeRecord(input: MakeRecordInput): AuditRecord {
     ...(input.answer !== undefined ? { answer: input.answer } : {}),
     ...(input.bypassable !== undefined ? { bypassable: input.bypassable } : {}),
     ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+    // 只有非缺省的那一类才占这一格：旧账的字节一字不改（新增一类不许改动旧形状）
+    ...(input.decidedBy === undefined || input.decidedBy === 'policy'
+      ? {}
+      : { decidedBy: input.decidedBy }),
     ...(input.rules !== undefined
       ? {
           rules: {
@@ -201,6 +248,10 @@ export function parseAuditLine(line: string): AuditRecord | null {
       ...(typeof raw['answer'] === 'string' ? { answer: raw['answer'] as AuditAnswer } : {}),
       ...(typeof raw['bypassable'] === 'boolean' ? { bypassable: raw['bypassable'] } : {}),
       ...(typeof raw['durationMs'] === 'number' ? { durationMs: raw['durationMs'] } : {}),
+      // 只认这两个值；别的一律当"没写这一格"（旧行、被改坏的行都不兜底成"当面批准"那种强说法）
+      ...(raw['decidedBy'] === 'person' || raw['decidedBy'] === 'policy'
+        ? { decidedBy: raw['decidedBy'] as AuditDecidedBy }
+        : {}),
       ...(raw['rules'] !== undefined ? { rules: raw['rules'] as AuditRecordRules } : {}),
     };
   } catch {

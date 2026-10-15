@@ -13,6 +13,17 @@ import { describe, expect, it } from 'vitest';
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
+/**
+ * 去掉注释后的源码（T58 起这里要用它）。
+ *
+ * 为什么：**"旧写法必须绝迹"这类否定断言，判据只能落在代码上**。
+ * 我第一条这样的锁写完就红了 —— 不是因为分支还在，而是因为我留在原地的那段解释注释里
+ * 写着 `event.reason === 'tool_calls'`。同一形状的反面更危险：注释里写一句"已删除 X"
+ * 就能让一条否定锁常年绿灯（M268 撞过的那个坑的镜像）。
+ */
+const strip = (src: string): string =>
+  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
 describe('界面交互群源锁（T40 · 加固15）', () => {
   const chat = read('./features/chat/ChatPanel.tsx');
 
@@ -78,5 +89,38 @@ describe('失败兜底的装配接线（T45 · 审计清零批）', () => {
     // 组件与安装函数必须来自同一个模块（第二份实现就是第二个口径）
     expect(main).toMatch(/from '\.\/ui\/failure-notice'/);
     expect(app).toMatch(/from '\.\/ui\/failure-notice'/);
+  });
+});
+
+/**
+ * T58（终端与外部件批 · 2026-10-15）：**上游不会发的枚举成员，界面也不许留着读它**。
+ *
+ * 两条同形的死分支（`done.reason` 的 `tool_calls` / `permissionExpired.reason` 的 `cancelled`）
+ * 修法是同一句话：把"怎么说"从**散落的 if/三元**改成**以契约为键的穷举表**。
+ * 行为面在 `features/chat/done-notice.test.ts` 与 `features/permission/expired-notice.test.ts`
+ * （表键集合与契约成员集合对账）；这里钉的是"旧写法绝迹"——
+ * 因为表可以存在，而回调里那句 `reason === 'tool_calls'` 也可以同时存在（人改写时最容易忘的就是删旧的）。
+ */
+describe('结束原因与作废原因都走穷举表，不留死分支（T58 源锁）', () => {
+  const panel = strip(read('./features/chat/ChatPanel.tsx'));
+  const dialog = strip(read('./features/permission/PermissionDialog.tsx'));
+
+  it('对话页不再按 tool_calls 说话（那条分支永远走不到，留着就是骗下一个读代码的人）', () => {
+    expect(panel).not.toMatch(/reason === 'tool_calls'/);
+    expect(panel).not.toMatch(/本轮在工具调用处结束了/);
+    // 而截断那句话仍然要说 —— 清死分支不许顺手把活的路径关了
+    expect(panel).toMatch(/truncationNotice\(event\.reason\)/);
+  });
+
+  it('审批弹窗不再用三元兜底作废原因（非 timeout 一律说成"窗口已关闭"正是它撒过的谎）', () => {
+    expect(dialog).not.toMatch(/reason === 'timeout' \?/);
+    expect(dialog).toMatch(/expiredNotice\(reason\)/);
+    expect(dialog).toMatch(/from '\.\/expired-notice'/);
+  });
+
+  it('主进程那一侧的结束原因取自契约，不是手抄一份字面量（抄出来的那份多了一个 tool_calls）', () => {
+    const service = strip(readFileSync(new URL('../../main/chat-service.ts', import.meta.url), 'utf8'));
+    expect(service).toMatch(/let resolved: DoneEndReason = 'stop'/);
+    expect(service).not.toMatch(/let resolved: 'stop' \|/);
   });
 });

@@ -5,6 +5,7 @@ import {
   summarizeArgs,
   type ArgSummary,
   type AuditAnswer,
+  type AuditDecidedBy,
   type GateAuditInfo,
 } from '@jujia/agent-core';
 import { createAuditLog, type AuditLog, type AuditPage, type AuditStatus } from './audit-log';
@@ -48,6 +49,13 @@ export interface AuditGateInput {
    * git 不给这一格 —— 它的对账对象是路径（已经走 `paths`），提交信息属于正文。
    */
   commandKey?: string | undefined;
+  /**
+   * 硬 ask 与否（T19 的那一格）：非工具门里只有"当面批准"这一类需要它，
+   * 而且 `makeRecord` 会拦 —— `decidedBy:'person'` 配 `bypassable:true` 直接抛。
+   */
+  bypassable?: boolean | undefined;
+  /** 结论来源（T41）：不写 = 策略表判过；`'person'` = 只有人的当面答复，本机没做策略判定 */
+  decidedBy?: AuditDecidedBy | undefined;
 }
 
 export interface AuditService {
@@ -126,6 +134,8 @@ export function createAuditService(deps: AuditServiceDeps): AuditService {
           executed: input.executed,
           asked: input.asked,
           ...(input.answer !== undefined ? { answer: input.answer } : {}),
+          ...(input.bypassable !== undefined ? { bypassable: input.bypassable } : {}),
+          ...(input.decidedBy !== undefined ? { decidedBy: input.decidedBy } : {}),
           ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
           reason: input.reason,
           args: summarize(input.args, input.commandKey),

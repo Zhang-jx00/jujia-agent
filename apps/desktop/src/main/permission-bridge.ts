@@ -1,6 +1,7 @@
 import {
   IPC,
   permissionExpiredSchema,
+  permissionRequestSchema,
   type PermissionDecisionPayload,
   type PermissionExpiredPayload,
   type StreamEvent,
@@ -57,7 +58,26 @@ export class PermissionBridge {
   /** 提供给 agent-core 的 resolver */
   readonly resolve: PermissionResolver = (req: PermissionRequest) =>
     new Promise<PermissionDecision | PermissionAnswer>((res) => {
-      const sent = this.deps.send(IPC.PERMISSION_REQUEST, req);
+      /**
+       * T59：形状在**出门之前**判一次。
+       *
+       * 渲染层入口（preload）本来就拿同一张 schema 过滤，**不合的整条丢弃** ——
+       * 判据只留在那一侧的后果是：弹窗不出现、桥在这里挂满 120 秒，
+       * 界面说"点了没反应"而事实是"契约漂移"。同一件事两种说法，正是本仓最忌的静默失败。
+       * 当场收尾按 `timeout`（**fail closed：这一步不执行**，与"没有可用窗口"同一档），
+       * 并把 zod 那句原因写进告警 —— 说的必须是"形状没过契约"，不是"用户没点"。
+       */
+      const parsed = permissionRequestSchema.safeParse(req);
+      if (!parsed.success) {
+        console.warn(
+          `[permission] 审批请求不合契约，未推给界面（这一步不会执行）：${req.toolName} (${req.id})` +
+            ` —— ${parsed.error.issues[0]?.message ?? '字段缺失'}`,
+        );
+        res('timeout');
+        return;
+      }
+      // 发**判过的那一份**：与 `expire()` 里 `payload.data` 同一个口径（一处判形状，一处发判过的）
+      const sent = this.deps.send(IPC.PERMISSION_REQUEST, parsed.data);
       if (!sent) {
         res('timeout');
         return;

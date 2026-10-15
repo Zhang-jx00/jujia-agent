@@ -678,6 +678,87 @@ describe('生命周期钩子接入（W5d）：钩子能拒绝、能改写、能�
     expect(res.outcome.content).toContain('失败后建议检查路径');
   });
 
+  /**
+   * T51：钩子**没跑成**必须在这条结果里说出口。
+   *
+   * 契约是 fail-open（钩子坏了不阻断，见 hooks/types.ts 要点 5），代价就是这一格必须可见。
+   * 场景是真的会出现的：那道"不许读 .env"的 PreToolUse 钩子的二进制被卸载 ⇒ 退出码非零 ⇒
+   * `blocked:false` ⇒ 工具照常执行，而修改前**没有任何地方说过"那道关今天没上班"**。
+   */
+  it('PreToolUse 钩子超时（不阻断）→ 工具照常执行，但结果里要说清"钩子没生效"（T51）', async () => {
+    const { runner } = fakeHooks({
+      PreToolUse: { diagnostics: ['拒绝读 .env 的钩子: 超时 5000ms 已被终止 —— **本次钩子没有生效**'] },
+    });
+    const target = join(root, 'a.txt');
+    await writeFile(target, 'hi', 'utf8');
+    const res = await runTool(readFileTool, { path: target }, ctx(), async () => 'deny', { hooks: runner });
+
+    expect(res.outcome.ok).toBe(true); // fail-open：没被阻断，这是契约
+    expect(res.outcome.content).toContain('[钩子诊断]');
+    expect(res.outcome.content).toContain('本次钩子没有生效');
+  });
+
+  it('钩子把这次拦下来时，同一趟的诊断也不许丢（拒绝与"另外那条钩子坏了"是两个事实）', async () => {
+    const { runner } = fakeHooks({
+      PreToolUse: {
+        blocked: true,
+        reason: '今天不许写文件',
+        diagnostics: ['另一个钩子: 输出的 JSON 不合法 —— 按失败处理'],
+      },
+    });
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'hook-diag-denied.txt'), content: 'x' },
+      ctx(),
+      async () => 'allow_once',
+      { hooks: runner },
+    );
+
+    expect(res.outcome.content).toContain('被钩子拒绝');
+    expect(res.outcome.content).toContain('[钩子诊断]');
+    expect(res.outcome.content).toContain('JSON 不合法');
+    await expect(stat(join(root, 'hook-diag-denied.txt'))).rejects.toThrow();
+  });
+
+  it('用户拒绝这一条提前返回的分支同样带出诊断（写在出口而不是每条 return 前 = 结构上不可能漏）', async () => {
+    const { runner } = fakeHooks({
+      PreToolUse: { diagnostics: ['审批钩子: 启动失败 ENOENT node'] },
+    });
+    const res = await runTool(
+      writeFileTool,
+      { path: join(root, 'hook-diag-user-deny.txt'), content: 'x' },
+      ctx(),
+      async () => 'deny',
+      { hooks: runner },
+    );
+
+    expect(res.outcome.content).toContain('[钩子诊断]');
+    expect(res.outcome.content).toContain('启动失败');
+  });
+
+  it('PostToolUse 的诊断与补充上下文各归各格（两条都要在，但说法只有一套）', async () => {
+    const { runner } = fakeHooks({
+      PostToolUse: { additionalContext: ['记得跑测试'], diagnostics: ['统计钩子: 输出超过 32768 字节，已截断'] },
+    });
+    const target = join(root, 'post.txt');
+    await writeFile(target, 'hello', 'utf8');
+    const res = await runTool(readFileTool, { path: target }, ctx(), async () => 'deny', { hooks: runner });
+
+    expect(res.outcome.content).toContain('[钩子补充上下文]');
+    expect(res.outcome.content).toContain('[钩子诊断]');
+    expect(res.outcome.content).toContain('已截断');
+  });
+
+  it('反向对照：钩子跑成了（没有诊断）→ 结果里不许出现"钩子诊断"这一格', async () => {
+    const { runner } = fakeHooks({ PreToolUse: { diagnostics: [] } });
+    const target = join(root, 'clean.txt');
+    await writeFile(target, 'hi', 'utf8');
+    const res = await runTool(readFileTool, { path: target }, ctx(), async () => 'deny', { hooks: runner });
+
+    expect(res.outcome.ok).toBe(true);
+    expect(res.outcome.content).not.toContain('钩子诊断');
+  });
+
   it('不传 hooks 时行为与从前完全一致（默认空运行器）', async () => {
     const res = await runTool(writeFileTool, { path: join(root, 'plain.txt'), content: 'ok' }, ctx(), async () => 'allow_once');
     expect(res.outcome.ok).toBe(true);

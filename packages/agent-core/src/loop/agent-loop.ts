@@ -99,6 +99,15 @@ export interface LoopResult {
    * 界面还在说 stop"的分叉。
    */
   truncated: TruncationReason | null;
+  /**
+   * 回合级钩子（UserPromptSubmit / Stop）这一轮吐出的诊断（T51）。
+   *
+   * 为什么单独一格而不是塞进 `error`：钩子没跑成**不是这一轮的失败**（契约是 fail-open，
+   * 回合照常完成），把它写成 error 等于让一次正常回答变成红色；而完全不写就等于
+   * "那道安全检查今天没上班"没人说。空数组是常态，非空才需要在界面上占一格。
+   * 设为必填而不是可选：将来给循环加新出口时，漏填会直接编译不过（与 `truncated` 同一条纪律）。
+   */
+  hookDiagnostics: string[];
   messages: ChatMessage[];
 }
 
@@ -183,11 +192,20 @@ export async function runAgentTurn(
 
   const hooks = deps.hooks ?? noopHookRunner;
   const hookCtx = { sessionId: deps.sessionId ?? 'unknown', cwd: deps.workspaceRoot };
+  /**
+   * 回合级钩子的诊断收集处（T51）。
+   * 两处钩子（UserPromptSubmit / Stop）都往这里交，出口只有一个 —— `LoopResult.hookDiagnostics`。
+   * 写在**外面**而不是各 return 前各拼一份：循环有七八条出口，逐条拼迟早漏一条，
+   * 而漏的那条正好是"钩子没跑成"这句话（与 `executor.ts` 的 sink 同一条纪律）。
+   */
+  const hookDiagnostics: string[] = [];
 
   // ---- 回合级钩子：UserPromptSubmit（发给模型之前） ----
   // 拦下时**一次模型调用都不发生**：这是"钩子能省钱"的地方，也是"钩子能拦住危险提示词"的地方。
   const promptText = params.promptText ?? lastUserText(messages);
   const submit = await userPromptSubmit(hooks, hookCtx, promptText);
+  // 拦下与没拦下都要收诊断：被拦下时"另外那条钩子坏了"仍是第二个事实
+  hookDiagnostics.push(...submit.diagnostics);
   if (submit.blocked) {
     return {
       branch: 'final',
@@ -197,6 +215,7 @@ export async function runAgentTurn(
       error: submit.reason ?? '这次提示词被钩子拦下了（钩子未给出理由）',
       // 一次模型调用都没发生，所以"没有截断"是**事实**而不是默认值
       truncated: null,
+      hookDiagnostics,
       messages,
     };
   }
@@ -218,7 +237,7 @@ export async function runAgentTurn(
     turn += 1;
 
     if (params.signal?.aborted) {
-      return { branch: 'final', text: fullText, turns: turn, reason: 'aborted', truncated, messages };
+      return { branch: 'final', text: fullText, turns: turn, reason: 'aborted', truncated, hookDiagnostics, messages };
     }
 
     // ---- 一轮模型调用（流式） ----
@@ -261,7 +280,7 @@ export async function runAgentTurn(
     }
 
     if (aborted) {
-      return { branch: 'final', text: fullText, turns: turn, reason: 'aborted', truncated, messages };
+      return { branch: 'final', text: fullText, turns: turn, reason: 'aborted', truncated, hookDiagnostics, messages };
     }
     if (streamError !== null) {
       return {
@@ -271,6 +290,7 @@ export async function runAgentTurn(
         reason: 'error',
         error: streamError,
         truncated,
+        hookDiagnostics,
         messages,
       };
     }
@@ -281,6 +301,8 @@ export async function runAgentTurn(
       // 钩子可以用 continue:true 要求"再走一步"（例如"你还没跑测试，别急着收工"）。
       // 必须有次数上限：钩子写错（永远返回 continue:true）就成了死循环 —— 这是钩子能拖垮会话的地方。
       const stop = await stopTurn(hooks, hookCtx, turnText);
+      // 续走与收工都先收诊断：多次 Stop（上限 3 次）的诊断逐次累加，一条都不覆盖
+      hookDiagnostics.push(...stop.diagnostics);
       if (stop.continueTurn && stopContinues < MAX_STOP_CONTINUATIONS) {
         stopContinues += 1;
         messages.push({ role: 'assistant', content: turnText });
@@ -294,7 +316,7 @@ export async function runAgentTurn(
 
       messages.push({ role: 'assistant', content: turnText });
       params.emit({ type: 'turn_end', turn, branch: 'final' });
-      return { branch: 'final', text: fullText, turns: turn, reason: 'final', truncated, messages };
+      return { branch: 'final', text: fullText, turns: turn, reason: 'final', truncated, hookDiagnostics, messages };
     }
 
     // ---- 分支三：handoff（模型请求移交） ----
@@ -342,7 +364,7 @@ export async function runAgentTurn(
         });
       }
       params.emit({ type: 'turn_end', turn, branch: 'handoff' });
-      return { branch: 'handoff', text: fullText, turns: turn, reason: 'handoff', truncated, messages };
+      return { branch: 'handoff', text: fullText, turns: turn, reason: 'handoff', truncated, hookDiagnostics, messages };
     }
 
     // ---- 分支二：tool（串行执行后回传结果） ----
@@ -387,6 +409,7 @@ export async function runAgentTurn(
     reason: 'max_turns',
     error: `已达到最大迭代次数（${maxTurns}），已停止。可继续输入以接着处理。`,
     truncated,
+    hookDiagnostics,
     messages,
   };
 }

@@ -1,6 +1,7 @@
 import { ToolError, type StoredTool, type ToolContext, type ToolKind, type ToolOutcome } from './types';
 import { decideGate, type GateDecision, type PermissionMode } from '../permissions/policy';
-import { noopHookRunner, type HookRunner } from '../hooks/types';
+import { noopHookRunner, type HookRunParams, type HookRunResult, type HookRunner } from '../hooks/types';
+import { appendHookDiagnostics } from '../hooks/notice';
 import type { PermissionRule } from '../permissions/rules';
 import type { AuditAnswer, GateAuditInfo } from '../audit/record';
 
@@ -105,6 +106,13 @@ interface AuditSink {
   executed: boolean;
   /** 被钩子拦下时的理由（覆盖 gate 的结论 —— 判定确实是 ask，但做事的是钩子说"不"） */
   hookDeny?: string;
+  /**
+   * 沿途每一次钩子调用吐出的诊断（T51）。
+   *
+   * 放在同一个 sink 里而不是让每条分支自己拼：钩子契约是 **fail-open**（见 hooks/types.ts 要点 5），
+   * "没阻断"不等于"跑成了"，而这句话一旦漏传，用户看到的就是"那道安全钩子在上班"的错觉。
+   */
+  diagnostics: string[];
 }
 
 export interface RunToolResult {
@@ -135,9 +143,20 @@ export async function runTool(
   opts: RunToolOptions = {},
 ): Promise<RunToolResult> {
   const started = Date.now();
-  const sink: AuditSink = { asked: false, executed: false };
+  const sink: AuditSink = { asked: false, executed: false, diagnostics: [] };
   try {
-    return await runToolCore(tool, rawArgsInput, ctx, resolver, opts, sink);
+    const res = await runToolCore(tool, rawArgsInput, ctx, resolver, opts, sink);
+    // T51：诊断只有一个去处 —— **结果本身**。模型与工具卡读同一份话，不新开第二条通道
+    //（第二条"怎么说失败"迟早与第一条说法不一致，而那正是本项目登记过多次的分叉面）。
+    // 写在这一层的返回处而不是 runToolCore 的每条 return 前：那里有七八条分支，迟早漏一条。
+    if (sink.diagnostics.length === 0) return res;
+    return {
+      ...res,
+      outcome: {
+        ...res.outcome,
+        content: appendHookDiagnostics(res.outcome.content, sink.diagnostics),
+      },
+    };
   } finally {
     const gate = sink.gate;
     // 参数校验就没过的调用**不进审计**：那时还没有任何权限判定，记进去等于凭空造一条判定。
@@ -160,6 +179,24 @@ export async function runTool(
       });
     }
   }
+}
+
+/**
+ * T51：把**每一次**钩子调用吐出的诊断收进 sink —— 包一层，而不是在每个调用点后各写一行。
+ *
+ * 执行器里现在有五处 `hooks.run`（PreToolUse / PermissionRequest / Post / PostToolUseFailure，
+ * 将来还会加第五、第六处）。逐点写的结局是"新加一处忘了写"，而忘的正好是
+ * 「那道钩子今天没跑成」这句话本身 —— fail-open 的契约下，漏掉这一句就等于界面在替它撒谎。
+ * 与审计同一条纪律：**收口在一处，结构上不可能漏**（见 `runTool` 的 finally）。
+ */
+function collectingHooks(real: HookRunner, sink: AuditSink): HookRunner {
+  return {
+    async run(params: HookRunParams): Promise<HookRunResult> {
+      const res = await real.run(params);
+      if (res.diagnostics.length > 0) sink.diagnostics.push(...res.diagnostics);
+      return res;
+    },
+  };
 }
 
 async function runToolCore(
@@ -241,7 +278,7 @@ async function runToolCore(
   // 3) 生命周期钩子：PreToolUse（在权限门**之前**）
   //    放在前面是有意的：钩子可以拒绝（连问都不用问），也可以改写参数
   //    —— 改写后的参数必须**重新过一遍 tool.parse**，否则钩子就成了绕过校验的后门。
-  const hooks = opts.hooks ?? noopHookRunner;
+  const hooks = collectingHooks(opts.hooks ?? noopHookRunner, sink);
   const hookCtx = {
     sessionId: opts.sessionId ?? 'manual',
     cwd: ctx.workspaceRoot,

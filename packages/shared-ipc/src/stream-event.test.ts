@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { TOOL_OUTPUT_TAIL_CHARS, streamEventSchema } from './index';
+import {
+  DONE_END_REASONS,
+  PERMISSION_EXPIRED_REASONS,
+  TOOL_OUTPUT_TAIL_CHARS,
+  permissionExpiredSchema,
+  streamEventSchema,
+} from './index';
 
 /**
  * 流式事件契约（R8.7 加了一类：`tool_output`）。
@@ -63,5 +69,40 @@ describe('streamEventSchema · tool_output', () => {
   it('未知类型仍然一律拒（不给"以后随便加一类事件"留松口子）', () => {
     const r = streamEventSchema.safeParse({ ...base, type: 'tool_progress', tail: 'x' });
     expect(r.success).toBe(false);
+  });
+});
+
+/**
+ * T58（终端与外部件批 · 2026-10-15）：**契约里有、运行期永不产生**的枚举成员要清掉。
+ *
+ * 为什么要拦这个方向：`done.reason` 曾声明 `tool_calls`（provider 那一层确实会产，
+ * 但它止步于循环，从来不出主进程），而渲染层有一条**活分支**在读它 ——
+ * 于是那句话今天永远不显示，而下一个读代码的人会以为"工具调用处结束"这条路径是通的。
+ * 界面读得到、上游不发的成员，比缺一个成员更坏：它把注意力骗到一条不存在的路径上。
+ *
+ * 同形第二条：`permissionExpired.reason` 曾声明 `cancelled`，桥里只发 `timeout` 与
+ * `window-closed`，而弹窗那侧写的是 `reason === 'timeout' ? A : B` —— 若将来真补上 cancelled，
+ * 它会被说成"窗口已关闭"。清掉成员之后，界面那张说明表改成穷举 `Record`：**新增即编译不过**。
+ */
+describe('结束原因的枚举里不许有"运行期永不产生"的成员（T58）', () => {
+  it('done 不再收 tool_calls：主进程从未发过它', () => {
+    expect(streamEventSchema.safeParse({ ...base, type: 'done', reason: 'tool_calls' }).success).toBe(false);
+  });
+
+  it('契约成员清单就是那五个，一个不多（新增成员必须同时改主进程与界面那张表）', () => {
+    expect([...DONE_END_REASONS].sort()).toEqual(
+      ['aborted', 'content_filter', 'error', 'length', 'stop'].sort(),
+    );
+  });
+
+  it('审批作废原因不再收 cancelled：桥里只有超时与窗口关闭两条出口', () => {
+    expect(permissionExpiredSchema.safeParse({ id: 'p-1', reason: 'cancelled' }).success).toBe(false);
+    expect([...PERMISSION_EXPIRED_REASONS].sort()).toEqual(['timeout', 'window-closed']);
+  });
+
+  it('留下的成员照样收（清死分支不许顺手把活的路径断了）', () => {
+    expect(streamEventSchema.safeParse({ ...base, type: 'done', reason: 'stop' }).success).toBe(true);
+    expect(streamEventSchema.safeParse({ ...base, type: 'done', reason: 'content_filter' }).success).toBe(true);
+    expect(permissionExpiredSchema.safeParse({ id: 'p-1', reason: 'window-closed' }).success).toBe(true);
   });
 });

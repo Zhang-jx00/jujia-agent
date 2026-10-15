@@ -158,6 +158,52 @@ describe('createAuditService', () => {
     expect(asText).not.toContain('这条正文不该出现在账上');
   });
 
+  /**
+   * T41：内置终端这一类**没有策略判定**的门，走同一个出口进账（`decidedBy:'person'`）。
+   *
+   * 出口仍然只有一处：终端不再另写一份 JSON，只是多标两格（来源 + 硬 ask）。
+   * 反过来说，这一条也在拦"顺手漏标" —— 没标 `decidedBy` 的终端记录会看起来像策略表判过的，
+   * 而用户在规则页写的 `terminal` 规则对它根本无效（那是 T41 登记时的原话）。
+   */
+  it('当面批准那一类进账时要带上自己的来源，且与策略表那类分得开', async () => {
+    const { svc } = service();
+    await svc.recordGate({
+      subject: 'terminal_start',
+      outcome: 'ask',
+      asked: true,
+      answer: 'allow_once',
+      bypassable: false,
+      decidedBy: 'person',
+      reason: '内置终端：每次新起会话都当面问（这一步不查策略表）',
+      args: { cwd: 'D:\\ws', cols: 80, rows: 24 },
+      sessionId: 'manual',
+      executed: true,
+    });
+    const rec = (await svc.tail(10)).records[0];
+
+    expect(rec?.decidedBy).toBe('person');
+    expect(rec?.kind).toBe('gate');
+    expect(rec?.bypassable).toBe(false);
+    expect(rec?.executed).toBe(true);
+  });
+
+  it('反向对照：没标来源的门不写这一格（旧账形状不许被顺手改掉）', async () => {
+    const { svc } = service();
+    await svc.recordGate({
+      subject: 'git_commit',
+      outcome: 'ask',
+      asked: true,
+      answer: 'allow_once',
+      reason: '提交会写入仓库历史，需人工确认',
+      args: { action: 'commit' },
+      sessionId: 'manual',
+      executed: true,
+    });
+    const rec = (await svc.tail(10)).records[0];
+
+    expect('decidedBy' in (rec ?? {})).toBe(false);
+  });
+
   it('导出：新路径写得出、已存在的路径拒绝覆盖', async () => {
     const { svc } = service();
     await svc.recordTool(info());

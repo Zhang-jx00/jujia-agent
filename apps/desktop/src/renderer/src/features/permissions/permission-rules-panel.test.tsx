@@ -72,6 +72,49 @@ describe('权限页 · 命令前缀', () => {
     expect((await screen.findAllByText(/rm -rf/)).length).toBeGreaterThan(0);
   });
 
+  /**
+   * T52（终端与外部件批 · 2026-10-15）：**这一格管多大范围，界面要自己说出口**。
+   *
+   * 前缀按字面匹配命令行的开头，所以 `deny git push` 挡不住 `git.exe push --force`、
+   * `"git" push`、`C:\Program Files\Git\cmd\git.exe push` —— 一次改写形态就绕过去了。
+   * 收紧匹配（按 argv 逐词比对）**改的是"用户写下的承诺到底算不算数"**，属停牌①，等所有者定；
+   * 定之前界面上不许留着"写了 deny 就拦得住"的错觉。
+   * 判据落在**渲染出来的文本**上而不是源码上：这句话的作用是让正在写规则的人看见，
+   * 藏在注释里等于没说（复看 084 第 4 条的同一形状）。
+   */
+  it('说得出"前缀可能被改写形态绕过"，并给出具体的形态（不说抽象的"可能"）', async () => {
+    mount([view({ argPrefix: 'git push' })]);
+    await screen.findByText('git push');
+    const body = document.body.textContent ?? '';
+
+    expect(body).toContain('改写');
+    expect(body).toContain('git.exe push');
+    expect(body).toContain('不生效');
+    // 说的是"这条规则的边界"，不是"整个门没了"：组合符那一档今天仍然照常问一次
+    expect(body).toContain('还是会问你');
+  });
+
+  /**
+   * T41（终端与外部件批 · 2026-10-15）：内置终端**现在入账了**，但记的是另一类账。
+   *
+   * 这一格的话以前写的是"内置终端不在本账里"。本轮把它的形状定下来（`decidedBy:'person'` =
+   * 没有策略判定、只有当面答复），账上多了一行，可这句话不能跟着翻成"都覆盖了"——
+   * 用户在规则页写的 `deny terminal` **今天仍然拦不住**终端：它压根不查那张表。
+   * 收紧到走策略判定属停牌①（改的是这台机器的门怎么判），所以界面要说的是"记了账 ≠ 管得住"。
+   */
+  it('覆盖范围那一格：终端已入账，但说清"记了账不等于规则管得住它"', async () => {
+    mount([]);
+    await screen.findByText('执行审计（今天）');
+    const body = document.body.textContent ?? '';
+
+    expect(body).toContain('内置终端');
+    // 旧的那句话必须绝迹：账上现在真有一行，还说"不在本账里"就是把事实说反
+    expect(body).not.toContain('不在本账里');
+    // 而这一句必须留下 —— 它说的是"规则对它无效"这件今天仍然成立的事
+    expect(body).toContain('对它无效');
+    expect(body).toContain('当面问');
+  });
+
   it('没填前缀的规则不会凭空长出一格「前缀 」', async () => {
     mount([view({ pattern: 'mcp__*', argPrefix: null })]);
     await screen.findByText('mcp__*');

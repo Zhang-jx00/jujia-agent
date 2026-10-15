@@ -143,3 +143,49 @@ describe('T23-④：新通道要真的接上线', () => {
     expect(raw).toContain('terminal.disposeAll();');
   });
 });
+
+/**
+ * T41（终端与外部件批 · 2026-10-15）：内置终端进执行审计。
+ *
+ * 形状是这一轮要定的东西（登记原文："纳入审计需要先定它的判定形状"）：
+ * 它**不走 `decideGate`**，所以账上不能伪装成一份策略判定 —— 新增一类
+ * `decidedBy:'person'`（没有策略判定、只有人的当面答复），出口仍然只有 `recordGate` 那一处。
+ *
+ * 覆盖边界（如实）：`decidedBy` 那三条判据（outcome 必须 ask / 必须真问过 / 不许可压）
+ * 由 `audit/record.test.ts` 用真抛错守住；`recordGate` 透传由 `audit-service.test.ts` 守住；
+ * 这一格只钉**接线形态** —— 因为 `terminal-service` 要 import node-pty，vitest 里起不来真 PTY，
+ * 而"账上真有一行 terminal_start"由 e2e 的审计那一步（GATE_SUBJECTS）用真界面断言。
+ */
+describe('T41：内置终端把每一次当面问记进账', () => {
+  it('记账出口在三个结局分支上各一次：被拒/超时、启动失败、真的起了', () => {
+    // 计数而不是逐条点名：新增一条提前返回的分支忘了记 = 这里直接红
+    // （与 `runTool` 的 finally、`auditedGateRun` 同一条纪律：写在出口，别写在分支里）
+    const calls = service.match(/this\.recordGate\(/g) ?? [];
+    expect(calls.length, `recordGate 出现 ${String(calls.length)} 次，应当是 3 次`).toBe(3);
+  });
+
+  it('必须先问过才记账：接回已有会话（adopt）与超出上限（refuse）一个新进程都没起，不配有一条账', () => {
+    const asked = service.indexOf('await this.permission(');
+    const firstRecord = service.indexOf('this.recordGate(');
+    expect(asked).toBeGreaterThan(-1);
+    expect(firstRecord).toBeGreaterThan(asked);
+    // 上限拒绝那条分支在 permission **之前** return：它后面不许出现记账
+    const refuse = service.indexOf("decision.kind === 'refuse'");
+    expect(refuse).toBeGreaterThan(-1);
+    expect(refuse).toBeLessThan(asked);
+  });
+
+  it('接线层把这一类标成"没有策略判定"：outcome=ask + decidedBy=person + 压不掉', () => {
+    expect(ipcTerminal).toContain("subject: 'terminal_start'");
+    expect(ipcTerminal).toContain("outcome: 'ask'");
+    expect(ipcTerminal).toContain("decidedBy: 'person'");
+    expect(ipcTerminal).toContain('bypassable: false');
+    // 理由那句话只有一处定义（账本与规则页说的是同一件事）
+    expect(ipcTerminal).toContain('TERMINAL_GATE_REASON');
+  });
+
+  it('记的是"问过什么"而不是现编一份参数：cwd 与尺寸走当面问那一份 args', () => {
+    expect(service).toMatch(/const gateArgs = \{ cwd: params\.workspaceRoot/);
+    expect(service).toMatch(/args: gateArgs/);
+  });
+});
