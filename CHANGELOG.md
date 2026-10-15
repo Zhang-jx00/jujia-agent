@@ -77,9 +77,13 @@
    现扫三个脚本的 `const fail = ...` 定义体，出现 `process.exit` 即红（剥注释后判，带定位器失效下限），
    注入自检第 **33** 处把它注回旧形状验证会红。
 
-**验证方式**：typecheck 0 · lint 0 · 单测 **2085 通过 / 1 跳过（140 文件）**（本轮 +3 例，全在
-`headless-shoot-wiring` 那条源锁里）· `check:docs` 0（**23 条**，本轮 +1）· 注入自检 0（**30 处全拦**）·
-`npm run screenshots` 退出码 0（四张 1280×842、38–67KB、清单与版本对齐）·
+**验证方式**：typecheck 0 · lint 0 · 单测 **2087 通过 / 1 跳过（140 文件）**（本轮 +5 例：
+`headless-shoot-wiring` 源锁 3 例 + `security.test.ts` 的 offscreen 两侧判据 2 例）· `check:docs` 0（**25 条**，本轮 +3）·
+注入自检 0（**34 处全拦**，本轮 +6）· e2e 0（**65 步**，本轮未加步骤）· smoke 0 ·
+`npm run screenshots` 退出码 0（四张 1280×842、清单与版本对齐、`dirtyAtCapture:false`）·
+**`verify:pack` 本轮"未能运行"**：`dist:dir` 在 `release\win-unpacked.tmp\resources\default_app.asar` 上
+`EBUSY`，此刻 `tasklist` 里没有任何 `electron.exe` / `JujiaAgent.exe` ⇒ **归属不明、照旧不杀**（R29 的纪律不变）。
+本轮同时把 R29 那句"换输出目录也绕不开"**证伪并改口**（`release/shoot` 一次成功），正解登记为 T67 交 R35。
 其余门禁与变异见 `docs/PROGRESS.md` 规整19 复跑块。
 
 **回退点**：`v0.90.0-加固19`（上一版；本轮新增的是脚本 + 一条护栏 + 一个窗口开关，回退不留数据痕迹）。
