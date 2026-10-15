@@ -38,7 +38,18 @@ export function assertBaselineConstantIntact(): void {
  * 说明：Electron 44 已移除 `webContents.getLastWebPreferences()`，
  * 因此改为「传参前断言配置对象」的方式自检——纯函数、可单测、不依赖已废弃 API。
  */
-export function secureWebPreferences(preload: string): WebPreferences {
+export function secureWebPreferences(
+  preload: string,
+  /**
+   * 唯一的可选位（R32 展示页截图）：`offscreen` 让窗口**不进屏幕也照常画**。
+   *
+   * 为什么留这一个口子而不是让调用方自己拼 `webPreferences`：这个函数是**安全基线的出口**，
+   * 拼一份出来的那份绕过 `assertSecureWebPreferences`。所以扩展只走"加一个具名选项"这条路，
+   * 而且**只给 true 或不给这个键** —— `offscreen: options.offscreen` 那种写法会把 `undefined`
+   * 塞进对象（`exactOptionalPropertyTypes` 下编译不过，但先拦住写法比等编译报错更早）。
+   */
+  options: { offscreen?: boolean } = {},
+): WebPreferences {
   return {
     contextIsolation: SECURITY_BASELINE.contextIsolation,
     sandbox: SECURITY_BASELINE.sandbox,
@@ -46,6 +57,7 @@ export function secureWebPreferences(preload: string): WebPreferences {
     webSecurity: SECURITY_BASELINE.webSecurity,
     webviewTag: SECURITY_BASELINE.webviewTag,
     preload,
+    ...(options.offscreen ? { offscreen: true } : {}),
   };
 }
 

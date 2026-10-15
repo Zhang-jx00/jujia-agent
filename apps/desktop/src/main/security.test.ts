@@ -6,6 +6,7 @@ import {
   isAllowedNavigation,
   isTrustedSenderUrl,
   safeProtocol,
+  secureWebPreferences,
 } from './security';
 
 const preload = 'C:/app/out/preload/index.js';
@@ -58,6 +59,27 @@ describe('assertSecureWebPreferences（安全基线 fail-closed）', () => {
     expect(() => assertSecureWebPreferences({ ...base, ...override } as never)).toThrow(
       /\[security\]/,
     );
+  });
+});
+
+describe('secureWebPreferences 的唯一可选位 offscreen（R32 展示页截图）', () => {
+  /**
+   * 这一位是"没人看也要画"的开关：截图模式靠它，日常窗口**绝不允许**带上它
+   * （带上的症状是双击图标什么都没发生）。所以两侧都要锁：给了才有、没给就整个键都不存在。
+   *
+   * **红证说明（复核 089）**：这两条是 R32 代码写完、给变异 M310 做首校时补的断言 ——
+   * 补的判据必须当场能红，否则等于没有。证据 = M310 把那一行 spread 摘掉之后这两条一起失败
+   * （不是"看着绿"），详见 review/REVIEW-LOG.md 复核 089 的变异首校段。
+   */
+  it('显式要 offscreen 才有这一位，且不破坏安全基线', () => {
+    const wp = secureWebPreferences(preload, { offscreen: true });
+    expect(wp.offscreen).toBe(true);
+    expect(() => assertSecureWebPreferences(wp)).not.toThrow();
+  });
+
+  it('不给选项 / 给 false 时，这一位整个不存在（日常窗口不 offscreen）', () => {
+    expect('offscreen' in secureWebPreferences(preload)).toBe(false);
+    expect('offscreen' in secureWebPreferences(preload, { offscreen: false })).toBe(false);
   });
 });
 

@@ -1487,6 +1487,146 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 23. 展示页截图与清单一致（R32 立 · 2026-10-15）
+ *
+ * 为什么立它：README 上的截图是**对外的声称**（"这就是这个应用长这样"），而它比任何文档都容易过期 ——
+ * R12 手工拍过一次之后，仓里既没有截图脚本也没有任何判据盯着，结果两张图的 mtime 停在 v0.75.0，
+ * 而版本已经走到 v0.90.x。像素里的漂移 `check:docs` 第 9/9b 条看不见（那是查文本的本机路径），
+ * 所以这一步要立的是**账**：图、清单、README 三处必须互相对得上。
+ *
+ * 判据取三条**结构关系**，刻意不取"图必须是最新版"：
+ * ① 清单列出的每张图都在盘上、且不是空白图（字节下限）；
+ * ② 清单与 README **双向对账**（拍了没人引用 = 白拍；引用了清单没有 = 图与账分家）；
+ * ③ README 的图注必须写着清单记录的那个版本（换了图没换字、换了字没换图都会红）。
+ * 为什么不判"图注版本 == package.json 版本"：那是**每轮必然红**的锁（发版比截图勤得多），
+ * 而"天生红的锁教人无视红灯"是本仓的老账 —— 图注说清"这是哪一版的产物 + 怎么重拍"就是诚实。
+ * ------------------------------------------------------------------ */
+{
+  const MANIFEST = 'docs/screenshots/manifest.json';
+  const bad = [];
+  let listed = 0;
+  if (!exists(MANIFEST)) {
+    bad.push('缺 docs/screenshots/manifest.json —— 展示页的图说不出"哪一版、怎么重拍"，等于不可复跑');
+  } else {
+    let mf = null;
+    try {
+      mf = JSON.parse(read(MANIFEST));
+    } catch (err) {
+      bad.push(`清单不是合法 JSON：${err instanceof Error ? err.message : String(err)}`);
+    }
+    const readme = read('README.md');
+    if (mf !== null) {
+      for (const key of ['version', 'commit', 'capturedAt', 'howToReshoot', 'dirtyAtCapture']) {
+        if (mf[key] === undefined) bad.push(`清单缺字段 ${key}（对外声称的出处要完整）`);
+      }
+      const files = (mf.shots ?? []).map((s) => s.file);
+      listed = files.length;
+      // 防失焦：少于四张就是清单或定位器出了问题（本轮起展示页固定四页：概览/对话/画布/文件）
+      if (listed < 4) bad.push(`清单只列了 ${String(listed)} 张图（少于 4 张）`);
+      for (const f of files) {
+        const rel = `docs/screenshots/${f}`;
+        if (!exists(rel)) {
+          bad.push(`清单里的 ${f} 不在盘上`);
+          continue;
+        }
+        const bytes = readFileSync(join(repoRoot, rel)).length;
+        if (bytes < 20_000) bad.push(`${f} 只有 ${String(bytes)} 字节 —— 空白图或截错区域`);
+        if (!readme.includes(rel)) bad.push(`${f} 在清单里但 README 没引用（拍了没人看的图）`);
+      }
+      const referenced = [...readme.matchAll(/docs\/screenshots\/([A-Za-z0-9_-]+\.png)/g)].map((m) => m[1]);
+      for (const f of referenced) {
+        if (!files.includes(f)) bad.push(`README 引用了 ${f}，清单里却没有（图与账分家）`);
+      }
+      if (mf.version !== undefined && !readme.includes(`v${String(mf.version)}`)) {
+        bad.push(`README 的图注没写清单记录的版本 v${String(mf.version)}（图换了字没换，或反之）`);
+      }
+    }
+  }
+  report(
+    `展示页截图与清单一致（现扫 ${String(listed)} 张；对外展示的图必须说得出哪一版、怎么重拍）`,
+    bad.length === 0,
+    bad.join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 24. e2e 的"批准之后读磁盘"必须先等到界面回执（T64 · R32 立 · 2026-10-15）
+ *
+ * 立闸的起因是真实的红灯：`npm run e2e` 在第 25 步报"批准了却没写进磁盘"，而盘上两秒后
+ * 就有那条命令 —— **弹窗 detached 只代表主进程拿到了答案**，`hooks.save()` 的写盘还在后面。
+ * 这类"断言抢在真值前面"的洞不会让任何测试变红、只会让门禁随机红，然后被人当成 flake 重跑；
+ * 重跑能过就更没人去修 —— 所以把它变成机械判据（老规矩：写进禁忌表的规矩要变成机器判据，否则照样复发）。
+ *
+ * 判据形状：在「钩子配置」那一步里，`clickDialog*(...)` 之后、任何一条 `waitText*(...)` 之前
+ * 出现读盘（`hooksOnDisk()` / `readHooksDiskUntil(`）就是违规 —— 因果顺序必须写死在脚本形状里。
+ * **只看代码行，注释先剥掉**：这段的说明文字里就写着 `clickDialog2` 和 `waitText2('已保存')`，
+ * 不剥注释的话守卫会被自己的解释骗红（T58 撞过同一件事）。
+ * ------------------------------------------------------------------ */
+
+{
+  const rel = 'apps/desktop/scripts/e2e-ui.mjs';
+  const src = read(rel);
+  const bad = [];
+  const anchor = src.indexOf("step('钩子配置：改一次问一次");
+  if (anchor < 0) {
+    bad.push('定位器失效：e2e 脚本里找不到「钩子配置：改一次问一次」那一步 —— 改名了就去同步这条守卫');
+  } else {
+    const nextStep = src.indexOf('\n  step(', anchor + 10);
+    const block = src.slice(anchor, nextStep < 0 ? src.length : nextStep);
+    let inBlockComment = false;
+    const code = [];
+    for (const line of block.split('\n')) {
+      const t = line.trim();
+      if (inBlockComment) {
+        code.push('');
+        if (t.includes('*/')) inBlockComment = false;
+        continue;
+      }
+      if (t.startsWith('/*')) {
+        code.push('');
+        if (!t.includes('*/')) inBlockComment = true;
+        continue;
+      }
+      code.push(t.startsWith('//') || t.startsWith('*') ? '' : line);
+    }
+    let armedAt = -1;
+    let reads = 0;
+    let receipts = 0;
+    /* 三种形状都要判，所以**不按"命中即 return"写**（第一版就是那样写的，留下两个洞）：
+     * ① 一行里既有 `clickDialog*` 又读盘 ⇒ 抢跑（弹窗刚消失就读）；
+     * ② 一行里既有界面回执又读盘 ⇒ **合法**（JS 从左往右算，先 await 到回执再读）；
+     * ③ 决定之后、回执之前的独立读盘行 ⇒ 抢跑。
+     * 换句话说"同一行有回执"可以豁免这一行的读盘，"同一行有点击"绝不能豁免。
+     */
+    code.forEach((line, i) => {
+      const hasClick = /clickDialog\w*\(/.test(line);
+      const hasReceipt = /waitText\w*\(/.test(line);
+      const hasRead = /hooksOnDisk\(\)|readHooksDiskUntil\(/.test(line);
+      if (hasRead) {
+        reads += 1;
+        if (!hasReceipt && (hasClick || armedAt >= 0)) {
+          bad.push(`第 ${String(i + 1)} 行（步内相对行号）在弹窗决定后、任何界面回执前就读了盘：${line.trim().slice(0, 90)}`);
+        }
+      }
+      if (hasClick && armedAt < 0) armedAt = i + 1;
+      if (hasReceipt) {
+        armedAt = -1;
+        receipts += 1;
+      }
+    });
+    // 防失焦下限：守卫自己失效比不装更坏 —— 步里只剩一次读盘 / 一条回执都没等到，说明扫描没走到该走的地方
+    if (reads < 2) bad.push(`这一步只扫到 ${String(reads)} 处读盘断言（少于 2 处：拒绝与批准各一处）—— 扫描或脚本形状变了`);
+    if (receipts < 2) bad.push(`这一步只扫到 ${String(receipts)} 条界面回执（少于 2 条："未改动"与"已保存"）—— 回执等不到就谈不上"先等再做"`);
+  }
+  report(
+    `e2e 的磁盘断言不抢跑（批准/拒绝之后先等界面回执再读盘；${rel} 的因果顺序）`,
+    bad.length === 0,
+    `弹窗 detached 只代表主进程拿到答案，写盘还在后面 —— 先等那一句回执（或那次操作自身的 await）再读盘。\n     ` +
+      bad.join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

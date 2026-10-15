@@ -42,6 +42,16 @@ const logger = createLogger(logs, { minLevel: resolveDefaultMinLevel(process.env
 setPersistLogger(logger);
 
 const isSmoke = process.argv.includes('--smoke');
+/**
+ * 无头 = smoke 或 shoot（R32 展示页截图）。
+ *
+ * 为什么要并进同一个开关而不是再写一条 `if`：这两件事的**后果完全一样** —— 窗口不弹到用户脸上，
+ * 但渲染层照常画（`show:false` + `ready-to-show` 之后 `capturePage` 拿得到内容）。
+ * 分成两条 `if (!isSmoke) ... else if (isShoot) ...` 的结局是将来加第三种模式时只改一边，
+ * 于是"截图脚本把窗口弹出来"这种退化会在某一天悄悄发生（源锁 `headless-shoot-wiring` 就盯这个）。
+ */
+const isShoot = process.argv.includes('--shoot');
+const isHeadless = isSmoke || isShoot;
 /** 启动性能实测模式（M18）：打印启动时间线后退出，用于建立可回归的性能预算 */
 const isPerf = process.argv.includes('--perf');
 
@@ -69,7 +79,18 @@ function emitStream(event: StreamEvent): void {
 }
 
 function createMainWindow(): BrowserWindow {
-  const webPreferences = secureWebPreferences(join(__dirname, '../preload/index.js'));
+  /**
+   * 展示页截图（R32）走 **offscreen 渲染**，而不是"建个正常窗口再藏起来"：
+   * 隐藏窗口不保证每一帧都画，抓到的像素可能是黑的或旧的 ——
+   * 而"截图看起来成功了、内容是黑的"正是这条门禁最没用的失败方式。
+   * `offscreen` 是 Electron 给"没人看也要画"的官方路径（在 44 的类型里它**只在 `WebPreferences` 上**，
+   * 写在 BrowserWindow 顶层会直接 TS2353 —— 本轮实测撞过一次）。
+   *
+   * **必须经过 `secureWebPreferences` 这个出口**：那正是安全基线的 fail-closed 断言所在，
+   * 在这里手拼一份 `webPreferences` 就等于绕过它（本仓的老账：基线被顺手复制粘贴掉）。
+   * 只有 shoot 模式开 —— 日常窗口要是也 offscreen，症状是"双击图标什么都没发生"。
+   */
+  const webPreferences = secureWebPreferences(join(__dirname, '../preload/index.js'), { offscreen: isShoot });
   assertSecureWebPreferences(webPreferences);
 
   const win = new BrowserWindow({
@@ -101,7 +122,7 @@ function createMainWindow(): BrowserWindow {
   });
 
   win.once('ready-to-show', () => {
-    if (!isSmoke) win.show();
+    if (!isHeadless) win.show();
   });
 
   win.webContents.on('render-process-gone', (_e, details) => {

@@ -29,6 +29,7 @@
     "license:check": "node apps/desktop/scripts/license-check.mjs",
     "e2e": "npm run e2e --workspace @jujia/desktop",
     "app": "npm run app --workspace @jujia/desktop",
+    "screenshots": "npm run screenshots --workspace @jujia/desktop",
     "dist": "npm run dist --workspace @jujia/desktop",
     "verify:pack": "npm run dist:dir --workspace @jujia/desktop && npm run verify:pack:drive --workspace @jujia/desktop",
     "mut": "node scripts/mutation-check.mjs",

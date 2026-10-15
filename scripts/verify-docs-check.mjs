@@ -390,6 +390,47 @@ const cases = [
     to: '| 轮 | 任务 | 停牌点 / 备注',
     expect: '表格行自封闭',
   },
+  {
+    // 第 23 条（展示页截图与清单 · R32 立）：清单里列一张不存在的图 ⇒ "图与账分家"。
+    // 为什么挑这个形状：截图最容易坏的方式不是"拍错"，而是**图被删了 / 换了名字而 README 还在引**，
+    // 读者看到的是裂图的灰框，而门禁全绿。
+    name: '清单列了一张盘上不存在的截图',
+    file: 'docs/screenshots/manifest.json',
+    from: '"file": "overview.png"',
+    to: '"file": "no-such-shot-xyz.png"',
+    expect: '展示页截图与清单一致',
+  },
+  {
+    // 第 23 条的另一半：图注与清单的版本必须互相对得上。
+    // 锚点挑 `"version": "` 这个**键**而不是那个版本号值 —— 值每轮重拍都会变，
+    // 写死值的用例下一轮就会变成"注入失败"（本仓的规矩：注入失败算红灯，等于给自己埋雷）。
+    name: '清单版本号与 README 图注脱钩（图换了字没换）',
+    file: 'docs/screenshots/manifest.json',
+    from: '"version": "',
+    to: '"version": "9.9.9-',
+    expect: '展示页截图与清单一致',
+  },
+  {
+    // 第 24 条（磁盘断言不抢跑 · T64 · R32 立）：把上一轮那个**真实红过的形状**注回去 ——
+    // 弹窗决定之后、界面回执之前先读一次盘。
+    // 挑这一条做用例的理由：这类洞的症状是**随机红**，重跑能过就没人修；只有把它变成必红的判据才修得掉。
+    // 锚点用 `const savedNote = ...` 整行（现扫唯一），不挑 `clickDialog2('允许一次')`（出现 4 次）。
+    name: 'e2e 在弹窗决定后、界面回执前读盘（T64 那个抢跑形状）',
+    file: 'apps/desktop/scripts/e2e-ui.mjs',
+    from: "  const savedNote = await waitText2('已保存');",
+    to: "  if (hooksOnDisk() === null) fail('注入探针：这就是抢跑');\n  const savedNote = await waitText2('已保存');",
+    expect: 'e2e 的磁盘断言不抢跑',
+  },
+  {
+    // 第 24 条的第二个形状（**判据自己不能有洞**）：点击与读盘挤在**同一行**。
+    // 第一版守卫是"命中即 return"，这种写法会整行躲过去 —— 加一条用例把它钉住，
+    // 也顺手证明"同一行有界面回执"是豁免、"同一行有点击"不是。
+    name: 'e2e 同一行里点完弹窗就立刻读盘（守卫的同行洞）',
+    file: 'apps/desktop/scripts/e2e-ui.mjs',
+    from: "  await clickDialog2('允许一次');\n  const savedNote = await waitText2('已保存');",
+    to: "  await clickDialog2('允许一次'); const raceSameLine = hooksOnDisk();\n  if (raceSameLine === undefined) fail('注入探针');\n  const savedNote = await waitText2('已保存');",
+    expect: 'e2e 的磁盘断言不抢跑',
+  },
 ];
 
 /**

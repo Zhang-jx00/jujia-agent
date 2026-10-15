@@ -1644,6 +1644,20 @@ try {
     2,
   );
   const hooksOnDisk = () => (existsSync(hooksFile) ? readFileSync(hooksFile, 'utf8') : null);
+  /**
+   * 读盘读到"出现某个形状"为止（T64）。
+   *
+   * 只给**正面**断言用（"批准了应该看得到"）：负面断言（"拒绝了不该有"）绝不能轮询等缺席 ——
+   * 那等于一上来就通过，写盘稍晚一点就永远抓不到，是天生绿的锁。负面那边走界面回执，见下面。
+   */
+  const readHooksDiskUntil = async (predicate, ms = 5_000) => {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const content = hooksOnDisk() ?? '';
+      if (predicate(content) || Date.now() >= deadline) return content;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
   const ASK_HEAD = '需要你确认：修改钩子配置会以你的宿主环境执行命令';
 
   const hooksBefore = hooksOnDisk();
@@ -1654,22 +1668,35 @@ try {
     fail('确认弹窗里看不到要写入的命令 —— 看不到内容的审批等于没有审批', (await body2()).slice(0, 900));
   }
   await clickDialog2('拒绝');
-  if (hooksOnDisk() !== hooksBefore) fail('用户明明拒绝了，hooks.json 却被改动（拒绝必须真的不做）');
+  /* ---------------- 顺序纪律（外部审查 T64）：弹窗消失 ≠ 主进程做完了 ----------------
+   *
+   * 上一轮这一步报的是"批准了却没写进磁盘"，而盘上两秒后确实有那条命令 ——
+   * 红的不是产品，是**抢在真值前面的断言**：`clickDialog2` 等的是弹窗 detached，那一刻主进程
+   * 刚拿到用户的答案，`extensions.ts` 里 `await hooks.save(payload)` 还没跑完（写盘是
+   * 原子改名 + `.bak`，还要再等 `hooksState()` 回 IPC）。
+   * **界面那句回执才是"这一趟做完了"的信号**：`HooksPanel.save` 在 `await window.jujia.hooksSet(...)`
+   * 返回之后才设 notice ⇒ 先等回执、再读盘，因果才接得上（本文件后面 T51 那一步早就是这个形状）。
+   * 负面断言（"拒绝了不该有"）只等回执、不轮询：轮询"缺席"= 一上来就通过，是天生绿的锁。
+   */
   const deniedNote = await waitText2('钩子配置未改动');
   if (deniedNote !== true) fail('拒绝之后界面没有如实说明配置未改动', (await body2()).slice(0, 900));
+  if (hooksOnDisk() !== hooksBefore) fail('用户明明拒绝了，hooks.json 却被改动（拒绝必须真的不做）');
   ok('拒绝 → 磁盘一字未动，界面说明未改动');
 
   await saveHooksFromEditor(hooksJson);
   const askSecond = await waitText2(ASK_HEAD);
   if (askSecond !== true) fail('第二次保存没有再弹确认', (await body2()).slice(0, 900));
   await clickDialog2('允许一次');
-  const allowedDisk = hooksOnDisk() ?? '';
-  if (!allowedDisk.includes(HOOK_MARKER)) fail('批准了却没写进磁盘（这次写入其实没发生）', allowedDisk.slice(0, 400));
   const savedNote = await waitText2('已保存');
   if (savedNote !== true) fail('批准后界面没有报告保存成功', (await body2()).slice(0, 900));
+  const allowedDisk = await readHooksDiskUntil((c) => c.includes(HOOK_MARKER));
+  if (!allowedDisk.includes(HOOK_MARKER)) fail('批准了却没写进磁盘（这次写入其实没发生）', allowedDisk.slice(0, 400));
   ok('批准 → 配置真的落盘（磁盘上有那条命令），界面报告已保存');
 
   // 第三次：界面上不该再有「本次会话总是允许」（T19），点「允许一次」之后第四次仍必须问
+  // 这一位之后**不再读盘**，所以不给第三次批准加"等回执"：那句 `waitText2('已保存')` 在这里
+  // 会被第二次留下的旧文案直接满足 = 一条永远不会红的断言，比没有更坏（教人无视红灯）。
+  // 第四步要的是"还要不要再问"，与写盘时序无关。
   await saveHooksFromEditor(hooksJson);
   const askThird = await waitText2(ASK_HEAD);
   if (askThird !== true) fail('第三次保存没弹确认', (await body2()).slice(0, 900));
@@ -1691,6 +1718,53 @@ try {
    * 所以三种载体各盯一条：**用量数字**（usage）、**仍在发送中的状态**（done）、**别人的正文**。
    */
   step('真·流式对话走一遍：切走的会话不许改掉当前界面（用量 / 收尾 / 正文三条都盯）');
+  /* ===== 常驻现场取证（T65 装在门禁里，复核 089）=====
+   * 起因：规整19 收口时这一步**红过一次**，报"B 自己的用量没出现"，而失败时 dump 出来的界面停在
+   * **外观页** —— 脚本里唯一点外观的地方在第 50 步用的还是另一个窗口句柄，时间上不可能。
+   * 第二次带这段取证重跑：65 步全绿，快照显示当时活动页签是"对话"、输入框在、B 的正文已到末段。
+   * **根因未定**（一次红、一次绿，不编故事），所以把取证留在门禁里而不是留在我脑子里：
+   * ① 记录每一个真的落到 DOM 上的点击（含它是不是点在页签栏上）；② 失败时给出"当前哪一页是活的 /
+   * 输入框在不在 / A 与 B 的末段在不在 / 最近 12 次点击"。下次再红，出处就在日志里，不用再猜。
+   * 取证本身只做两次 `evaluate`，不改变判定，也不给任何断言放宽时限。
+   */
+  await win2.evaluate(() => {
+    const w = window;
+    w.__fxClicks = [];
+    document.addEventListener(
+      'click',
+      (ev) => {
+        const el = ev.target instanceof Element ? ev.target : null;
+        const btn = el ? el.closest('button') : null;
+        const label = btn && btn.textContent ? btn.textContent.trim().slice(0, 20) : '(非按钮)';
+        const where = el && el.closest('nav.app-tabs') ? 'NAV' : 'body';
+        const t = Date.now();
+        w.__fxClicks.push(`${where}:${label}`);
+        w.__fxAt = w.__fxAt || [];
+        w.__fxAt.push(t);
+        if (w.__fxClicks.length > 80) {
+          w.__fxClicks.shift();
+          w.__fxAt.shift();
+        }
+      },
+      true,
+    );
+  });
+  const fx = async () =>
+    await win2.evaluate(() => {
+      const navs = [...document.querySelectorAll('nav.app-tabs button')];
+      const active = navs.find((b) => b.className.includes('app-tab-active'));
+      const body = document.body.innerText;
+      return JSON.stringify({
+        active: active ? active.textContent : '(没有 active 页签)',
+        chatBox: !!document.querySelector('textarea[placeholder^="输入消息"]'),
+        hasA_tail: body.includes('A_16_'),
+        hasB_tail: body.includes('B_16_'),
+        hasB_first: body.includes('B_1_'),
+        len: body.length,
+        clicks: (window.__fxClicks ?? []).slice(-12).join(' , '),
+        vis: document.visibilityState,
+      });
+    });
   await win2.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
   await win2.locator('select').first().selectOption(seededStreamConnId);
   const chatBox = win2.locator('textarea[placeholder^="输入消息"]');
@@ -1719,8 +1793,14 @@ try {
   if (!(await stopVisible())) fail('A 的 done 把 B 的"正在发送"状态提前收尾了（停止按钮不见了）');
   ok('A 说完之后：正文、用量、收尾三样都没落到 B 的界面上');
 
+  log(`[取证·等 131313 之前] ${await fx()}`);
   if ((await waitText2('131313', 15_000)) !== true) {
-    fail('B 自己的用量没出现 —— 闸门口径写反了会把当前会话的事件也筛掉', (await body2()).slice(0, 900));
+    // 临时取证：当前活页签 / 输入框在不在 / A 与 B 的末段在不在 / 最近 12 次真的落到 DOM 的点击
+    const pageCount = win2.context && win2.context() ? win2.context().pages().length : -1;
+    fail(
+      'B 自己的用量没出现 —— 闸门口径写反了会把当前会话的事件也筛掉',
+      `窗口数=${String(pageCount)} ` + (await fx()),
+    );
   }
   const afterB = await body2();
   if (afterB.includes('424242')) fail('A 的用量最终仍然污染了 B', afterB.slice(0, 900));
