@@ -45,17 +45,29 @@ const EXE = join(here, '..', 'release', packDir, 'JujiaAgent.exe');
 const STALE_TMP = join(here, '..', 'release', 'win-unpacked.tmp');
 
 const STEPS = [];
+/** 走完最后一步才算成功；退出码由它决定（`fail` 抛哨兵异常，收尾统一在 finally） */
+let finished = false;
 const log = (t) => console.log(t);
 const ok = (t) => log(`  ✅ ${t}`);
 const step = (t) => {
   STEPS.push(t);
   log(`\n[${STEPS.length}] ${t}`);
 };
+/**
+ * 失败出口用**抛哨兵异常**，不用 `process.exit(1)`（T66 · 同族第四处，本轮顺着护栏第 25 条扫出来的）。
+ *
+ * 为什么这一处最要紧：这个脚本的 `finally` 负责**关掉它拉起来的打包版应用**并删临时目录。
+ * 旧写法一 exit 就把 `finally` 跳过了 ⇒ 应用留在后台继续握着 `release/win-unpacked*` 的句柄 ⇒
+ * **下一次 `dist:dir` 在 rename 那一步 EBUSY**。今天这条门禁跑不动（见下面的预检文案），
+ * 与这个泄漏是同一条链上的事 —— 只说链存在，不把归因写死。
+ */
+class PackAbort extends Error {}
+
 const fail = (text, detail) => {
   console.error(`\n❌ ${text}`);
   if (detail !== undefined) console.error(String(detail).slice(0, 900));
   console.error(`\n已完成步骤：\n${STEPS.map((s) => '  - ' + s).join('\n')}`);
-  process.exit(1);
+  throw new PackAbort(text);
 };
 
 if (!existsSync(EXE)) {
@@ -64,12 +76,15 @@ if (!existsSync(EXE)) {
     console.error(
       `\n❌ 没有找到可验证的打包产物：${EXE}\n` +
         `   而 ${STALE_TMP} 卡在原地 —— electron-builder 的 "解到 .tmp 再 rename 成正式目录" 这一步被系统挡了。\n` +
-        '   实测取证（2026-10-15）：.tmp **里面的文件**逐个可读写重命名，只有**目录本身**不能 rename/delete\n' +
-        '   ⇒ 有进程握着这个目录的句柄；换输出目录（--config.directories.output=release/r29）同样在 rename 处 EPERM。\n' +
-        '   本机还有 3 个 crashpad_handler 进程以**当前用户看不到的身份**在跑（CIM 取不到路径与命令行），\n' +
-        '   归属无法确认 ⇒ **不去结束它们**（拿别人机器上的不明进程赌一把，代价可能是别人正在跑的东西）。\n' +
-        '   这条门禁因此**今天验不了**：正确处置是重启后重跑 npm run verify:pack，或在确认归属后由使用者释放该句柄。\n' +
-        '   台账规矩：这种环境下跑不动的项目 **只能记"未能运行 + 原因"，不许记成绿**。',
+        '   实测取证（2026-10-15 两次）：.tmp **里面的文件**逐个可读写重命名，只有**被握着的那一个**删不掉\n' +
+        '   ⇒ 有进程握着它的句柄。**这条结论本轮改了口**：R29 写的"换输出目录同样在 rename 处 EPERM"是错的 ——\n' +
+        '   `npm run screenshots` 用 `--config.directories.output=release/shoot` **一次成功**，\n' +
+        '   挡的一直是"把 .tmp 改名覆盖到那个已被握着的 win-unpacked"这一步，全新目录不碰它。\n' +
+        '   所以正解不是重启碰运气，而是**给这条门禁的 dist 步骤也用按运行命名的输出目录**（登记 T67，R35 落地）。\n' +
+        '   本机此刻 tasklist 里没有任何 electron.exe / JujiaAgent.exe，只有一个 Services 会话下的 crashpad_handler\n' +
+        '   与若干 node.exe ⇒ **归属不明照旧不杀**（拿别人机器上的不明进程赌一把，代价可能是别人正在跑的东西）。\n' +
+        '   这条门禁因此**今天验不了**：台账规矩是这种环境下跑不动的项目**只能记"未能运行 + 原因"，不许记成绿**。\n' +
+        '   （这里的 `process.exit(1)` 是安全的：走到这一行还没拉起应用、也没建临时目录，没有收尾要跑。）',
     );
     process.exit(1);
   }
@@ -291,8 +306,16 @@ try {
   app = undefined;
   ok('已退出');
   log('\nVERIFY-PACK OK：打包产物能启动、能读工作区、能看中文 PDF（不缺字、不出网）');
+  finished = true;
 } catch (err) {
-  fail('执行过程中抛异常', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
+  if (!(err instanceof PackAbort)) {
+    // 意外异常：借 fail 把"做到哪一步"说出来；它抛的哨兵在这里咽掉（话已经说完了）
+    try {
+      fail('执行过程中抛异常', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
+    } catch {
+      /* 故意空着 */
+    }
+  }
 } finally {
   if (app !== undefined) await app.close().catch(() => undefined);
   try {
@@ -301,3 +324,5 @@ try {
     console.log(`（提示）本轮临时目录未能自动清理：${TMP} —— 交给 scripts/cleanup.py 处理`);
   }
 }
+
+process.exit(finished ? 0 : 1);

@@ -422,6 +422,16 @@ const cases = [
     expect: 'e2e 的磁盘断言不抢跑',
   },
   {
+    // 第 25 条（失败出口自带收尾 · T66）：把 e2e 的 fail() 改回 `process.exit(1)`。
+    // 挑这一条的理由：这个形状本月犯了三次（T62 注入自检 / 本轮截图脚本 / e2e），
+    // 每一次的后果都是"收尾没跑"—— 注入不回滚、应用没关、临时目录留在盘上。
+    name: 'e2e 的 fail() 退回 process.exit（收尾会被跳过）',
+    file: 'apps/desktop/scripts/e2e-ui.mjs',
+    from: '  throw new E2EAbort(text);',
+    to: '  process.exit(1);',
+    expect: '门禁脚本的失败出口自带收尾',
+  },
+  {
     // 第 24 条的第二个形状（**判据自己不能有洞**）：点击与读盘挤在**同一行**。
     // 第一版守卫是"命中即 return"，这种写法会整行躲过去 —— 加一条用例把它钉住，
     // 也顺手证明"同一行有界面回执"是豁免、"同一行有点击"不是。
@@ -430,6 +440,16 @@ const cases = [
     from: "  await clickDialog2('允许一次');\n  const savedNote = await waitText2('已保存');",
     to: "  await clickDialog2('允许一次'); const raceSameLine = hooksOnDisk();\n  if (raceSameLine === undefined) fail('注入探针');\n  const savedNote = await waitText2('已保存');",
     expect: 'e2e 的磁盘断言不抢跑',
+  },
+  {
+    // 第 25 条的第二处靶子：`verify-pack.mjs` 的 fail() —— 同族**第四次**被扫出来的。
+    // 它的 `finally` 负责关掉拉起来的打包版应用；跳过它 = 应用在后台握着 `release/win-unpacked*` 的句柄
+    // = 下一次 `dist:dir` 在 rename 那一步 EBUSY（本轮这条门禁跑不动，与这条链在同一条线上）。
+    name: 'verify-pack 的 fail() 退回 process.exit（应用不会被关，句柄留在手里）',
+    file: 'apps/desktop/scripts/verify-pack.mjs',
+    from: '  throw new PackAbort(text);',
+    to: '  process.exit(1);',
+    expect: '门禁脚本的失败出口自带收尾',
   },
 ];
 

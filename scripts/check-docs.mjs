@@ -1627,6 +1627,56 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 25. 门禁脚本的失败出口不许用 process.exit（T66 · R32 立 · 2026-10-15）
+ *
+ * 同一个病本月犯了三次：T62 是注入自检的 `fail()` 用 `process.exit(1)` —— **exit 不跑 `finally`**，
+ * 于是"用例没拦住"那次刚注入的文件不回滚；本轮新写的截图脚本又是一模一样的形状（失败后
+ * `D:\JujiaAgentDemo*` 留在盘上），而 e2e 脚本的 `fail()` 也是 —— 它的 `finally` 负责关三个假服务、
+ * 关应用、删临时目录，跳过它的后果是**每红一次就在机器上留一个没人认领的 Electron 进程**
+ * （本机那一堆"归属不明"的 electron.exe 与 `.tmp/e2e-*` 残留，至少一部分这么来的，
+ * 而负载又回头影响 perf 与偶发红）。
+ *
+ * 规矩早就写进禁忌表了，照样复发 —— 所以这次改成机器判据：
+ * 这四个脚本里 `const fail = (...) => {...}` 的定义体中出现 `process.exit` 即红。
+ * （判据只看定义体，不看脚本末尾那个"成功之后统一收场"的 `process.exit(0)` —— 那正是它该有的样子。）
+ * ------------------------------------------------------------------ */
+
+{
+  const rels = [
+    'apps/desktop/scripts/e2e-ui.mjs',
+    'apps/desktop/scripts/shoot-ui.mjs',
+    'apps/desktop/scripts/verify-pack.mjs',
+    'scripts/verify-docs-check.mjs',
+  ];
+  const bad = [];
+  for (const rel of rels) {
+    if (!exists(rel)) {
+      bad.push(`${rel} 不在了 —— 这条守卫的定位器要跟着改`);
+      continue;
+    }
+    const src = read(rel);
+    // 剥注释：这些脚本的说明文字里就写着"process.exit 不跑 finally"，不剥会被自己的解释骗红
+    const bare = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const def = /const fail = \([\s\S]*?\n\};/.exec(bare);
+    if (def === null) {
+      bad.push(`${rel} 里找不到 \`const fail = ...\` 的定义 —— 失败出口改名了？守卫看不见就等于没有`);
+      continue;
+    }
+    if (def[0].includes('process.exit')) {
+      bad.push(`${rel} 的 fail() 里有 process.exit —— exit 不跑 finally，收尾（还原 / 关应用 / 删临时目录）会被跳过，改成抛哨兵异常`);
+    }
+    if (!bare.includes('} finally {')) {
+      bad.push(`${rel} 里没有 finally —— 那"失败也要收尾"这句话没有承载体`);
+    }
+  }
+  report(
+    `门禁脚本的失败出口自带收尾（四个脚本的 fail() 不许 process.exit；T66 同族第四次不再靠人记）`,
+    bad.length === 0,
+    bad.join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

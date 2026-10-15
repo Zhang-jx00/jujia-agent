@@ -64,13 +64,26 @@ const RUN_ID = `${Date.now().toString(36)}-${process.pid}`;
 const TMP_ROOT = join(here, '..', '..', '..', '.tmp', `e2e-${RUN_ID}`);
 
 const STEPS = [];
+/** 走完最后一步才算成功；退出码由它决定（`fail` 抛哨兵异常，收尾统一在 finally） */
+let e2eFinished = false;
 const log = (text) => console.log(text);
 const ok = (text) => log(`  ✅ ${text}`);
+/**
+ * 中止用**抛哨兵异常**，不用 `process.exit(1)`（T66 · 与本月 T62 同一个病，第三次差点复发在这里）。
+ *
+ * 为什么这条值得改：`exit` 不跑 `finally`，而这里的 `finally` 干的是**关三个假服务 + 关应用 + 删临时目录**。
+ * 于是每一次"e2e 红掉"都在机器上留下一个**没人认领的 Electron 进程**（以及占着句柄的临时目录）——
+ * 本机那一堆游离 `electron.exe`（R29 记为"归属不明、照旧不杀"）与 `.tmp/e2e-*` 残留，
+ * 至少有一部分就是这么攒下来的；而负载又反过来影响 perf 与偶发红（T65 / R34）。
+ * 改成抛：话照样说完，收尾一定跑，退出码在最外层统一给。
+ */
+class E2EAbort extends Error {}
+
 const fail = (text, detail) => {
   console.error(`\n❌ ${text}`);
   if (detail !== undefined) console.error(String(detail).slice(0, 1200));
   console.error(`\n已完成步骤：\n${STEPS.map((s) => '  - ' + s).join('\n')}`);
-  process.exit(1);
+  throw new E2EAbort(text);
 };
 const step = (text) => {
   STEPS.push(text);
@@ -4018,8 +4031,17 @@ try {
   await app.close();
   app = undefined;
   ok('应用已关闭');
+  e2eFinished = true;
 } catch (err) {
-  fail('执行过程中抛异常', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
+  if (!(err instanceof E2EAbort)) {
+    // 意外异常：借 fail 把"已完成到哪一步"说出来；它抛的哨兵在这里咽掉，
+    // 因为要的话已经说完了，剩下的只有"退出码是 1"这一件事。
+    try {
+      fail('执行过程中抛异常', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
+    } catch {
+      /* 故意空着：见上 */
+    }
+  }
 } finally {
   streamServer.close();
   echoServer.close();
@@ -4033,6 +4055,8 @@ try {
     console.log(`（提示）本轮临时目录未能自动清理：${TMP_ROOT} —— 交给 scripts/cleanup.py 处理`);
   }
 }
+
+if (!e2eFinished) process.exit(1);
 
 console.log('\nE2E UI OK：启动 → 标签切换 → 插件识别 → 权限规则增删生效 → 钩子/MCP 页就绪 → 浏览器真实加载与拦截 → Git 暂存/提交与权限门 → 内置 exec 逐次确认（均含磁盘真值核对）→ 会话持久化与重启 → 只读敏感文件与钩子配置逐次确认 → 真·流式对话按会话分发 → 审批超时按 id 精准收尾 → 6b 压缩与结束记要点（预览不落盘 / 磁盘真值 / 退出留账与补问）→ T22 切页签不丢选择与流 → M19 文件树/保存过门/覆盖保护/PDF 零出站/逐行 patch → 中文 PDF 的 cmap 映射 → M9a 画布（三节点链跑完 / 成环开跑前被拒 / 工具节点过同一扇审批门）→ B1 画布（命令面板 / 右键与双击建节点 / 对齐辅助线与吸附）→ B2 画布（从中间节点重跑：只跑该段 / 上游不动 / 重跑标）→ B3 画布（条件分支：选中的口执行 / 未选两支与下游 skipped / fromPort 落盘）→ B3b 画布（有界循环：命中即停 / 到界失败并说明白）→ 终端会话跨页签存活与接回 → 文档页记住路径与阅读位置 → 上游截断与垃圾流在界面上分开说 → T55/T56 断流与空参数在界面上说实话（没结束标记要说"可能不完整"、参数没送到就拒执行且说清原因，半截内容不丢）→ 命令前缀规则只拦它说的那段命令 → 执行审计看得见判定、看不见正文 → 长命令的实时输出在命令跑完之前就看得见 → 定时任务：开机补跑只补最近一次并报出跳过几次（水位线是"那一次"而非"此刻"，那一轮真落进会话文件）→ 展开/收起：真实高度的轨道过渡 + 箭头同元素旋转 180°（收起态内容 inert）→ 主题包背景类型真的落在画面上（渐变 / 毛玻璃）→ 运行日志真在隔离目录里落盘（概览页看得见同一份）→ 更新检查点一次查一次（有新版本说得出来）→ 干净退出');
 process.exit(0);

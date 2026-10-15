@@ -59,11 +59,22 @@ const step = (t) => {
   done.push(t);
   log(`\n[${done.length}] ${t}`);
 };
+/**
+ * 中止用**抛哨兵异常**而不是 `process.exit(1)`（T66）。
+ *
+ * 为什么：`exit` 不跑 `finally` —— 这正是本月 T62 在注入自检脚本里撞过的同一个形状，
+ * 而我在这轮新写的这个脚本里**又犯了一遍**（写进禁忌表的规矩不变成机器判据就会复发）。
+ * 实测后果：上一版 `fail()` 直接 exit ⇒ 下面那个负责清场的 `finally` 根本没跑，
+ * `D:\JujiaAgentDemoData\<run>` 与 `D:\JujiaAgentDemo` 就留在盘上了。
+ * 现在：`fail` 把话说完再抛，收尾统一在 `finally` 里做，最外层按结果给退出码。
+ */
+class ShootAbort extends Error {}
+
 const fail = (t, detail) => {
   console.error(`\n❌ ${t}`);
   if (detail !== undefined) console.error(String(detail).slice(0, 900));
   console.error(`\n已完成步骤：\n${done.map((s) => '  - ' + s).join('\n')}`);
-  process.exit(1);
+  throw new ShootAbort(t);
 };
 
 /**
@@ -276,6 +287,8 @@ await new Promise((r) => server.once('listening', r));
 const port = server.address().port;
 
 let app;
+/** 只有走完最后一步才算成功；退出码由它决定（`fail` 抛哨兵异常，收尾统一在 finally） */
+let finished = false;
 try {
   step('准备隔离目录与演示工作区（中性路径，拍完清场）');
   /**
@@ -384,21 +397,25 @@ try {
     fail('假服务的回答没到界面上（那这张图拍的是空会话，等于白拍）', await win.evaluate(() => document.body.innerText.slice(0, 600)));
   }
   /**
-   * **等到正文 ≠ 流已收尾**。第一版拍完回头看图，发现「停止」按钮还挂着、气泡末尾带着光标 ——
-   * 那是"正在说"的一帧，而 README 的图注写的是"一次真流式回答**之后**"（对外声称与像素不符，
-   * 属于本轮立这条护栏最想防的那类事）。所以等发送态真的结束再拍：
-   * 判据取 `.w2-chat` 里那颗「发送」按钮的 `disabled`（流式期间它是禁用的，`ChatPanel` 里写的是
-   * `disabled={pendingBusy || sending}`），**限定在对话面板内** —— 别的页签是 KeepAlive 挂着的隐藏面板，
-   * 全页扫 `hasText:'停止'` 会被它们骗住。等不到就 fail-fast：宁可不出图，也不出一张与图注不符的图。
+   * **等到正文 ≠ 等到收尾**。第一版拍完回头看图，气泡末尾还带着光标（`.w2-caret`）——
+   * 那是"正在说"的一帧，而 README 的图注写的是"一次真流式回答**之后**"（对外说法与像素不符，
+   * 正是本轮立这条护栏最想防的那类事）。
+   *
+   * **判据为什么取光标而不是按钮**（上一笔 `6723681` 挑错了，当场红给我看）：我原先等的是
+   * 「发送」的 `disabled`，而它写的是 `disabled={!hasConnection || (input.trim()==='' && attached.length===0) || sending}` ——
+   * **输入框空就禁用**，发完一轮之后输入框本来就是空的 ⇒ 流早就收了它还是禁用，于是这条等待永远不满足、
+   * 脚本 fail-fast 退出（红灯本身是对的：判据不该架在一个恒真的信号上）。
+   * 现在等 `.w2-caret` 消失：这个元素就是 `ChatPanel` 里 `{b.streaming && <span className="w2-caret" />}`，
+   * `done`/`error` 事件把 `streaming` 置回 false 才没有它 —— **眼睛在图上看到的那个信号，脚本也判同一个**。
+   * 等不到就 fail-fast：宁可不出图，也不出一张与图注不符的图。
    */
-  const sendBtn = win.locator('.w2-chat button', { hasText: '发送' }).first();
-  const closed = async () => !(await sendBtn.isDisabled());
+  const caretGone = async () => await win.evaluate(() => document.querySelector('.w2-caret') === null);
   const closeDeadline = Date.now() + 20_000;
-  while (Date.now() < closeDeadline && !(await closed())) {
+  while (Date.now() < closeDeadline && !(await caretGone())) {
     await new Promise((r) => setTimeout(r, 200));
   }
-  if (!(await closed())) {
-    fail('回答的流没收尾（「发送」仍是禁用态），这张图拍的是"正在说"而不是"说完"，与图注不符');
+  if (!(await caretGone())) {
+    fail('回答的流没收尾（气泡上还有光标），这张图拍的是"正在说"而不是"说完"，与图注不符');
   }
   const chat = await shot('chat.png', '对话', '数据不出本机', '回答文本与收尾都在拍前验过，此处不应失败');
 
@@ -502,14 +519,16 @@ try {
   step('干净退出并清场');
   await app.close();
   app = undefined;
-  rmSync(TMP_ROOT, { recursive: true, force: true });
-  if (process.env.JUJIA_KEEP_DEMO !== '1') rmSync(demoWorkspace, { recursive: true, force: true });
-  ok(`临时目录已清；演示工作区${process.env.JUJIA_KEEP_DEMO === '1' ? '按 JUJIA_KEEP_DEMO=1 保留' : '已删除'}`);
+  ok('应用已关；目录收尾在 finally 里做（成功与失败走同一条收尾路）');
 
   console.log('\nSCREENSHOTS OK：四张图都有内容、尺寸达标，清单与版本对齐');
-  process.exit(0);
+  finished = true;
 } catch (err) {
-  fail(`执行中抛异常：${err instanceof Error ? err.message : String(err)}`, err instanceof Error ? err.stack : undefined);
+  if (!(err instanceof ShootAbort)) {
+    // 意外异常：借 fail 把"已完成到哪一步"说出来，再交给统一的收尾与退出码
+    fail(`执行中抛异常：${err instanceof Error ? err.message : String(err)}`, err instanceof Error ? err.stack : undefined);
+  }
+  // ShootAbort：话已经在 fail 里说完了，这里只负责把结果记成"失败"
 } finally {
   if (app !== undefined) await app.close().catch(() => undefined);
   server.close();
@@ -518,4 +537,14 @@ try {
   } catch {
     log(`（提示）本轮临时目录未能自动清理：${TMP_ROOT} —— 交给 scripts/cleanup.py`);
   }
+  if (process.env.JUJIA_KEEP_DEMO === '1') {
+    log(`（JUJIA_KEEP_DEMO=1）演示工作区保留在 ${demoWorkspace}`);
+  } else {
+    try {
+      rmSync(demoWorkspace, { recursive: true, force: true });
+    } catch {
+      log(`（提示）演示工作区未能自动清理：${demoWorkspace}`);
+    }
+  }
 }
+process.exit(finished ? 0 : 1);
