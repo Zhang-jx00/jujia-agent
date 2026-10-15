@@ -4827,8 +4827,9 @@ CHANGELOG + 轮换 · 本条）。**零新依赖**；权限映射表 / 模式含
 **推送最终状态（定稿：第六次成功，远端已核对）**：中间 5 次 `git push` / `git ls-remote` 全部
 `Failed to connect to github.com:443`（同期 `api.github.com` 可访问 ⇒ **不是凭据问题**，
 本轮凭据未改、`git config` 未动），收口收尾后**第 6 次重试成功**：
-`9e2bc7e..753fc4e main -> main`（`PUSH_EXIT=0`），`git ls-remote` 核对
-`refs/heads/main = 753fc4e`、`refs/tags/v0.87.0-接驳1{}` peel 到 `9e2bc7e` —— **本地与远端一致，零待推**。
+`9e2bc7e..753fc4e main -> main`（`PUSH_EXIT=0`），随后本条定稿又推了一次
+（`753fc4e..d5ac38c`）—— **最终状态：远端 `main = d5ac38c` = 本地，零待推**；
+`git ls-remote` 核对 `refs/tags/v0.87.0-接驳1{}` peel 到 `9e2bc7e`（**标签从未改写**）。
 **已推且核对过的**：主体提交 `9e2bc7e` + 标签 `v0.87.0-接驳1`（CI run `38683714787` **success**）·
 其后的台账提交（复核 085 · CI 一笔 · 推送状态记 · 本条定稿）都只动 `review/` 与 `docs/`，零产品源码。
 **留下的口径**（这条才是可复用的）：**"待推"是一种瞬时状态，写进台账时必须同时写"以
