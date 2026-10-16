@@ -31,7 +31,7 @@
     "app": "npm run app --workspace @jujia/desktop",
     "screenshots": "npm run screenshots --workspace @jujia/desktop",
     "dist": "npm run dist --workspace @jujia/desktop",
-    "verify:pack": "npm run dist:dir --workspace @jujia/desktop && npm run verify:pack:drive --workspace @jujia/desktop",
+    "verify:pack": "npm run verify:pack:drive --workspace @jujia/desktop",
     "mut": "node scripts/mutation-check.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "check:docs:selftest": "node scripts/verify-docs-check.mjs"

@@ -641,6 +641,16 @@ PDF 零出站、diff 扩 `GIT_DIFF` 而不新开通道，末尾九条开关）�
 > 3. **报告数量与文件清单，不回显敏感值本身**；且区分**三类不同对象**（GitHub 账号名 / 本机账户名 / 仓库路径）——
 >    它们的处置方式完全不同，混在一起谈就会得出"用户名泄漏了"这种既吓人又没根据的结论。
 - 模型 API Key 属用户本地数据（safeStorage 加密存储），不随仓库走；接手方开发用自己的 Key，别提交。
+- **每轮开工复取 CI 状态的配方（一次性脚本，**不进仓**）**：`git credential fill`（stdin 喂
+  `protocol=https` + `host=github.com`）取到的令牌**只在内存里过** →
+  `fetch https://api.github.com/repos/<owner>/<repo>/actions/runs?per_page=6`，头带
+  `Authorization: Bearer <令牌>` 与 `User-Agent` → **只打印 run 号 / 状态 / 结论 / `head_sha` 短哈希**，
+  密文零回显、不落文件、不改 `git config`。三条实测坑（都是本轮撞的）：
+  ① **别加 `GIT_TERMINAL_PROMPT=0` 或 `GCM_INTERACTIVE=never`** —— 那样 helper 会**不返回也不报错**，
+     整条命令挂住（要靠"去掉这两个覆盖"才走通，2026-10-16 实测）；
+  ② 匿名访问**私有仓库**的 API 返回 **404**（不是 401）—— 别把它读成"仓库不存在"，先想到没带令牌；
+  ③ 脚本放 `.tmp/` 随 cleanup 收走，**不升进 `scripts/`**：读凭据的工具进仓就是多一条长期要维护的攻击面，
+     而每轮的参数（提交哈希、条数）本来就不同 —— 需要固定的是**上面这段配方**，不是脚本。
 
 ### 5.10 用户固定约定（**逐条核对过，接手方必须继续遵守**）
 

@@ -137,9 +137,28 @@ def purge_old_trash(apply: bool) -> int:
     return n
 
 
+def unique_dest(dest: Path) -> Path:
+    """目标位已被占用时加 `__dupN` 序号，绝不把源目录塞进同名目录里。
+
+    为什么要这一层：2026-10-16 实测 `.trash/<批次>/.tmp/.tmp/sub/keep.txt` 这种双层嵌套 ——
+    计划里先有一条"搬 `.tmp/empty-run.log`"（0 字节文件命中），它顺手建出了 `.trash/<批次>/.tmp/`
+    这一层；随后"搬整只 `.tmp` 目录"的目标位**已经存在**，而 `shutil.move` 对"目标是已存在的目录"
+    的行为是把源塞进去 ⇒ 路径多一层。后果不是脏，是**台账里"去回收站找 .tmp/xxx"这句话对不上号**，
+    找一个残留要找两次。探针在合成项目上跑旧版当场复现（见复核 092）。
+    """
+    if not dest.exists():
+        return dest
+    n = 1
+    while True:
+        cand = dest.with_name(f"{dest.name}__dup{n}")
+        if not cand.exists():
+            return cand
+        n += 1
+
+
 def move_to_trash(p: Path, stamp: str) -> Path:
     rel = p.relative_to(PROJECT)
-    dest = TRASH / stamp / rel
+    dest = unique_dest(TRASH / stamp / rel)
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(p), str(dest))
     return dest
@@ -171,6 +190,7 @@ def main() -> int:
         print(f"  [缓存目录] {p.relative_to(PROJECT)}")
     for p in legacy:
         print(f"  [旧版遗留·空目录] {p.relative_to(PROJECT)}")
+    print("执行顺序：整只目录先搬，文件条目后搬；已随上层目录一起走的条目会跳过并如实计数。")
 
     n_purged = 0
     if args.purge_trash and TRASH.is_dir():
@@ -188,20 +208,36 @@ def main() -> int:
         return 0
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    moved, failed = 0, []
-    for p in plan:
+    moved, failed, carried = 0, [], 0
+    # **目录先走**：整只目录一搬走，里面那些按文件名命中的条目（0 字节日志、*.bak 之类）
+    # 原路径就不存在了 —— 再搬第二次会抛 FileNotFoundError 把整轮清理中止（"任何失败立即停止"这条本身没错，
+    # 错的是顺序）。所以目录批完之后，文件条目跳过"已随上层一起走"的那些，并把数量如实报出来。
+    for p in stale_dirs + legacy:
         try:
-            if p.is_dir():
-                shutil.move(str(p), str(TRASH / stamp / p.relative_to(PROJECT)))
-            else:
-                move_to_trash(p, stamp)
+            dest = unique_dest(TRASH / stamp / p.relative_to(PROJECT))
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(p), str(dest))
             moved += 1
         except Exception as e:  # 任何失败立即停止，不静默跳过
             failed.append((p, e))
             print(f"!! 清理失败，已中止：{p} -> {e}", file=sys.stderr)
             break
 
-    print(f"\n[完成] 已移入 .trash/{stamp}/：{moved} 项；失败中止：{len(failed)} 项")
+    if not failed:
+        for p in [x for x, _ in temp_files] + empty_files:
+            if not p.exists():
+                carried += 1
+                continue
+            try:
+                move_to_trash(p, stamp)
+                moved += 1
+            except Exception as e:
+                failed.append((p, e))
+                print(f"!! 清理失败，已中止：{p} -> {e}", file=sys.stderr)
+                break
+
+    extra = f"；另有 {carried} 项已随整只目录一起搬走，跳过" if carried else ""
+    print(f"\n[完成] 已移入 .trash/{stamp}/：{moved} 项{extra}；失败中止：{len(failed)} 项")
     if failed:
         return 1
     print("提示：.trash/ 内文件保留 30 天可反悔；执行 --apply --purge-trash 可真删超期条目。")

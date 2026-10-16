@@ -20,10 +20,13 @@
  * ④⑤ 都刻意只走"不需要外部服务"的那条路：画布用两个工具节点（不碰模型连接），
  * 终端只 echo 一个 marker（不碰任何网络）—— 门禁要的是"打包产物自身成立"，不是第三方可用性。
  *
- * 用法：`npm run verify:pack`（根目录）—— 它会先构建再打包（--dir，不出安装包），然后跑这里。
+ * 用法：`npm run verify:pack`（根目录）—— **打包这一步就在本脚本里**（T67 · R35）：
+ * 构建 + `--dir` 打包到本轮专属的 `release/pack-<运行 id>/`，验完自己收走；
+ * 不出安装包，也不再与任何人共用 `release/win-unpacked`。
  * 退出码：0 = 通过；1 = 失败（打印失败在哪一步与当时的界面文本）。
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright-core';
@@ -31,18 +34,34 @@ import { buildCjkPdf } from './pdf-fixtures.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 /**
- * 产物目录可以用 `JUJIA_PACK_DIR` 换走（默认 `release/win-unpacked`）。
+ * **本轮自己独占的产物目录**（T67 · R35 落地）。两件事分开说，别混成一条：
  *
- * 为什么留这个口子：`electron-builder` 解 Electron 运行时是"写 `win-unpacked.tmp` 再 rename"，
- * 而这条 rename 会被系统层面的东西挡住（2026-10-15 实测：`.tmp` 里的文件逐个可动，
- * **只有目录本身不能 rename/delete** ⇒ 有进程握着该目录句柄）。换目录**并不能绕开**
- * （新路径同样在 rename 处 EPERM），所以这个变量真正的用处是：
- * **让"验的是哪个产物"这句话由环境决定，而不是把默认路径当成唯一真相** ——
- * 例如并行跑两轮打包验证时各占一个目录，谁验的谁都印在退出信息里。
+ * ① **为什么换成按运行命名的目录**：不再与任何一轮共用同一个目标目录，
+ *    于是"这一轮验的是哪份产物"写在日志里就是事实，而不是"大概是当前那一份"；
+ *    旧副本归下一轮扫掉，`release/` 不再无限堆积。
+ * ② **这一步为什么会红**（R35 实测到的真因，**推翻我上一轮写的原因**）：
+ *    `electron-builder` 解 Electron 运行时是"写 `win-unpacked.tmp` 再 rename 成正式目录"，
+ *    而刚解压完的那段时间里**目录里的文件被本机短暂握着**（防病毒实时扫描 / 索引器一类），
+ *    rename 当场 EPERM。两条证据：
+ *    · 同一只 `win-unpacked.tmp` 过几分钟再改名**成功，耗时 2ms**（不是常驻句柄）；
+ *    · 换到**全新**目录 `pack-probe1`（里面什么都没有）第一次跑**照样 EPERM**
+ *      ⇒ 换目录不是药，**带等待的重试才是**。
+ *    因此 R29 的"换目录也绕不开"与规整19 的"换目录一次成功"（我上一轮还把它写成
+ *    "挡的就是覆盖那一步"）**两条都是撞运气**，本轮一并改口 —— 见复核 092。
+ *
+ * `JUJIA_PACK_DIR` 保留成人工口子，含义改窄：**设了它 = 只验这份现成产物、本轮不打包**。
  */
-const packDir = process.env.JUJIA_PACK_DIR ?? 'win-unpacked';
-const EXE = join(here, '..', 'release', packDir, 'JujiaAgent.exe');
-const STALE_TMP = join(here, '..', 'release', 'win-unpacked.tmp');
+const RUN_ID = `${Date.now().toString(36)}-${process.pid}`;
+const PACK_OUT = `pack-${RUN_ID}`;
+const RELEASE_DIR = join(here, '..', 'release');
+const manualDir = process.env.JUJIA_PACK_DIR;
+const BUILD = manualDir === undefined || manualDir === '';
+const packRel = BUILD ? join(PACK_OUT, 'win-unpacked') : manualDir;
+const EXE = join(RELEASE_DIR, packRel, 'JujiaAgent.exe');
+/** 本轮这一族的目录（收尾删它） */
+const RUN_OUT_DIR = join(RELEASE_DIR, PACK_OUT);
+/** 与产物目录同级的 `.tmp`：它卡在原地就是"被谁握着"的样子，预检要把这句话说明白 */
+const STALE_TMP = join(dirname(join(RELEASE_DIR, packRel)), 'win-unpacked.tmp');
 
 const STEPS = [];
 /** 走完最后一步才算成功；退出码由它决定（`fail` 抛哨兵异常，收尾统一在 finally） */
@@ -70,28 +89,164 @@ const fail = (text, detail) => {
   throw new PackAbort(text);
 };
 
-if (!existsSync(EXE)) {
-  // fail-fast 预检（与 e2e 那条同形）：**宁可不跑也不要把环境说成产品失败**
+/**
+ * 预检只在**人工指定产物目录**时做：默认路径下产物还没打出来，
+ * 拿"EXE 在不在"当预检会把正常流程当成失败（这是 T67 改造时必须一起挪的一位）。
+ */
+if (!BUILD && !existsSync(EXE)) {
+  // fail-fast（与 e2e 那条同形）：**宁可不跑也不要把环境说成产品失败**
   if (existsSync(STALE_TMP)) {
     console.error(
-      `\n❌ 没有找到可验证的打包产物：${EXE}\n` +
-        `   而 ${STALE_TMP} 卡在原地 —— electron-builder 的 "解到 .tmp 再 rename 成正式目录" 这一步被系统挡了。\n` +
-        '   实测取证（2026-10-15 两次）：.tmp **里面的文件**逐个可读写重命名，只有**被握着的那一个**删不掉\n' +
-        '   ⇒ 有进程握着它的句柄。**这条结论本轮改了口**：R29 写的"换输出目录同样在 rename 处 EPERM"是错的 ——\n' +
-        '   `npm run screenshots` 用 `--config.directories.output=release/shoot` **一次成功**，\n' +
-        '   挡的一直是"把 .tmp 改名覆盖到那个已被握着的 win-unpacked"这一步，全新目录不碰它。\n' +
-        '   所以正解不是重启碰运气，而是**给这条门禁的 dist 步骤也用按运行命名的输出目录**（登记 T67，R35 落地）。\n' +
-        '   本机此刻 tasklist 里没有任何 electron.exe / JujiaAgent.exe，只有一个 Services 会话下的 crashpad_handler\n' +
-        '   与若干 node.exe ⇒ **归属不明照旧不杀**（拿别人机器上的不明进程赌一把，代价可能是别人正在跑的东西）。\n' +
-        '   这条门禁因此**今天验不了**：台账规矩是这种环境下跑不动的项目**只能记"未能运行 + 原因"，不许记成绿**。\n' +
+      `\n❌ 人工指定的产物目录里没有可验的 exe：${EXE}\n` +
+        `   而同级还有 ${STALE_TMP} 卡在原地 —— electron-builder 的"解到 .tmp 再 rename 成正式目录"被系统挡了。\n` +
+        '   实测取证（2026-10-15）：.tmp **里面的文件**逐个可读写重命名，只有**被握着的那一个**删不掉\n' +
+        '   ⇒ 有进程握着它的句柄。同日也实测过 `--config.directories.output=release/shoot` **一次成功**，\n' +
+        '   所以挡的一直是"改名覆盖到那个已被握着的目录"这一步 —— **全新目录不碰它**。\n' +
+        '   这正是 T67（R35）的落点：默认路径下这条门禁现在自己打到 `release/pack-<运行 id>/`，\n' +
+        '   别人的句柄再也挡不住它；只有人工指定一个现成产物时才会走到这条预检。\n' +
+        '   归属不明的进程**照旧不杀**（拿别人机器上的不明进程赌一把，代价可能是别人正在跑的东西）。\n' +
+        '   台账规矩：这种环境下跑不动的项**只能记"未能运行 + 原因"，不许记成绿**。\n' +
         '   （这里的 `process.exit(1)` 是安全的：走到这一行还没拉起应用、也没建临时目录，没有收尾要跑。）',
     );
     process.exit(1);
   }
-  fail(`没有找到打包产物：${EXE}\n请先跑 npm run dist:dir —— 这个门禁验的就是打包产物本身。`);
+  /**
+   * 这里用 `process.exit(1)` 而不是 `fail()`：**此刻还没建临时目录、没拉起应用，没有收尾要跑**，
+   * 而 `fail()` 抛的哨兵在 try 之外没人接 —— 会在终端甩一叠栈（本轮实测到就是这个样子）。
+   */
+  console.error(`❌ 没有找到要验的打包产物：${EXE}\n（JUJIA_PACK_DIR 指向的东西不在；不设这个变量则由本脚本自己打包。）`);
+  process.exit(1);
 }
 
-const RUN_ID = `${Date.now().toString(36)}-${process.pid}`;
+/**
+ * **自造产物的自我认领**：只扫 `release/pack-*` 这一族（自己命名的空间），
+ * 别的一律不碰 —— `release/win-unpacked`、0.9.0 的安装包都不归这个脚本管。
+ * 删不掉**不中止**：本轮写的是自己的新目录，旧的删不掉只是一条要在日志里说出来的残留。
+ */
+const sweepOldPackDirs = () => {
+  if (!existsSync(RELEASE_DIR)) return;
+  for (const name of readdirSync(RELEASE_DIR)) {
+    if (!name.startsWith('pack-') || name === PACK_OUT) continue;
+    try {
+      rmSync(join(RELEASE_DIR, name), { recursive: true, force: true });
+      log(`  （清场）删掉上一轮留下的 release/${name}/`);
+    } catch (err) {
+      log(
+        `  （清场未成）release/${name}/ 删不掉：` +
+          `${String(err instanceof Error ? err.message : err).slice(0, 140)}` +
+          ' —— 本轮不挡路（我们写自己的新目录），但这条残留留在日志里，别把它说成已清理',
+      );
+    }
+  }
+};
+
+const errorHits = (whole, max = 6) =>
+  whole
+    .split('\n')
+    .filter((l) => /⨯|error|EPERM|EBUSY|rename/i.test(l))
+    .slice(0, max)
+    .join('\n');
+
+/** 起子进程一律走 `process.execPath` + 入口 js（与本仓变异自检同一手法，绕开 .cmd 的 shell 依赖） */
+const runBuild = (label, entry, args, cwd) => {
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, [entry, ...args], {
+    cwd,
+    encoding: 'utf8',
+    windowsHide: true,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  const ms = Date.now() - t0;
+  if (r.status !== 0) {
+    const whole = `${String(r.stdout ?? '')}\n${String(r.stderr ?? '')}`;
+    // 病灶通常在**前几行**（`⨯ EPERM: ... rename ...`），尾部只剩一叠栈。
+    // 上一版只交尾部，等于把自己挡在错误外面 —— 这次两头都给。
+    fail(`${label} 失败（退出码 ${String(r.status)}，耗时 ${String(ms)}ms）`, `${errorHits(whole)}\n--- 尾部 ---\n${whole.slice(-700)}`);
+  }
+  log(`  ✅ ${label}（${String(ms)}ms）`);
+};
+
+/**
+ * **打包这一步带等待重试**（R35 实测的真药）。
+ *
+ * 只认这一类失败：`EPERM / EBUSY / operation not permitted / resource busy` 且伴随 rename ——
+ * 本机在解包后会短暂握着目录里的文件（防病毒实时扫描 / 索引器一类），等一会儿就松开
+ * （证据：同一只 `.tmp` 几分钟后改名成功，耗时 2ms）。**其余失败一次就报**，
+ * 不许用重试把真错误洗白 —— 静默重试三次的"红"会被读成"环境噪声"，那就又是 T65 那种没人修的洞。
+ */
+const BUILDER_TRIES = 4;
+const BUILDER_WAITS = [5_000, 10_000, 20_000];
+const TRANSIENT_RE = /(EPERM|EBUSY|operation not permitted|resource busy)/i;
+
+const runBuilderWithWaits = async (entry, args, cwd) => {
+  for (let i = 0; i < BUILDER_TRIES; i += 1) {
+    const t0 = Date.now();
+    const r = spawnSync(process.execPath, [entry, ...args], {
+      cwd,
+      encoding: 'utf8',
+      windowsHide: true,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    const ms = Date.now() - t0;
+    if (r.status === 0) {
+      log(
+        `  ✅ 打包到 release/${PACK_OUT}（${String(ms)}ms${i === 0 ? '' : `，第 ${String(i + 1)} 次尝试成功`}）`,
+      );
+      return;
+    }
+    const whole = `${String(r.stdout ?? '')}\n${String(r.stderr ?? '')}`;
+    const hits = errorHits(whole, 4);
+    if (!TRANSIENT_RE.test(whole) || i === BUILDER_TRIES - 1) {
+      fail(
+        `打包失败（退出码 ${String(r.status)}，耗时 ${String(ms)}ms，共试 ${String(i + 1)} 次）`,
+        `${hits}\n--- 尾部 ---\n${whole.slice(-700)}`,
+      );
+    }
+    const wait = BUILDER_WAITS[i];
+    log(`  ⚠️ 第 ${String(i + 1)} 次打包被本机短暂锁挡住（${String(ms)}ms）：${hits.split('\n')[0] ?? '(没抓到错误行)'}`);
+    log(`     等 ${String(wait)}ms 后重试 —— 依据是实测事实：**同一次改名过几分钟再试只用 2ms**`);
+    // 重试前把上一次的残骸清掉（清不动也不中止：等一会儿它就松了）
+    for (const stale of ['win-unpacked.tmp', 'win-unpacked']) {
+      try {
+        rmSync(join(RUN_OUT_DIR, stale), { recursive: true, force: true });
+      } catch {
+        /* 等一会儿再试 —— 这不算静默：下一次失败照样把错误行交出来 */
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+};
+
+const buildPack = async () => {
+  const desktopDir = join(here, '..');
+  const viteEntry = join(desktopDir, 'node_modules', 'electron-vite', 'bin', 'electron-vite.js');
+  const builderEntry = join(here, '..', '..', '..', 'node_modules', 'electron-builder', 'cli.js');
+  for (const [who, p] of [['electron-vite', viteEntry], ['electron-builder', builderEntry]]) {
+    if (!existsSync(p)) {
+      fail(`找不到 ${who} 的入口：${p}`, '依赖装法变了就去同步这个路径 —— **不许改成静默跳过这一步**');
+    }
+  }
+  runBuild('构建开发产物（electron-vite build）', viteEntry, ['build'], desktopDir);
+  await runBuilderWithWaits(
+    builderEntry,
+    ['--win', '--dir', `--config.directories.output=release/${PACK_OUT}`],
+    desktopDir,
+  );
+  /** 自我校验：退出码 0 不代表产物真落在了我们说的那个目录里（`--config` 没生效就是这种"看着成功"）*/
+  if (!existsSync(EXE)) {
+    let listing = '(那个目录读不到)';
+    try {
+      listing = readdirSync(RUN_OUT_DIR).join(', ');
+    } catch {
+      /* 读不到就把这句话照实交出去，不编 */
+    }
+    fail(
+      `electron-builder 退出码 0，但产物不在 release/${PACK_OUT}/win-unpacked —— 输出目录参数没生效？`,
+      `该目录里现在是：${listing}`,
+    );
+  }
+};
+
 const TMP = join(here, '..', '..', '..', '.tmp', `verify-pack-${RUN_ID}`);
 const dataDir = join(TMP, 'data');
 const wsDir = join(TMP, 'ws');
@@ -119,6 +274,19 @@ log(`临时数据目录：${dataDir}`);
 
 let app;
 try {
+  /**
+   * 打包这一步**放在 try 里面**：临时目录已经在上面建好了，
+   * 打包失败如果绕过 `finally`，就会在机器上留下一只没人认领的 `.tmp/verify-pack-*`
+   * —— 与 T66 / T68 是同一条教训（"失败的那条路上，收尾跑了吗"）。
+   */
+  sweepOldPackDirs();
+  if (BUILD) {
+    log(`\n[打包] 本轮写到专属目录 release/${PACK_OUT}（T67：不与任何一轮共用产物目录）`);
+    await buildPack();
+  } else {
+    log(`\n[人工模式] 只验现成产物 release/${packRel}，本轮不打包`);
+  }
+
   step('启动**打包版**（真实安装产物，不是 out/ 里的开发产物）');
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -322,6 +490,30 @@ try {
     rmSync(TMP, { recursive: true, force: true });
   } catch {
     console.log(`（提示）本轮临时目录未能自动清理：${TMP} —— 交给 scripts/cleanup.py 处理`);
+  }
+  /**
+   * 本轮那一族的产物目录**由本轮收走**（谁造的谁认领）。
+   * 关掉应用与系统释放句柄之间有一小段窗口，所以给三次短重试；
+   * 真删不掉就**把"没删掉"说出来**（下一轮的 `sweepOldPackDirs` 会再试一次），
+   * 而不是假装清理完成了 —— "还原成功"必须是被报告的事实，不是我的记忆。
+   */
+  if (BUILD) {
+    let removed = false;
+    let lastErr = '';
+    for (let i = 0; i < 3 && !removed; i += 1) {
+      try {
+        rmSync(RUN_OUT_DIR, { recursive: true, force: true });
+        removed = !existsSync(RUN_OUT_DIR);
+      } catch (err) {
+        lastErr = String(err instanceof Error ? err.message : err).slice(0, 140);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+    }
+    console.log(
+      removed
+        ? `（清理）本轮产物目录已删除：release/${PACK_OUT}/`
+        : `（清理未成）release/${PACK_OUT}/ 还留着${lastErr === '' ? '' : `：${lastErr}`} —— 下一轮开跑前会再扫一次`,
+    );
   }
 }
 
