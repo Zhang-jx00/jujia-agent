@@ -1,5 +1,5 @@
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { z } from 'zod';
 import { displayPath, guardPath } from '../path-guard';
 import { ToolError, type StoredTool, type ToolDefinition, type ToolOutcome } from '../types';
@@ -150,8 +150,3 @@ export const listDirTool: ToolDefinition<{
 
 /** 内置文件工具集合（后续阶段的 run_command / git 等按同一契约追加） */
 export const FILE_TOOLS: ReadonlyArray<StoredTool> = [readFileTool, writeFileTool, listDirTool];
-
-/** 供测试用：拼接工作区内的路径 */
-export function pathIn(workspaceRoot: string, ...parts: string[]): string {
-  return join(workspaceRoot, ...parts);
-}

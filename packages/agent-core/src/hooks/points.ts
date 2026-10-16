@@ -6,7 +6,7 @@
  * 循环与对话服务都调这里，格式化只写一份，也便于单测（不需要真的跑循环）。
  */
 
-import { emptyHookResult, type HookRunner, type HookRunResult } from './types';
+import { type HookRunner, type HookRunResult } from './types';
 
 export interface HookPointContext {
   sessionId: string;
@@ -101,6 +101,3 @@ export async function stopTurn(
     diagnostics: res.diagnostics,
   };
 }
-
-/** 单测与"没有钩子"场景用：返回空结果，避免各处判空 */
-export const emptyPoints = (): HookRunResult => emptyHookResult();

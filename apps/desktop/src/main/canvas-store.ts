@@ -1,4 +1,4 @@
-import { readFile, readdir, rm } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { JsonStore, atomicWriteJson } from '@jujia/shared';
 import {
@@ -159,9 +159,4 @@ function graphVersionOf(data: unknown): number {
 /** 真实运行时：数据根下的 canvas/ 目录 */
 export function defaultCanvasRoot(dataRoot: string): string {
   return join(dataRoot, 'canvas');
-}
-
-/** 删掉一张图（M9a 只在测试与将来的"删除"按钮里用；保留在这里避免另开一处路径拼接） */
-export async function removeCanvas(root: string, id: string): Promise<void> {
-  await rm(canvasFile(root, id), { force: true });
 }

@@ -1,5 +1,4 @@
 import {
-  CANVAS_MAX_CONFIG_BYTES,
   CANVAS_MAX_RUN_STEPS,
   runGraph,
   summarizeRun,
@@ -212,6 +211,3 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
     },
   };
 }
-
-/** 与图契约里的上限保持一处（供界面提示用） */
-export const canvasRunnerLimits = { maxSteps: CANVAS_MAX_RUN_STEPS, maxConfigBytes: CANVAS_MAX_CONFIG_BYTES };

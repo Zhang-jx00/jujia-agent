@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { JsonStore } from '@jujia/shared';
@@ -307,15 +307,4 @@ export function createFileScheduleStore(dataRoot: string): ScheduleStore {
   };
 
   return createCore(read, write, () => lastHealth);
-}
-
-/** 只有测试与 e2e 的"磁盘真值核对"会用到 */
-export async function readScheduleFile(dataRoot: string): Promise<string> {
-  return readFile(scheduleFile(dataRoot), 'utf8');
-}
-
-/** 给"文件坏了不许静默当空表"这类用例铺数据 */
-export async function writeRawScheduleFile(dataRoot: string, text: string): Promise<void> {
-  await mkdir(dirname(scheduleFile(dataRoot)), { recursive: true });
-  await writeFile(scheduleFile(dataRoot), text, 'utf8');
 }

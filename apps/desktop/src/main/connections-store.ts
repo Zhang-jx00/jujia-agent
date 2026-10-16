@@ -8,7 +8,7 @@ import {
   type ConnectionView,
 } from '@jujia/shared-ipc';
 import { getDataRoot } from './paths';
-import { hintOf, isEncryptionAvailable, protectSecret, revealSecret, type ProtectedSecret } from './secret';
+import { hintOf, protectSecret, revealSecret, type ProtectedSecret } from './secret';
 
 export const CONNECTIONS_VERSION = 1;
 
@@ -146,8 +146,4 @@ export async function resolveConnection(
   const apiKey = revealSecret(record.secret);
   if (!apiKey) throw new Error('该连接没有可用的 API Key（可能已更换过系统账户或未填写）');
   return { record, apiKey };
-}
-
-export function keyStorageMode(): 'safeStorage' | 'plain' {
-  return isEncryptionAvailable() ? 'safeStorage' : 'plain';
 }
