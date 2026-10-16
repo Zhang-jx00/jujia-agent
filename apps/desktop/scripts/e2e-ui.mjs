@@ -14,9 +14,9 @@
  * 退出码：0 = 通过；1 = 失败（打印失败在哪一步、以及界面当时的文本）
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -83,12 +83,34 @@ const fail = (text, detail) => {
   console.error(`\n❌ ${text}`);
   if (detail !== undefined) console.error(String(detail).slice(0, 1200));
   console.error(`\n已完成步骤：\n${STEPS.map((s) => '  - ' + s).join('\n')}`);
+  /**
+   * 现场再加一份**应用自己写的账**（R34 · 偶发红这一族）：渲染进程没了、落盘失败、启动异常，
+   * 主进程都会写进隔离数据根的 `logs/app-*.jsonl`（M12 批一那条线）。以前失败只交界面文本，
+   * 崩溃类的一次红只能留下 Playwright 那句 `Page crashed` —— 原因在盘上，没人去读。
+   */
+  console.error(`\n[现场·应用运行日志尾部]\n${runLogTail()}`);
   throw new E2EAbort(text);
 };
 const step = (text) => {
   STEPS.push(text);
   log(`\n[${STEPS.length}] ${text}`);
 };
+
+/**
+ * 悬挂的 Promise 不许把进程打死在收尾之前（T66 同族 · R34 第三次跑当场撞出）。
+ *
+ * 那一轮红在第 24 步："读敏感文件没弹确认"。`fail()` 话说完了，Node 却在随后那条**没 await 的
+ * `toolRun` 拒绝**上走了默认的 unhandledRejection 通道（日志里就是
+ * `node:internal/process/promises triggerUncaughtException`），**`finally` 没跑完** ——
+ * 临时目录 `.tmp/e2e-mvahmtiz-19052` 就是这么留在盘上的。后果与 T66 那三次同一条线：
+ * 红一次就多一堆残留，而残留的负载回头影响下一轮的测量。
+ * 处置：**说出来，但不杀进程**。要紧的调用后面都 `await` 得到（该红的照样红），
+ * 这里只兜住"已经没人在等它"的那一类 —— 静默吞掉是禁区，所以它必须打进门禁日志。
+ */
+process.on('unhandledRejection', (reason) => {
+  const text = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+  log(`  [取证·未处理拒绝] ${text.slice(0, 400)}`);
+});
 
 // ---------- 准备隔离环境 ----------
 // 目录本身是新的（RUN_ID 唯一），因此这里只需要创建，不需要删除
@@ -98,6 +120,25 @@ const profileDir = join(TMP_ROOT, 'profile');
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(wsDir, { recursive: true });
 mkdirSync(profileDir, { recursive: true });
+
+/**
+ * 读隔离数据根里**应用自己写**的运行日志尾部（M12 批一的落盘线：`logs/app-本地日期.jsonl`）。
+ * 只给尾部几条、读不到就照实说读不到 —— 这段是现场，不是断言，任何异常都不许把失败本身盖掉。
+ */
+const runLogTail = () => {
+  try {
+    const now = new Date();
+    const key = `${String(now.getFullYear())}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+      now.getDate(),
+    ).padStart(2, '0')}`;
+    const file = join(dataDir, 'logs', `app-${key}.jsonl`);
+    if (!existsSync(file)) return `（没有运行日志：logs/app-${key}.jsonl）`;
+    const lines = readFileSync(file, 'utf8').split('\n').filter((l) => l.trim() !== '');
+    return lines.slice(-6).join('\n');
+  } catch (err) {
+    return `（读运行日志失败：${String(err instanceof Error ? err.message : err).slice(0, 160)}）`;
+  }
+};
 
 // 预置一个插件（等价于"用户自己装了一个插件"），供界面断言
 const pluginDir = join(dataDir, 'plugins', 'my-team');
@@ -618,6 +659,88 @@ env.JUJIA_UPDATE_API = `http://127.0.0.1:${String(updatePort)}/releases/latest`;
 log(`数据目录（临时）：${dataDir}`);
 log(`工作区（临时）：${wsDir}`);
 
+/**
+ * ---------- 常驻输入与崩溃取证（R34 · "e2e 偶发红"这一族）----------
+ *
+ * 为什么装在**每一个窗口**、而且**不只在失败时**给：
+ * 这个仓库记过两次同形状的红 —— 复核 051 的 R-4（第 17 步"Git 暂存等不到已暂存（1）"，
+ * 现场 dump 出来的是**画布页**的文案）与规整19 的 T65（第 26 步 B 的用量没出现，现场是**外观页**）。
+ * 两次的共同点不是 git、不是流式，而是"**界面当时停在另一个页签**"。页签只能由页签按钮的 onClick 改
+ * （`App.tsx` 里 `setTab` 只有那一处），而 onClick 分不清点从哪来 —— 脚本的 Playwright 点击、
+ * 键盘激活、真人的手，全都走同一个 DOM 事件。以前只有失败那一刻的快照，绿的那一次次里
+ * 页签被拨来过也看不出来，所以这次把记录**改成实时打到门禁日志上**（红与绿都留痕）。
+ *
+ * 三条判据都在页面里，不改任何断言、不放宽任何时限：
+ * ① 每一次点击记下"落到哪儿 + 此前 400ms 内有多少**个不同坐标**的 mousemove"——
+ *    实测基线（三次全绿跑）：**脚本自己的点击是 1–6 处**，真人的手移过去是几十处且坐标不落在按钮中心；
+ *    这条只当**判读依据**，不许写成断言（写死数字就是又一条会被合法增长咬死的锁）；
+ * ② 页签一变就 `console.log` 一句，Node 侧原样转进门禁日志（不等失败）；
+ * ③ `page.on('crash')` 把渲染进程崩溃单独说出来（R27/R28 的 [47] `Page crashed` 那条观察项），
+ *    崩溃之后应用的 `render-process-gone` 也会进运行日志，失败时一起交出来。
+ */
+const watchWindow = async (page, tag) => {
+  page.on('console', (msg) => {
+    const text = msg.text();
+    if (text.startsWith('[取证·')) log(`  ${text}`);
+  });
+  page.on('crash', () => log(`  [取证·${tag}] ⚠️ 渲染进程崩溃（Playwright 的 crash 事件）@${new Date().toISOString()}`));
+  await page.evaluate((t) => {
+    const w = window;
+    if (w.__fxInstalled) return;
+    w.__fxInstalled = true;
+    w.__fxClicks = [];
+    w.__fxMoves = [];
+    document.addEventListener(
+      'mousemove',
+      (ev) => {
+        w.__fxMoves.push(`${String(Date.now())}:${String(ev.clientX)},${String(ev.clientY)}`);
+        if (w.__fxMoves.length > 120) w.__fxMoves.shift();
+      },
+      true,
+    );
+    document.addEventListener(
+      'click',
+      (ev) => {
+        const el = ev.target instanceof Element ? ev.target : null;
+        const btn = el ? el.closest('button') : null;
+        const label = btn && btn.textContent ? btn.textContent.trim().slice(0, 20) : '(非按钮)';
+        const where = el && el.closest('nav.app-tabs') ? 'NAV' : 'body';
+        const now = Date.now();
+        const recent = new Set(
+          w.__fxMoves.filter((m) => now - Number(m.split(':')[0]) <= 400).map((m) => m.slice(m.indexOf(':') + 1)),
+        ).size;
+        w.__fxClicks.push(
+          `${where}:${label} @${String(ev.clientX)},${String(ev.clientY)} 前400ms移动${String(recent)}处`,
+        );
+        if (w.__fxClicks.length > 60) w.__fxClicks.shift();
+      },
+      true,
+    );
+    const activeTab = () => {
+      const b = [...document.querySelectorAll('nav.app-tabs button')].find((x) =>
+        x.className.includes('app-tab-active'),
+      );
+      return b && b.textContent ? b.textContent.trim() : '(无 active)';
+    };
+    const attach = (tries) => {
+      const nav = document.querySelector('nav.app-tabs');
+      if (nav === null) {
+        if (tries < 60) setTimeout(() => attach(tries + 1), 100);
+        return;
+      }
+      let last = activeTab();
+      new MutationObserver(() => {
+        const now = activeTab();
+        if (now === last) return;
+        last = now;
+        const c = w.__fxClicks.length > 0 ? w.__fxClicks[w.__fxClicks.length - 1] : '(没有点击记录)';
+        console.log(`[取证·${t}] 页签切到「${now}」@${new Date().toISOString()}｜最近一次点击 ${c}`);
+      }).observe(nav, { attributes: true, attributeFilter: ['class'], subtree: true });
+    };
+    attach(0);
+  }, tag);
+};
+
 let app;
 try {
   step('启动应用（真实 Electron + 真实渲染层）');
@@ -629,6 +752,7 @@ try {
   });
   const win = await app.firstWindow();
   await win.waitForSelector('nav.app-tabs', { timeout: 20_000 });
+  await watchWindow(win, 'w1');
   ok('窗口打开，标签栏已渲染');
 
   const tabButton = (label) => win.locator('nav.app-tabs button', { hasText: label });
@@ -1078,19 +1202,75 @@ try {
    * （复核 026 的 G-8 教训：只看界面文案的断言可以把拦截整个删掉还全绿。）
    * 工作区是第 6 步设进来的临时目录，本步骤在它里面就地 `git init` 一个真仓库。
    */
-  const g_in = (args) => runGit('git', args, { cwd: wsDir, windowsHide: true });
+  /**
+   * 在测试工作区里跑 git：**一件事只有一处定义**（R34 把这一族合到一份实现上）。
+   *
+   * 为什么合：这个仓库同时被两边用 —— 应用在里面跑 status/diff/commit，脚本在外面写文件并提交，
+   * git 用 `.git/index.lock` 互斥，撞上就当场 `Unable to create …: File exists`。
+   * 复核 051 的 R-4 就是红在这儿（第 17 步等不到「已暂存（1）」），而铺设9 那一步（现在的第 46 步）
+   * 早为同一件事写过一份有界退避 —— **两份实现一定会漂**（一份改重试另一份不知道），所以合成一份。
+   * 三条口径：① 等是**有界**的（20 次 × 300ms，沿用旧实现的原值）；
+   * ② **非撞锁的失败当场点名**（判定一概不放宽，也不让它退化成一句裸栈）；
+   * ③ 每一次撞锁都留一行当堂现场（命令 / 锁龄 / 还在跑的 git 进程数）——
+   *    R-4 那次"重跑绿了就当没事"的根因至今没抓到，所以**绿的那一次次也要留得下证据**。
+   */
+  const LOCK_RETRY_TRIES = 20;
+  const LOCK_RETRY_MS = 300;
+  const lockPath = join(wsDir, '.git', 'index.lock');
+  const gitProcCount = () => {
+    const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq git.exe', '/FO', 'CSV', '/NH'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    return r.status === 0 ? (String(r.stdout).match(/"git\.exe"/g) ?? []).length : -1;
+  };
+  const lockScene = (cmd) => {
+    let age = '锁不在（已松开）';
+    try {
+      const st = statSync(lockPath);
+      age = `锁龄 ${String(Date.now() - st.mtimeMs)}ms / ${String(st.size)} 字节`;
+    } catch {
+      // 读不到就是没有：这句本身就是现场
+    }
+    return `${cmd}｜${age}｜同时在跑的 git 进程 ${String(gitProcCount())} 个`;
+  };
+  let gLockHits = 0;
+  let gLockWaitMs = 0;
+  const gitInWs = async (args) => {
+    for (let i = 0; ; i += 1) {
+      try {
+        return await runGit('git', args, { cwd: wsDir, windowsHide: true });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/index\.lock/i.test(msg)) fail(`在测试工作区跑 git 失败：${args.join(' ')}`, msg.slice(0, 600));
+        if (i === LOCK_RETRY_TRIES - 1) {
+          fail(
+            `在测试工作区跑 git 连续撞锁 ${String(LOCK_RETRY_TRIES)} 次仍未松开：${args.join(' ')}`,
+            `${lockScene(args.join(' '))}\n${msg.slice(0, 400)}`,
+          );
+        }
+        gLockHits += 1;
+        gLockWaitMs += LOCK_RETRY_MS;
+        log(
+          `  [取证·git 竞争 #${String(gLockHits)}] ${lockScene(args.join(' '))}` +
+            ` → 等 ${String(LOCK_RETRY_MS)}ms 后重试（第 ${String(i + 1)}/${String(LOCK_RETRY_TRIES)} 次）`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+      }
+    }
+  };
   const commitCount = async () => {
-    const r = await g_in(['rev-list', '--count', 'HEAD']);
+    const r = await gitInWs(['rev-list', '--count', 'HEAD']);
     return Number.parseInt(r.stdout.trim(), 10);
   };
 
   step('内置 Git：暂存 → 确认 → 提交，磁盘上真的多出一次提交（权限门每次都过）');
-  await g_in(['init', '-q']);
-  await g_in(['config', 'user.email', 'e2e@example.invalid']);
-  await g_in(['config', 'user.name', 'e2e']);
+  await gitInWs(['init', '-q']);
+  await gitInWs(['config', 'user.email', 'e2e@example.invalid']);
+  await gitInWs(['config', 'user.name', 'e2e']);
   writeFileSync(join(wsDir, 'README-e2e-seed.md'), 'seed\n', 'utf8');
-  await g_in(['add', '--', 'README-e2e-seed.md']);
-  await g_in(['commit', '-qm', 'seed']);
+  await gitInWs(['add', '--', 'README-e2e-seed.md']);
+  await gitInWs(['commit', '-qm', 'seed']);
   const seededCount = await commitCount();
 
   const gitFile = `改动-${String(Date.now()).slice(-6)}.txt`;
@@ -1138,7 +1318,7 @@ try {
       dump.slice(0, 1200),
     );
   }
-  const subject = (await g_in(['log', '-1', '--pretty=%s'])).stdout.trim();
+  const subject = (await gitInWs(['log', '-1', '--pretty=%s'])).stdout.trim();
   if (subject !== 'e2e：接上了 git') fail('仓库最新提交的主题不是我们刚提交的那条', subject);
   ok('提交过了硬确认，并且真的写进了仓库历史');
 
@@ -1179,6 +1359,17 @@ try {
   const afterDeny = await commitCount();
   if (afterDeny !== beforeDeny) fail(`拒绝之后仓库里却多出了提交（${String(beforeDeny)} → ${String(afterDeny)}）`);
   ok('硬 ask 不被"总是允许"压掉；拒绝后仓库真的没动');
+
+  /**
+   * Git 这两步收尾时把**竞争情况**说一句话（R34 取证，不是断言）：
+   * 脚本侧撞了几次锁、界面上有没有出现过应用侧那句"等待 index.lock 释放约 …ms 后完成"。
+   * 两边都是 0 的时候也要出声 —— 那才是"这一轮真的没有并发撞车"的证据；
+   * 只有一句"跑过了"的话，下一次红还是得靠人回忆。
+   */
+  log(
+    `  [取证·git 竞争小结①] 到第 18 步为止：脚本侧撞锁 ${String(gLockHits)} 次（累计等过 ${String(gLockWaitMs)}ms）｜` +
+      `界面上出现过应用侧的"等待 index.lock"提示：${(await bodyText()).includes('等待 index.lock') ? '是' : '否'}`,
+  );
 
   step('内置 exec：批准后真的落盘；硬 ask 不给「总是允许」按钮、批准也不外溢；拒绝后磁盘上什么都没有');
   /**
@@ -1521,6 +1712,7 @@ try {
   });
   const win2 = await app.firstWindow();
   await win2.waitForSelector('body', { timeout: 15_000 });
+  await watchWindow(win2, 'w2');
   const direct = await win2.evaluate(async (id) => {
     const page = await window.jujia.chatHistory({ sessionId: id, limit: 120 });
     return { total: page.total, first: page.messages[0]?.content ?? '(空)', hasMore: page.hasMore };
@@ -1579,6 +1771,8 @@ try {
     }
   };
   const toolReadFile = (path) => win2.evaluate(async (p) => await window.jujia.toolRun('read_file', { path: p }), path);
+  /** 每一条"先放出去再等弹窗"的调用，它的结局记在这儿给失败现场用（见下面 R34 那段说明） */
+  const settledNote = {};
 
   const secretMarker = 'E2E_T1_SECRET_DO_NOT_LEAK';
   writeFileSync(join(wsDir, '.env'), `API_TOKEN=${secretMarker}\n`, 'utf8');
@@ -1589,9 +1783,28 @@ try {
    */
   const SENSITIVE_HEAD = '需要你确认：read_file · 读取 —— 目标是敏感路径';
 
+  /**
+   * 三个 `toolRun` 都是**先放出去、等弹窗再收**（不 await 就会悬挂，await 就等不到弹窗）。
+   * R34 给它们各挂一个"结算记录"：① 失败现场因此能直接说出这一条工具调用**到底怎么了**
+   * （还在等 = 闸门没弹；已返回 = 内容都读回来了，只读放行抢在敏感判定之前；已拒绝 = IPC 自己出错），
+   * 而不是只留一句"没弹确认"让人猜；② 顺带把这些 Promise 变成"有人处理过"——
+   * 本轮第三次跑红在这儿时，`fail()` 之后那些悬挂的 Promise 拒绝**把进程打死在收尾之前**，
+   * 临时目录就是这么留下的（`node:internal/process/promises triggerUncaughtException` 在日志里为证）。
+   */
+  const settled = (label) => (value) => {
+    settledNote[label] = `已返回 ${JSON.stringify(value).slice(0, 260)}`;
+  };
+  const settledFail = (label) => (err) => {
+    settledNote[label] = `已拒绝 ${String(err instanceof Error ? err.message : err).slice(0, 260)}`;
+  };
   const deniedRead = toolReadFile('.env');
+  settledNote.deniedRead = '(还在等主进程的回答)';
+  deniedRead.then(settled('deniedRead'), settledFail('deniedRead'));
   if ((await waitText2(SENSITIVE_HEAD)) !== true) {
-    fail('read_file 读 .env 竟然没弹确认（只读放行仍排在敏感判定之前 —— T1 没修上）', (await body2()).slice(0, 900));
+    fail(
+      'read_file 读 .env 竟然没弹确认（只读放行仍排在敏感判定之前 —— T1 没修上）',
+      `那次调用的结局：${settledNote.deniedRead}\n${(await body2()).slice(0, 900)}`,
+    );
   }
   await clickDialog2('拒绝');
   const t1Denied = await deniedRead;
@@ -1602,7 +1815,14 @@ try {
   ok('拒绝 → 内容没有进上下文（工具结果里没有那把密钥）');
 
   const alwaysRead = toolReadFile('.env');
-  if ((await waitText2(SENSITIVE_HEAD)) !== true) fail('第二次读敏感文件没有再弹确认');
+  settledNote.alwaysRead = '(还在等主进程的回答)';
+  alwaysRead.then(settled('alwaysRead'), settledFail('alwaysRead'));
+  if ((await waitText2(SENSITIVE_HEAD)) !== true) {
+    fail(
+      '第二次读敏感文件没有再弹确认',
+      `那次调用的结局：${settledNote.alwaysRead}\n${(await body2()).slice(0, 900)}`,
+    );
+  }
   await assertHardAskCopy2('读敏感文件');
   await clickDialog2('允许一次');
   const alwaysResult = await alwaysRead;
@@ -1611,8 +1831,13 @@ try {
   ok('批准 → 才读得到内容');
 
   const thirdRead = toolReadFile('.env');
+  settledNote.thirdRead = '(还在等主进程的回答)';
+  thirdRead.then(settled('thirdRead'), settledFail('thirdRead'));
   if ((await waitText2(SENSITIVE_HEAD)) !== true) {
-    fail('上一次的「允许一次」被当成了记住 —— 第三次读敏感文件没再问，敏感路径绝不允许这样');
+    fail(
+      '上一次的「允许一次」被当成了记住 —— 第三次读敏感文件没再问，敏感路径绝不允许这样',
+      `那次调用的结局：${settledNote.thirdRead}\n${(await body2()).slice(0, 900)}`,
+    );
   }
   await clickDialog2('拒绝');
   await thirdRead;
@@ -1731,37 +1956,15 @@ try {
    * 所以三种载体各盯一条：**用量数字**（usage）、**仍在发送中的状态**（done）、**别人的正文**。
    */
   step('真·流式对话走一遍：切走的会话不许改掉当前界面（用量 / 收尾 / 正文三条都盯）');
-  /* ===== 常驻现场取证（T65 装在门禁里，复核 089）=====
+  /* ===== 本步的现场快照（T65 装在门禁里，复核 089；R34 把记录器提到窗口级）=====
    * 起因：规整19 收口时这一步**红过一次**，报"B 自己的用量没出现"，而失败时 dump 出来的界面停在
    * **外观页** —— 脚本里唯一点外观的地方在第 50 步用的还是另一个窗口句柄，时间上不可能。
    * 第二次带这段取证重跑：65 步全绿，快照显示当时活动页签是"对话"、输入框在、B 的正文已到末段。
-   * **根因未定**（一次红、一次绿，不编故事），所以把取证留在门禁里而不是留在我脑子里：
-   * ① 记录每一个真的落到 DOM 上的点击（含它是不是点在页签栏上）；② 失败时给出"当前哪一页是活的 /
-   * 输入框在不在 / A 与 B 的末段在不在 / 最近 12 次点击"。下次再红，出处就在日志里，不用再猜。
-   * 取证本身只做两次 `evaluate`，不改变判定，也不给任何断言放宽时限。
+   * 而复核 051 的 R-4（第 17 步红）当时的现场是**画布页** —— 两次同形状，所以 R34 不再只在失败时抓：
+   * 点击、鼠标移动、页签变化、渲染进程崩溃都由 `watchWindow` 在窗口一开口就盯着，实时打进门禁日志，
+   * **绿的那一次次也留痕**（页签被人拨了一下又拨回来，以前完全看不出来）。
+   * 这里只留"失败那一刻的界面状态"这一份快照；记录器本体在窗口级那一处，不在这里重复装第二套。
    */
-  await win2.evaluate(() => {
-    const w = window;
-    w.__fxClicks = [];
-    document.addEventListener(
-      'click',
-      (ev) => {
-        const el = ev.target instanceof Element ? ev.target : null;
-        const btn = el ? el.closest('button') : null;
-        const label = btn && btn.textContent ? btn.textContent.trim().slice(0, 20) : '(非按钮)';
-        const where = el && el.closest('nav.app-tabs') ? 'NAV' : 'body';
-        const t = Date.now();
-        w.__fxClicks.push(`${where}:${label}`);
-        w.__fxAt = w.__fxAt || [];
-        w.__fxAt.push(t);
-        if (w.__fxClicks.length > 80) {
-          w.__fxClicks.shift();
-          w.__fxAt.shift();
-        }
-      },
-      true,
-    );
-  });
   const fx = async () =>
     await win2.evaluate(() => {
       const navs = [...document.querySelectorAll('nav.app-tabs button')];
@@ -2073,6 +2276,7 @@ try {
   });
   const win3 = await app.firstWindow();
   await win3.waitForSelector('body', { timeout: 15_000 });
+  await watchWindow(win3, 'w3');
   const body3 = async () => await win3.evaluate(() => document.body.innerText);
   const waitText3 = async (needle, ms = 10_000) => {
     try {
@@ -2815,26 +3019,8 @@ try {
 
   /** 在工作区里造一次本地提交（走命令行，是为了把"推"这一步单独隔离出来看） */
   let pushSeq = 0;
-  /**
-   * **带退避地等 git 的 index.lock 松开**。
-   * 为什么需要：这个仓库同时被两边用 —— 应用在里面跑 status/diff/log/push，测试脚本在外面写文件并提交。
-   * git 用 `.git/index.lock` 互斥，撞到就当场 `Unable to create ...: File exists` 抛异常
-   * （这一步第一次红就是红在这儿，不是产品缺陷）。重试是有界的：等不到就把现场交出来。
-   */
-  const gitInWs = async (args, tries = 20) => {
-    for (let i = 0; i < tries; i += 1) {
-      try {
-        await runGit('git', args, { cwd: wsDir, windowsHide: true });
-        return;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!msg.includes('index.lock') || i === tries - 1) {
-          fail(`在测试工作区跑 git 失败：${args.join(' ')}`, msg.slice(0, 600));
-        }
-        await new Promise((r) => setTimeout(r, 300));
-      }
-    }
-  };
+  /* 这里的 `gitInWs` 是第 17 步那一处定义的同一个助手（R34 合并）：同一件事两份实现一定会漂，
+   * 而合并之后这一步也一并拿到了"撞锁当堂出声"的取证。 */
 
   const localCommit = async () => {
     pushSeq += 1;
@@ -2902,6 +3088,8 @@ try {
     fail(`拒绝了却仍然发出去了（${String(beforePushDeny)} → ${String(afterPushDeny)}）—— 外发被静默执行`);
   }
   ok(`推送：批准才发（远端 ${String(beforeAllow)} → ${String(afterAllow)}）、拒绝就不发（${String(beforePushDeny)} 不变），两次都弹硬确认且没有「总是允许」`);
+  /** 第 46 步是"脚本在外面提交、应用在里面 push"重叠最狠的一处 —— 竞争计数在这里收第二次口 */
+  log(`  [取证·git 竞争小结②] 到第 46 步为止：脚本侧累计撞锁 ${String(gLockHits)} 次（累计等过 ${String(gLockWaitMs)}ms）`);
 
   step('T23 终端页：切走页签会话不结束，回来接回同一个会话（切走期间的输出补得回来，也不多出一个 PTY）');
   /**
@@ -3755,6 +3943,7 @@ try {
   });
   const win4 = await app.firstWindow();
   await win4.waitForSelector('body', { timeout: 15_000 });
+  await watchWindow(win4, 'w4');
   const body4 = async () => (await win4.evaluate(() => document.body.innerText)).slice(0, 3_000);
   const waitText4 = async (needle, ms = 10_000) => {
     try {

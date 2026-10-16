@@ -1677,6 +1677,55 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 26. e2e 的常驻取证不许被顺手删掉（R34 立 · 2026-10-16）
+ *
+ * 为什么立它：这个仓库记过两次**同形状**的偶发红 —— 复核 051 的 R-4（第 17 步，现场是画布页）
+ * 与规整19 的 T65（第 26 步，现场是外观页）。共同点不是 git 也不是流式，而是"界面当时停在另一个页签"，
+ * 而页签只能由页签按钮的 onClick 改，onClick 分不清点从哪来。
+ * 上一轮装的取证**只在失败那一刻**取样，所以绿的那一次次里页签被拨来过也看不见 —— 于是 R34 把它
+ * 提到窗口级、实时打进门禁日志。这类"以后每一轮都靠它找根因"的东西，最怕的就是后面某轮重构顺手删掉，
+ * 而且删掉之后**什么都不会红**（取证不是断言）。所以这次把"装没装"变成判据。
+ *
+ * 判据两半：
+ * ① **每一扇窗都装了**：`app.firstWindow()` 出现 N 次，`await watchWindow(` 至少 N 次（允许多不许少）；
+ * ② **五处探针各在其位**（剥注释后逐个 needle）：点击环 / 鼠标移动环 / 页签变化的 MutationObserver /
+ *    `page.on('crash'` / 脚本侧撞锁检测 / 失败时读应用自己的运行日志。
+ * 防失焦：`app.firstWindow()` 一次都扫不到 = 这条守卫在跑空，照红。
+ * ------------------------------------------------------------------ */
+
+{
+  const rel = 'apps/desktop/scripts/e2e-ui.mjs';
+  const src = read(rel);
+  const bare = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const bad = [];
+  const windows = (bare.match(/app\.firstWindow\(\)/g) ?? []).length;
+  const watched = (bare.match(/await watchWindow\(/g) ?? []).length;
+  if (windows === 0) bad.push('扫不到 `app.firstWindow()` —— 窗口取法变了，这条守卫失去靶子');
+  if (windows > 0 && watched < windows) {
+    bad.push(`开了 ${String(windows)} 扇窗只装了 ${String(watched)} 套取证：那几次重开/新开的窗口出问题时会什么都没有`);
+  }
+  const needles = [
+    ['w.__fxClicks.push(', '点击环（每一次落到 DOM 的点击都记下来）'],
+    ['w.__fxMoves.push(', '鼠标移动环（真人手与脚本点击的区分靠它）'],
+    ['new MutationObserver(', '页签变化的实时上报（不等失败才取样）'],
+    // 判据取**调用形状**（带逗号）而不是光看事件名：日志正文里原本写着 `page.on('crash'` 这句话，
+    // 注入用例把事件名改掉之后守卫照样绿 —— 那是"needle 被自己的文案喂饱"，本仓撞过好几次的坑。
+    [`page.on('crash',`, '渲染进程崩溃的单独一句（[47] Page crashed 那一族）'],
+    ['index\\.lock', '脚本侧撞锁检测（第 17 步那一族的当堂现场）'],
+    ['runLogTail()', '失败时把应用自己写的运行日志尾部一起交出来'],
+    [`process.on('unhandledRejection'`, '悬挂 Promise 的拒绝说出来但不杀进程（T66 同族：红一次别留一堆积木）'],
+  ];
+  for (const [needle, why] of needles) {
+    if (!bare.includes(needle)) bad.push(`取证探针「${needle}」不在了 —— ${why}`);
+  }
+  report(
+    `e2e 的常驻取证还在原位（${String(windows)} 扇窗 / ${String(watched)} 套记录器；点击 · 鼠标 · 页签 · 崩溃 · 撞锁 · 运行日志 · 未处理拒绝）`,
+    bad.length === 0,
+    bad.join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 
