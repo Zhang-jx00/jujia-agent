@@ -25,7 +25,7 @@
  * 不出安装包，也不再与任何人共用 `release/win-unpacked`。
  * 退出码：0 = 通过；1 = 失败（打印失败在哪一步与当时的界面文本）。
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,15 +39,30 @@ const here = dirname(fileURLToPath(import.meta.url));
  * ① **为什么换成按运行命名的目录**：不再与任何一轮共用同一个目标目录，
  *    于是"这一轮验的是哪份产物"写在日志里就是事实，而不是"大概是当前那一份"；
  *    旧副本归下一轮扫掉，`release/` 不再无限堆积。
- * ② **这一步为什么会红**（R35 实测到的真因，**推翻我上一轮写的原因**）：
+ * ② **这一步为什么还会红**（R35 全天 6+3 次尝试的底账 —— 这条因果本轮被改了**三次**口，每次都以实测为准）：
  *    `electron-builder` 解 Electron 运行时是"写 `win-unpacked.tmp` 再 rename 成正式目录"，
- *    而刚解压完的那段时间里**目录里的文件被本机短暂握着**（防病毒实时扫描 / 索引器一类），
- *    rename 当场 EPERM。两条证据：
- *    · 同一只 `win-unpacked.tmp` 过几分钟再改名**成功，耗时 2ms**（不是常驻句柄）；
- *    · 换到**全新**目录 `pack-probe1`（里面什么都没有）第一次跑**照样 EPERM**
- *      ⇒ 换目录不是药，**带等待的重试才是**。
- *    因此 R29 的"换目录也绕不开"与规整19 的"换目录一次成功"（我上一轮还把它写成
- *    "挡的就是覆盖那一步"）**两条都是撞运气**，本轮一并改口 —— 见复核 092。
+ *    而本机有常驻进程（监视 / 索引 / 实时扫描）会在 `rename` 那一刻握着 `.tmp` 里的
+ *    `resources/default_app.asar` ⇒ 当场 EPERM。今天跑出来的六条事实：
+ *    · **换目录不是药**：全新目录（里面什么都没有）第一次跑**照样 EPERM**；
+ *    · **原地多等也不是药**：失败留下的那只 asar **32 分钟后仍改不动（EBUSY）**，
+ *      而且旧重试每次先 `unlink` 上一回的残骸 ⇒ 第二次尝试**根本没走到 rename**就红了
+ *      （14:45 那轮的第 2/3/4 次全是 `EBUSY ... unlink ... default_app.asar`）；
+ *    · **重试还可能把错误换一种**：残骸被清掉后 electron-builder 会去**联网重取**运行时，
+ *      本机那一刻连不上 GitHub ⇒ `connect ETIMEDOUT`，单次尝试烧掉 **199 秒**，真因被盖住；
+ *    · **位置只是相关，不是决定**：产物目录放工作区根**之外**（同一个盘）2 次全绿、
+ *      根**之内** 6 试 4 红 2 绿 —— 所以不能说"挪出去就好"，也不能说"之内必红"；
+ *    · **有意思的是绿的那两次都慢**：首attempt 成功的那两次耗时 30.0s / 60.4s，
+ *      红的那几次首attempt 只用 7.5–8.0s ⇒ 现在的最好解释是**竞态**：解包一结束就去 rename，
+ *      撞上扫描者正握着那只新写的 asar；解包本身慢（缓存冷、要重下）反而把窗口让过去了；
+ *    · 绿那两次之后的**清残骸只用 0.6–0.8 秒**，红的几处删到这只 asar 就停在 `Device or resource busy`。
+ *    ⇒ 这个脚本因此只做两件事：**不原地盲等**（红得越快越不烧别人的额度），
+ *      以及**把红说成可指路的红**（`lockProbe` 当场试一次改名，回答"句柄此刻还在不在"）。
+ *      操作口径：**红了就直接重跑一次** —— 重跑用的是全新目录、不碰旧残骸，等于把这一次尝试重新掷一次骰子；
+ *      连红两把就按取证判"这台机器此刻验不了打包产物"，台账记"未能运行 + 原因"，**不许记成绿、也不许写成产品缺陷**。
+ *      至于"每次尝试都换一只全新目录"这种自动化（把重跑搬进门禁内部），本轮没做，登记为 T69。
+ *    作废的旧结论一并留档：R29 的"换目录也绕不开"、规整19 的"换目录一次成功"、
+ *    本轮上一版的"本机短暂握着、等一会儿就松开"、以及今天中午记的"过几分钟改名成功 ⇒ 锁是短暂的"
+ *    —— 见复核 092 与 093。
  *
  * `JUJIA_PACK_DIR` 保留成人工口子，含义改窄：**设了它 = 只验这份现成产物、本轮不打包**。
  */
@@ -99,11 +114,13 @@ if (!BUILD && !existsSync(EXE)) {
     console.error(
       `\n❌ 人工指定的产物目录里没有可验的 exe：${EXE}\n` +
         `   而同级还有 ${STALE_TMP} 卡在原地 —— electron-builder 的"解到 .tmp 再 rename 成正式目录"被系统挡了。\n` +
-        '   实测取证（2026-10-15）：.tmp **里面的文件**逐个可读写重命名，只有**被握着的那一个**删不掉\n' +
-        '   ⇒ 有进程握着它的句柄。同日也实测过 `--config.directories.output=release/shoot` **一次成功**，\n' +
-        '   所以挡的一直是"改名覆盖到那个已被握着的目录"这一步 —— **全新目录不碰它**。\n' +
-        '   这正是 T67（R35）的落点：默认路径下这条门禁现在自己打到 `release/pack-<运行 id>/`，\n' +
-        '   别人的句柄再也挡不住它；只有人工指定一个现成产物时才会走到这条预检。\n' +
+        '   R35 全天底账（同一条命令 6 试 4 红 2 绿）把这条锁说清了：\n' +
+        '   · **跟目录叫什么名字无关**：全新空目录第一次打照样 EPERM；\n' +
+        '   · **不是等得来的**：失败留下的 `win-unpacked.tmp/resources/default_app.asar` **32 分钟后仍 EBUSY**；\n' +
+        '   · **跟位置相关但不决定性**：产物写到工作区根**之外**（同一个盘）2 试全绿、写到**之内** 6 试 4 红 2 绿，\n' +
+        '     而绿的两次首attempt 都慢（30.0s / 60.4s）、红的只用 7.5–8.0s ⇒ 现在最好的解释是**竞态窗口**；\n' +
+        '   ⇒ 所以默认路径这条门禁**不原地盲等**，改为**每次红都当场试一次改名把"句柄还在不在"说出口**（见 `lockProbe`），\n' +
+        '     红了就重跑一次（全新目录、不碰残骸）。只有人工指定现成产物时才会走到这条预检。\n' +
         '   归属不明的进程**照旧不杀**（拿别人机器上的不明进程赌一把，代价可能是别人正在跑的东西）。\n' +
         '   台账规矩：这种环境下跑不动的项**只能记"未能运行 + 原因"，不许记成绿**。\n' +
         '   （这里的 `process.exit(1)` 是安全的：走到这一行还没拉起应用、也没建临时目录，没有收尾要跑。）',
@@ -167,16 +184,65 @@ const runBuild = (label, entry, args, cwd) => {
 };
 
 /**
- * **打包这一步带等待重试**（R35 实测的真药）。
+ * **打包这一步：先当场问"锁松了没"，再决定要不要重试**（R35 把盲等改成了看现场）。
  *
- * 只认这一类失败：`EPERM / EBUSY / operation not permitted / resource busy` 且伴随 rename ——
- * 本机在解包后会短暂握着目录里的文件（防病毒实时扫描 / 索引器一类），等一会儿就松开
- * （证据：同一只 `.tmp` 几分钟后改名成功，耗时 2ms）。**其余失败一次就报**，
- * 不许用重试把真错误洗白 —— 静默重试三次的"红"会被读成"环境噪声"，那就又是 T65 那种没人修的洞。
+ * 上一版写的是"EPERM/EBUSY 就等 5/10/20s 再试，最多 4 次"，注释里还把它叫"真药"。
+ * **本轮实测把这句话否掉了**，三条证据：
+ * · 三次整跑、每次四回尝试，**重试一次都没救回来**（14:44 / 14:47 / 15:0x 全红）；
+ * · 第二次尝试还会把错误**换成另一种红**：残骸被清掉后 electron-builder 去联网重取 Electron 运行时，
+ *   而本机这一刻连不上 GitHub ⇒ `connect ETIMEDOUT 20.205.243.166:443`，**单这一回就耗 199 秒**
+ *   —— 真因（本机锁）被一个网络错误盖住了，这就是"用重试洗白真错误"的实际样子；
+ * · 每次重试都要重新解一遍运行时（约 370MB 新建文件），**它本身就是那把锁的燃料**。
+ * 所以现在**最多试两次**，且中间必须先过 `lockProbe`：
+ * 句柄还在 ⇒ **不重试**（这一族实测握到 32 分钟仍未松），直接交带取证的红；
+ * 句柄已松 ⇒ 按真·瞬时锁处理，等 5s 再试一次（"几分钟后改名只用 2ms"今天中午实测过**一次**，
+ * 够不上"锁都是短暂的"那条规律 —— 上一版就是这么写错的，这次只按"有这一类"用）。
+ * **其余失败一次就报**，不许用重试把真错误洗白 —— 静默重试三次的"红"会被读成"环境噪声"，
+ * 那就又是 T65 那种没人修的洞。
  */
-const BUILDER_TRIES = 4;
-const BUILDER_WAITS = [5_000, 10_000, 20_000];
+const BUILDER_TRIES = 2;
+const BUILDER_WAIT_MS = 5_000;
 const TRANSIENT_RE = /(EPERM|EBUSY|operation not permitted|resource busy)/i;
+
+/**
+ * **锁的现场取证**：当场试一次"给那只解包用的 asar 改名"（成功就立刻改回来，内容一个字节不动）。
+ *
+ * 只回答一个问题：**句柄此刻还在不在**（返回值里的 `held`）。
+ * · 在 ⇒ 是"工作区根之内被本机常驻进程盯着"那一族（环境侧）——**不是产品坏，也不许记成绿**；
+ * · 不在 ⇒ 才轮到重试，或者按错误行本身重算这一笔，别顺着上一句往下抄。
+ * 为什么值得为它写一段代码：R35 之前这类红只在台账里留过一句"本机 EBUSY"，
+ * 于是同一件事连着三轮没人能判断"是产品坏了还是这台机器不能验"（T65 那类洞的同源形状）。
+ *
+ * @returns {{ held: boolean, text: string }}
+ */
+const lockProbe = () => {
+  const asar = join(RUN_OUT_DIR, 'win-unpacked.tmp', 'resources', 'default_app.asar');
+  if (!existsSync(asar)) {
+    return { held: false, text: '现场取证：本轮目录里没有那只解包用的 asar ⇒ 红的不是这一把锁，按上面的错误行判' };
+  }
+  const t0 = Date.now();
+  try {
+    renameSync(asar, `${asar}.fx`);
+    const ms = Date.now() - t0;
+    try {
+      renameSync(`${asar}.fx`, asar);
+    } catch (e) {
+      return { held: false, text: `现场取证：改名**成功**（${String(ms)}ms）但**还原失败**（${String(e.code)}）—— 现场已被改成 default_app.asar.fx，请人工看一眼` };
+    }
+    return { held: false, text: `现场取证：改名**改得动**（${String(ms)}ms）⇒ 句柄这一刻松了，按真·瞬时锁处理` };
+  } catch (e) {
+    return {
+      held: true,
+      text: `现场取证：改名**改不动**（${String(e.code)}，${String(Date.now() - t0)}ms）⇒ 句柄还在别人手里。\n` +
+        '   R35 底账：同一条命令今天 6 试 4 红 2 绿 —— 绿的两次首attempt 都**慢**（30.0s / 60.4s）、' +
+        '红的几次首attempt 只用 7.5–8.0s ⇒ 最好解释是**解包刚结束就去 rename** 撞上本机扫描/索引者的竞态；' +
+        '与目录叫什么名字无关（全新空目录照样红），与工作区根之内/外**相关但不决定**（之外 2 试全绿、之内 6 试 4 红）。\n' +
+        '   操作口径：**直接重跑一次**（重跑用全新目录，不碰这些残骸）；连红两把就判"这台机器此刻验不了打包产物"，\n' +
+        '   台账只能记"**未能运行 + 原因**"—— **不许记成绿，也不许写成产品缺陷**；' +
+        '要自动化"每轮回全新目录"或把产物挪出项目文件夹，都得所有者点头（已登记 T69）。',
+    };
+  }
+};
 
 const runBuilderWithWaits = async (entry, args, cwd) => {
   for (let i = 0; i < BUILDER_TRIES; i += 1) {
@@ -196,24 +262,30 @@ const runBuilderWithWaits = async (entry, args, cwd) => {
     }
     const whole = `${String(r.stdout ?? '')}\n${String(r.stderr ?? '')}`;
     const hits = errorHits(whole, 4);
-    if (!TRANSIENT_RE.test(whole) || i === BUILDER_TRIES - 1) {
+    /** 现场取证先于"要不要再试一次"这个决定 —— 这一句把等待从盲等变成有条件的等 */
+    const probe = lockProbe();
+    if (!TRANSIENT_RE.test(whole) || probe.held || i === BUILDER_TRIES - 1) {
+      /**
+       * 取证文本排在**最前**：`fail()` 把 detail 截到 900 字，
+       * 上一版把这段放在 700 字的尾部之后，等于**当场把它截掉了**（15:11 那次实测：
+       * 日志里压根没有"现场取证"这一行 —— 写了指路的话却不让它出门，跟没写一样）。
+       */
       fail(
         `打包失败（退出码 ${String(r.status)}，耗时 ${String(ms)}ms，共试 ${String(i + 1)} 次）`,
-        `${hits}\n--- 尾部 ---\n${whole.slice(-700)}`,
+        `${probe.text}\n--- 错误行 ---\n${hits}\n--- 尾部（截 300 字） ---\n${whole.slice(-300)}`,
       );
     }
-    const wait = BUILDER_WAITS[i];
-    log(`  ⚠️ 第 ${String(i + 1)} 次打包被本机短暂锁挡住（${String(ms)}ms）：${hits.split('\n')[0] ?? '(没抓到错误行)'}`);
-    log(`     等 ${String(wait)}ms 后重试 —— 依据是实测事实：**同一次改名过几分钟再试只用 2ms**`);
-    // 重试前把上一次的残骸清掉（清不动也不中止：等一会儿它就松了）
+    log(`  ⚠️ 第 ${String(i + 1)} 次打包被锁挡住（${String(ms)}ms）：${hits.split('\n')[0] ?? '(没抓到错误行)'}`);
+    log(`     ${probe.text} ⇒ 等 ${String(BUILDER_WAIT_MS)}ms 后只再试这一次`);
+    // 重试前把上一次的残骸清掉（清不动也不中止 —— 但**别把它说成"等一会儿它就松了"**，本轮实测不松）
     for (const stale of ['win-unpacked.tmp', 'win-unpacked']) {
       try {
         rmSync(join(RUN_OUT_DIR, stale), { recursive: true, force: true });
       } catch {
-        /* 等一会儿再试 —— 这不算静默：下一次失败照样把错误行交出来 */
+        /* 走到这里说明上面的取证说"这一刻没握着"；清不动就照实让下一次失败把错误行交出来 */
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, wait));
+    await new Promise((resolve) => setTimeout(resolve, BUILDER_WAIT_MS));
   }
 };
 
