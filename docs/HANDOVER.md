@@ -3,7 +3,7 @@
 - **交接对象**：QoderCN（项目后续开发与维护方）
 - **交接日期**：2026-09-23（同日三遍复查修订）
 - **代码基线**：`ea56929`（标签 `v0.28.0-规整7`；本文档自身随该版本提交）
-- **阅读顺序建议**：先读本文档 → 再读 `docs/PRODUCT-GOAL.md`（定位）→ `docs/TRACK-ROADMAP.md`（排期与编号）→ `docs/PROGRESS.md`（状态权威）。
+- **阅读顺序建议**：**第一次拿到仓库（人或 AI）先读 [`docs/AI-HANDOVER.md`](AI-HANDOVER.md)**（接手手册：怎么跑起来 / 怎么推 GitHub / 用什么凭证 / 四条停牌 / 下一步）→ 再读本文档（治理台账与口径）→ `docs/PRODUCT-GOAL.md`（定位）→ `docs/TRACK-ROADMAP.md`（排期与编号）→ `docs/PROGRESS.md`（状态权威）。
 - **一句话提醒**：**`docs/PROGRESS.md` 是完成状态的唯一权威**；若本文档与 PROGRESS 冲突，**以 PROGRESS 为准**。
 
 ---
