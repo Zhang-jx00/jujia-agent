@@ -101,6 +101,7 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 | 画布 ↔ 编码引擎的**接驳契约**（节点如何调工具；M9a 交付物，R16 细化了子代理接线口） | [docs/LINKAGE-M9.md](docs/LINKAGE-M9.md) |
 | **M14 边界备忘**（多子 agent 编排的归口候选口径 + 画布接线口；R16 文书，**未实现、不宣称**） | [docs/DESIGN-M14.md](docs/DESIGN-M14.md) |
 | **流的结束口径**（T55/T56：凭什么判"说完了"、判不出时该说什么；R31 定稿） | [docs/DESIGN-T55-STREAM-END.md](docs/DESIGN-T55-STREAM-END.md) |
+| **探活与自动重连的口径**（T31：掉线凭什么判、要不要自动重连、重连后正在跑的回合怎么办、用户在哪看得见；R37 定稿，**只有文书、没有实现**） | [docs/DESIGN-T31-PROBE-RECONNECT.md](docs/DESIGN-T31-PROBE-RECONNECT.md) |
 | **远程能力的决策备忘**（M20–M22 与"数据不出本机"的表述冲突：选项 A–C 与先决清单） | [docs/DECISION-REMOTE.md](docs/DECISION-REMOTE.md) |
 | 排期、里程碑编号与修复队列（路线图） | [docs/TRACK-ROADMAP.md](docs/TRACK-ROADMAP.md) |
 | 全项目排查记录 | [review/TRACK-SWEEP-1.md](review/TRACK-SWEEP-1.md) |

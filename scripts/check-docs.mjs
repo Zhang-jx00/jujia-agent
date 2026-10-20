@@ -1900,6 +1900,65 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 30. `verify:pack` 的重试必须换一只全新目录（T69① · R37）
+ *
+ * 为什么立它：R35 的实测把"重试"这件事拆穿了 —— **旧重试每次先 `unlink` 上一回残骸**，
+ * 于是第二次尝试**根本没走到 `rename`**，就红在 `EBUSY ... unlink ... default_app.asar` 上。
+ * 换句话说：**同一只目录上的"重试"不是重试，是接着上一次的残骸再撞一次同一堵墙**。
+ * R35 因此把"每轮换全新目录"登记成 T69①，R37 落地。
+ *
+ * 判据架在**三件必须同时成立**的事上（缺一件就等于"重跑变成了接着撞"）：
+ *   ① 目录名**带尝试序号**（`pack-<run id>` / `pack-<run id>-a2` …）—— 换目录；
+ *   ② **输出参数跟着换**（`--config.directories.output=release/<新目录>`）——
+ *      只换目录名不换参数，electron-builder 还是写回旧目录，那只正是被锁着的那只；
+ *   ③ **收尾认领本轮造过的每一只**（不只最后一只）—— 否则前几只留在盘上没人认领。
+ *
+ * 为什么架在"调用形状"上而不是"名字"上（§11 第 3 条的老教训）：
+ * 判据认的是**"重试块里必须出现这三件事"**，不认注释里写了什么 ——
+ * 注释里那几句"换全新目录"的话，恰恰是最容易喂饱假锁的地方。
+ * ------------------------------------------------------------------ */
+{
+  const rel = 'apps/desktop/scripts/verify-pack.mjs';
+  const bad = [];
+  if (!exists(rel)) {
+    bad.push(`${rel} 不在了 —— 这条守卫的定位器要跟着改`);
+  } else {
+    // 剥注释：脚本里那段解释会写着"换一只全新目录"，不剥就被自己的说明喂饱
+    const bare = read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    // 找"重试块"：从尝试序号自增到那一次等待为止
+    const block = /packAttempt \+= 1;[\s\S]*?setTimeout\(resolve, BUILDER_WAIT_MS\)/.exec(bare);
+    if (block === null) {
+      bad.push(`${rel} 里找不到"重试块"（packAttempt 自增 → 等待）—— 重试逻辑改了形状？守卫看不见就等于没有`);
+    } else {
+      const b = block[0];
+      if (!/PACK_OUT = packOutName\(\)/.test(b)) {
+        bad.push(`${rel} 的重试没有换目录名（PACK_OUT 必须重新算出来）—— 同一只目录上的"重试"是接着撞，不是重试（T69①）`);
+      }
+      if (!/--config\.directories\.output=release\/\$\{PACK_OUT\}/.test(b)) {
+        bad.push(`${rel} 的重试没有换输出参数 —— 只换目录名不换参数，electron-builder 还是写回旧目录（那只正是被锁着的那只）`);
+      }
+      if (!/args\[outIdx\] =/.test(b)) {
+        bad.push(`${rel} 的重试没有把新目录写回 args —— 参数不改，输出目录就还是旧的`);
+      }
+    }
+    // 收尾必须认领本轮造过的**每一只**（含 -a2 / -a3）
+    if (!/ownDirs = readdirSync\(RELEASE_DIR\)\.filter/.test(bare) || !/for \(const name of ownDirs\)/.test(bare)) {
+      bad.push(`${rel} 的收尾没有认领本轮造过的每一只产物目录 —— 重试造出来的前几只会被留在盘上没人认领`);
+    }
+    // 清场不得扫本轮自己造的那几只（等 finally 统一收）
+    const sweep = /const sweepOldPackDirs = \(\) => \{[\s\S]*?\n\};/.exec(bare);
+    if (sweep === null || !/startsWith\(`pack-\$\{RUN_ID\}`\)/.test(sweep[0])) {
+      bad.push(`${rel} 的开跑清场没有排除本轮自己造的目录 —— 会把本轮要用的那只当"上一轮的"扫掉`);
+    }
+  }
+  report(
+    'verify:pack 的重试换全新目录（T69①：换目录名 + 换输出参数 + 收尾认领每一只）',
+    bad.length === 0,
+    bad.join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

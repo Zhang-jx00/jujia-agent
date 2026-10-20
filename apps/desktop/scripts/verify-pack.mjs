@@ -67,16 +67,35 @@ const here = dirname(fileURLToPath(import.meta.url));
  * `JUJIA_PACK_DIR` 保留成人工口子，含义改窄：**设了它 = 只验这份现成产物、本轮不打包**。
  */
 const RUN_ID = `${Date.now().toString(36)}-${process.pid}`;
-const PACK_OUT = `pack-${RUN_ID}`;
 const RELEASE_DIR = join(here, '..', 'release');
 const manualDir = process.env.JUJIA_PACK_DIR;
 const BUILD = manualDir === undefined || manualDir === '';
-const packRel = BUILD ? join(PACK_OUT, 'win-unpacked') : manualDir;
-const EXE = join(RELEASE_DIR, packRel, 'JujiaAgent.exe');
+
+/**
+ * **本轮这一族的目录名 —— 每次打包尝试换一只**（T69① · R37）。
+ *
+ * 为什么必须是"每次尝试一只"（而不是"本轮一只，重试在里面接着用"）：
+ * R35 的实测把这件事说死了 —— **旧重试每次先 `unlink` 上一回残骸**，
+ * 于是第二次尝试**根本没走到 `rename`** 就红在 `EBUSY ... unlink ... default_app.asar` 上；
+ * 换句话说：**同一只目录上的"重试"不是重试，是接着上一次的残骸再撞一次同一堵墙**。
+ * 真正意义的重试 = **换一只全新的空目录**（同一条命令 6 试 4 红 2 绿，
+ * 而"全新空目录第一次照样红"这条事实说明**换目录也不是药** —— 换目录只是让"重试"真的是重试，
+ * 而不是让"重跑"变成"接着撞"）。
+ *
+ * 所以这里用 `let` 而不是 `const`：**打包尝试序号进目录名**，
+ * 重试时换一只新目录（`pack-<run id>-a2` / `-a3`…），旧目录留给 `sweepOldPackDirs` 扫。
+ */
+let packAttempt = 0;
+const packOutName = () => (packAttempt === 0 ? `pack-${RUN_ID}` : `pack-${RUN_ID}-a${String(packAttempt + 1)}`);
+let PACK_OUT = packOutName();
+/** 产物相对路径（`BUILD` 时随尝试变，人工指定时固定） */
+const packRelNow = () => (BUILD ? join(PACK_OUT, 'win-unpacked') : manualDir);
+let EXE = join(RELEASE_DIR, packRelNow(), 'JujiaAgent.exe');
 /** 本轮这一族的目录（收尾删它） */
-const RUN_OUT_DIR = join(RELEASE_DIR, PACK_OUT);
+let RUN_OUT_DIR = join(RELEASE_DIR, PACK_OUT);
 /** 与产物目录同级的 `.tmp`：它卡在原地就是"被谁握着"的样子，预检要把这句话说明白 */
-const STALE_TMP = join(dirname(join(RELEASE_DIR, packRel)), 'win-unpacked.tmp');
+const staleTmpNow = () => join(dirname(join(RELEASE_DIR, packRelNow())), 'win-unpacked.tmp');
+let STALE_TMP = staleTmpNow();
 
 const STEPS = [];
 /** 走完最后一步才算成功；退出码由它决定（`fail` 抛哨兵异常，收尾统一在 finally） */
@@ -143,7 +162,9 @@ if (!BUILD && !existsSync(EXE)) {
 const sweepOldPackDirs = () => {
   if (!existsSync(RELEASE_DIR)) return;
   for (const name of readdirSync(RELEASE_DIR)) {
-    if (!name.startsWith('pack-') || name === PACK_OUT) continue;
+    // **本轮自己造的那几只（`-a2` / `-a3`…）不扫** —— 它们是本轮的，等 finally 统一收
+    if (!name.startsWith('pack-')) continue;
+    if (name === PACK_OUT || name.startsWith(`pack-${RUN_ID}`)) continue;
     try {
       rmSync(join(RELEASE_DIR, name), { recursive: true, force: true });
       log(`  （清场）删掉上一轮留下的 release/${name}/`);
@@ -277,14 +298,36 @@ const runBuilderWithWaits = async (entry, args, cwd) => {
     }
     log(`  ⚠️ 第 ${String(i + 1)} 次打包被锁挡住（${String(ms)}ms）：${hits.split('\n')[0] ?? '(没抓到错误行)'}`);
     log(`     ${probe.text} ⇒ 等 ${String(BUILDER_WAIT_MS)}ms 后只再试这一次`);
-    // 重试前把上一次的残骸清掉（清不动也不中止 —— 但**别把它说成"等一会儿它就松了"**，本轮实测不松）
-    for (const stale of ['win-unpacked.tmp', 'win-unpacked']) {
-      try {
-        rmSync(join(RUN_OUT_DIR, stale), { recursive: true, force: true });
-      } catch {
-        /* 走到这里说明上面的取证说"这一刻没握着"；清不动就照实让下一次失败把错误行交出来 */
-      }
+    /**
+     * **换一只全新目录再试**（T69① · R37）—— 这一步是本轮的核心。
+     *
+     * 旧写法是"把上一回的残骸 `unlink` 掉，然后接着用**同一只**目录重试"，
+     * 而 R35 的实测说死了那样不行：**第二次尝试根本没走到 `rename`**，
+     * 就红在 `EBUSY ... unlink ... default_app.asar` 上（那是在清残骸时就撞上了）。
+     * ⇒ 真正意义的重试是**换一只空的目录**，不是"在同一只上接着撞"。
+     *
+     * 注意这只目录**不删**（删不动 —— 那正是锁着的地方），
+     * 留给下一轮 `sweepOldPackDirs` 去扫（它已经在扫上一轮同族了）。
+     */
+    packAttempt += 1;
+    PACK_OUT = packOutName();
+    RUN_OUT_DIR = join(RELEASE_DIR, PACK_OUT);
+    EXE = join(RELEASE_DIR, packRelNow(), 'JujiaAgent.exe');
+    STALE_TMP = staleTmpNow();
+    log(`     ⇒ 换一只全新目录重试：release/${PACK_OUT}（旧的不碰、不删 —— 那是锁着的地方）`);
+    /**
+     * 换目录之后**输出参数必须跟着换** —— 否则 electron-builder 还是写回旧目录，
+     * 那只旧目录正是被锁着的那只 ⇒ 等于"换了个名字接着撞"。
+     * 这里按**参数名**找那一项（不按下标 —— 下标是"它碰巧在最后一位"，改个参数顺序就悄悄失效了）。
+     */
+    const outIdx = args.findIndex((a) => a.startsWith('--config.directories.output='));
+    if (outIdx < 0) {
+      fail(
+        '内部错误：打包参数里找不到 --config.directories.output=',
+        `参数是：${JSON.stringify(args)}\n没有它就换不了输出目录，重试会写回旧目录（那正是被锁着的那只）。`,
+      );
     }
+    args[outIdx] = `--config.directories.output=release/${PACK_OUT}`;
     await new Promise((resolve) => setTimeout(resolve, BUILDER_WAIT_MS));
   }
 };
@@ -570,21 +613,31 @@ try {
    * 而不是假装清理完成了 —— "还原成功"必须是被报告的事实，不是我的记忆。
    */
   if (BUILD) {
-    let removed = false;
+    let removed = [];
     let lastErr = '';
-    for (let i = 0; i < 3 && !removed; i += 1) {
-      try {
-        rmSync(RUN_OUT_DIR, { recursive: true, force: true });
-        removed = !existsSync(RUN_OUT_DIR);
-      } catch (err) {
-        lastErr = String(err instanceof Error ? err.message : err).slice(0, 140);
-        await new Promise((resolve) => setTimeout(resolve, 400));
+    /**
+     * **本轮可能造了不止一只目录**（T69①：每次重试换一只新的 ⇒ `pack-<id>` / `pack-<id>-a2` …）。
+     * 收尾必须**把本轮造过的每一只都收走** —— 只收最后一只 = 把前几只留在盘上没人认领
+     * （而它们恰恰是**被锁着的那几只**，下一轮开跑时又要在 `sweepOldPackDirs` 里再撞一次）。
+     */
+    const ownDirs = readdirSync(RELEASE_DIR).filter((n) => n === `pack-${RUN_ID}` || n.startsWith(`pack-${RUN_ID}-a`));
+    for (const name of ownDirs) {
+      const dir = join(RELEASE_DIR, name);
+      for (let i = 0; i < 3; i += 1) {
+        try {
+          rmSync(dir, { recursive: true, force: true });
+          if (!existsSync(dir)) { removed.push(name); break; }
+        } catch (err) {
+          lastErr = String(err instanceof Error ? err.message : err).slice(0, 140);
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
       }
     }
+    const left = ownDirs.filter((n) => !removed.includes(n));
     console.log(
-      removed
-        ? `（清理）本轮产物目录已删除：release/${PACK_OUT}/`
-        : `（清理未成）release/${PACK_OUT}/ 还留着${lastErr === '' ? '' : `：${lastErr}`} —— 下一轮开跑前会再扫一次`,
+      left.length === 0
+        ? `（清理）本轮产物目录已删除：${removed.map((n) => `release/${n}/`).join('、')}`
+        : `（清理未成）${left.map((n) => `release/${n}/`).join('、')} 还留着${lastErr === '' ? '' : `：${lastErr}`} —— 下一轮开跑前会再扫一次`,
     );
   }
 }

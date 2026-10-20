@@ -494,6 +494,18 @@ const cases = [
     to: '`[A-Za-z0-9_.-]*(?:TOKEN|…)[A-Za-z0-9_.-]*`',
     expect: 'Markdown 表格的数据行格数与表头一致',
   },
+  {
+    // 第 30 条（verify:pack 的重试必须换一只全新目录 · T69① · R37）：
+    // 把重试块里的"换目录名"那一句删掉。
+    // 挑这一条的理由很具体：**R35 的实测把"重试"拆穿了** —— 旧写法每次先 `unlink` 上一回残骸，
+    // 于是第二次尝试**根本没走到 `rename`**，就红在 `EBUSY ... unlink ... default_app.asar` 上；
+    // 换句话说"同一只目录上的重试"不是重试，是**接着撞**。判据若失效，同形的缺陷会悄无声息地再长出来。
+    name: 'verify:pack 的重试不换目录（变回"在同一只上接着撞"）',
+    file: 'apps/desktop/scripts/verify-pack.mjs',
+    from: '    PACK_OUT = packOutName();\n    RUN_OUT_DIR = join(RELEASE_DIR, PACK_OUT);',
+    to: '    RUN_OUT_DIR = join(RELEASE_DIR, PACK_OUT);',
+    expect: 'verify:pack 的重试换全新目录',
+  },
 ];
 
 /**
