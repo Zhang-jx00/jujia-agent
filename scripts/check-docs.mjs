@@ -1959,6 +1959,100 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 31. 文档里声明的"行数口径"必须与 eslint 的 max-lines 配置一致（R38 评估）
+ *
+ * 为什么立它：R38 的题面是"评估大文件该不该拆"，而**动手前现扫发现题面前提是错的** ——
+ * R20（规整13）登记的"三个候选超阈"用的是**物理行**（`ChatPanel.tsx` 917 行），
+ * 而真正会拦人的判据是 eslint 的 `max-lines`（`skipBlankLines` + `skipComments`），
+ * **两者差 200~500 行** ⇒ 同一批文件，按物理行算是"超阈、该拆"，
+ * 按 eslint 口径算是"没超阈、别拆" —— **结论整个反过来**。
+ *
+ * **本条只查一件事**：文档里写的"行数怎么算"这句口径说明，
+ * 与 `eslint.config.js` 里 `max-lines` 的实际配置**是否一致**。
+ * 判据架在"那两个配置项"上 —— **可以直接对账的事实，不猜任何意图**。
+ *
+ * **为什么不是"扫描所有行数断言、逐个核对数字"**（那才是最初的想法）：
+ * 那一版**误报了 12 处** —— 因为"这个数字说的是哪一年的尺寸"只能靠上下文猜，
+ * 而"756 行单文件 → 拆成 11 个模块"这种**历史快照**与"现状：`ipc.ts` 565 行"
+ * 这种**现状声明**在文本上**没法可靠区分**。
+ * 猜不准的判据会**误报三次就被删掉**（§11 第 3 条）⇒ 那条路走不通。
+ * ⇒ 改成：**数字由本轮人工核一次并改掉过时的那些**，
+ * **口径本身写成一句话钉在文档里**，本条只盯那句话与配置是否一致。
+ * ------------------------------------------------------------------ */
+{
+  const rel = 'eslint.config.js';
+  const bad = [];
+  let cfg = '';
+  if (!exists(rel)) {
+    bad.push(`${rel} 不在了 —— 这条守卫的定位器要跟着改`);
+  } else {
+    cfg = read(rel);
+    // eslint 的实际配置：max-lines 的 max / skipBlankLines / skipComments
+    // 用 RegExp 构造器而不是正则字面量 —— 写进文件的模板里 `\` 会被吃掉，
+    // 那样这条守卫会"认不出配置"却仍然报绿（假锁）。本轮已栽过一次。
+    const m = new RegExp("'max-lines':\\s*\\[\\s*'error'\\s*,\\s*\\{([^}]*)\\}\\s*\\]").exec(cfg);
+    if (m === null) {
+      bad.push(`${rel} 里认不出 max-lines 的配置（'max-lines': ['error', { max: N, ... }]）—— 改写法了？守卫看不见就等于没有`);
+    } else {
+      // `m[1]` 是 `{...}` 里面的内容 ⇒ 从里面再取 max / skipBlankLines / skipComments
+      const rest = m[1] ?? '';
+      const maxMatch = new RegExp('max:\\s*(\\d+)').exec(rest);
+      const max = maxMatch === null ? NaN : Number(maxMatch[1]);
+      if (!Number.isFinite(max)) {
+        bad.push(`${rel} 的 max-lines 配置里认不出 max 的数值（看到了：${rest.trim()}）`);
+      }
+      const skipBlank = new RegExp('skipBlankLines:\\s*true').test(rest);
+      const skipComments = new RegExp('skipComments:\\s*true').test(rest);
+      if (!skipBlank || !skipComments) {
+        bad.push(`${rel} 的 max-lines 没有同时开 skipBlankLines 与 skipComments —— 口径与本文写的不一致`);
+      }
+      // 文档里必须有一句"行数按 eslint 口径"的话，且它说的配置与实际一致
+      const docs = ['docs/TEST-POLICY.md', 'docs/DESIGN-R38-BIGFILE-EVAL.md', '俱佳Agent交接文档.md'];
+      const said = [];
+      for (const d of docs) {
+        if (!exists(d)) continue;
+        const t = read(d);
+        // 找"行数"旁边的口径声明：必须同时点到 skipBlankLines 与 skipComments
+        for (const mm of t.matchAll(new RegExp('[^\\n]{0,200}skipBlankLines[^\\n]{0,200}', 'g'))) {
+          const line = mm[0];
+          if (!/skipComments/.test(line)) continue;
+          said.push({ d, line: line.trim().slice(0, 160) });
+        }
+      }
+      if (said.length === 0) {
+        bad.push(
+          '活文档里没有一处写明"行数按 eslint 口径（skipBlankLines + skipComments）"—— ' +
+            '口径不写清，下一个人又会按物理行评估（R20 就是这么错的）',
+        );
+      }
+      // 口径声明里写的 max 若与实际配置不符 ⇒ 报出来
+      for (const s2 of said) {
+        const mm = new RegExp('max[^\\d]{0,10}(\\d{3,4})').exec(s2.line);
+        if (mm !== null && Number(mm[1]) !== max) {
+          bad.push(`${s2.d} 的口径声明写 max ${mm[1]}，而 ${rel} 里是 ${max}`);
+        }
+        if (!/skipBlankLines/.test(s2.line) || !/skipComments/.test(s2.line)) {
+          bad.push(`${s2.d} 的口径声明没有同时点到 skipBlankLines 与 skipComments`);
+        }
+      }
+      if (said.length > 0 && !bad.some((b) => b.includes('口径声明写 max'))) {
+        // ok
+      }
+      if (said.length > 0) {
+        for (const s2 of said) {
+          // 记录实际读到的口径（供排查）
+        }
+      }
+    }
+  }
+  report(
+    '文档里的行数口径与 eslint 的 max-lines 配置一致（skipBlankLines + skipComments）',
+    bad.length === 0,
+    bad.join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

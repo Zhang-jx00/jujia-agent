@@ -361,7 +361,7 @@ W18（多子 agent 编排）、W19（轻量 IDE）、W20–W22（远程 / 云端
 | 7 | 内置浏览器引入安全面（恶意网页） | 中 | `setWindowOpenHandler` 一律拒绝或转系统浏览器；will-navigate 白名单；权限请求默认拒绝；scheme 白名单（S10 §96） |
 | 8 | 能力门控误判（声明说有、实际没有） | 中 | 声明 + 探测双保险；探测失败走兜底提示而非崩溃；厂商 preset JSON 化便于热修 |
 | 9 | 配置/会话损坏 | 中 | json-store 单测模拟半截写入；.bak 自愈 |
-| 10 | 单文件巨石回潮 | 中 | ESLint 行数上限（单文件 ≤800 行）+ CI。**⚠️ 原计划的"main ≤300 行"尚未落地**（现状：`ipc.ts` 565 行、`mcp-service.ts` 511 行）；收敛方式与优先级见 `review/TRACK-SWEEP-1.md` |
+| 10 | 单文件巨石回潮 | 中 | ESLint 行数上限（单文件 ≤800 行）+ CI。**⚠️ 原计划的"main ≤300 行"尚未落地** —— **但那已不是现状了**：`ipc.ts` 早已拆成 `ipc/` 下 18 个模块（装配根 `ipc.ts` 剩 **38** 逻辑行 · eslint 口径），`mcp-service.ts` 剩 **387** 逻辑行（物理 559）。**行数一律按 eslint 的 `max-lines` 口径数：max 800 · skipBlankLines: true · skipComments: true**。当轮的行数见 `review/TRACK-SWEEP-1.md`（那是当轮的审计快照，数字已过时）；现值见 `docs/DESIGN-R38-BIGFILE-EVAL.md` |
 | 11 | 学习时间与课业冲突 | 中 | 周表允许 ±1 周滑动；里程碑验收不减配 |
 | 12 | 厂商 SDK/文档链接失效 | 低 | 知识库已有 URL 校验脚本；每阶段开工前跑一遍当簇来源链接 |
 

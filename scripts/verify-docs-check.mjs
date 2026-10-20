@@ -506,6 +506,18 @@ const cases = [
     to: '    RUN_OUT_DIR = join(RELEASE_DIR, PACK_OUT);',
     expect: 'verify:pack 的重试换全新目录',
   },
+  {
+    // 第 31 条（行数口径必须与 eslint 的 max-lines 配置一致 · R38）：
+    // 把 eslint 配置里的 skipComments 关掉 —— 口径变了，而文档里还写着"skipComments: true"。
+    // 挑这一条的理由很具体：**R20 就是按物理行评估的**（"三个候选超阈"），
+    // 而真正会拦人的判据是 eslint 的逻辑行 —— **两者差 200~500 行，结论整个反过来**。
+    // 判据若失效，下一个人又会按错口径评估（而 R20 的清单就是这么错的）。
+    name: 'eslint 的行数口径变了（skipComments 被关掉）而文档还写着旧口径',
+    file: 'eslint.config.js',
+    from: 'skipComments: true',
+    to: 'skipComments: false',
+    expect: '行数口径与 eslint 的 max-lines 配置一致',
+  },
 ];
 
 /**
