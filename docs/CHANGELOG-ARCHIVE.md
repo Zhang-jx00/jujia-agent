@@ -1225,7 +1225,7 @@ HANDOVER §2.5 如实标注 **`handoff` 分支在应用层没有被区别处置*
 
 | 项 | 事实 | 处置 |
 |----|------|------|
-| **约定 #5/#10 依赖的脚本跑不起来** | `cleanup.py:68`、`count_coverage.py:31` 用了 `str | None`（需 Python 3.10+），而本机 PATH 上是 **3.8.3** → 在定义函数阶段就 `TypeError`。HANDOVER §1.2 写的"Python 3.13（managed）"是沙箱内解释器，**不在 PATH 上** | 各加一行 `from __future__ import annotations`（PEP 563：注解不在运行时求值）。**先实测确认局部变量注解本就不求值**，所以 `cleanup.py:140` 的 `list[Path]` 不用改 |
+| **约定 #5/#10 依赖的脚本跑不起来** | `cleanup.py:68`、`count_coverage.py:31` 用了 `str \| None`（需 Python 3.10+），而本机 PATH 上是 **3.8.3** → 在定义函数阶段就 `TypeError`。HANDOVER §1.2 写的"Python 3.13（managed）"是沙箱内解释器，**不在 PATH 上** | 各加一行 `from __future__ import annotations`（PEP 563：注解不在运行时求值）。**先实测确认局部变量注解本就不求值**，所以 `cleanup.py:140` 的 `list[Path]` 不用改 |
 | **`count_coverage.py` 在 Windows 默认控制台崩溃** | 打印 ✅ 时 `UnicodeEncodeError: 'gbk' codec`，得靠用户先设 `PYTHONIOENCODING` —— 而 Windows 是**唯一支持平台**，工程底线明令"不得依赖本机特殊状态才能跑" | 脚本自己把 stdout 切到 UTF-8（`sys.stdout.reconfigure`，3.7+ 可用），**不要求用户设环境变量** |
 | **`scripts/` 有 6 处写死本机绝对路径** | `count_coverage.py:19`、`gen_matrix.py:15`·`:16`、`fix_paths.py:11`、`fix_source_urls.py:13`、`fix_links_round2.py:20` 全是 `D:\MiMo\ProjectOne\俱佳agent`。而 PROGRESS 的开源就绪表写"全量扫描 apps/packages/scripts，**无命中**" —— `apps/`、`packages/`、`.github/` 确实无命中，**`scripts/` 那部分不成立** | 两个**仍在被约定引用的活脚本**改为按 `Path(__file__)` 解析仓库根（同 `check-docs.mjs` 用 `import.meta.url` 的做法，也是 HANDOVER §5.6 第 7 条对脚本的要求）；`gen_matrix.py` 文档串里写死的"89 行"一并去掉；**同日追记：三个一次性脚本也全部改完**，PROGRESS 该行已转 ✅ 并由 §五 的"本机绝对路径"断言看住 |
 

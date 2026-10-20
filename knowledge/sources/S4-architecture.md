@@ -24,7 +24,7 @@
 |------|------|-----|-----------|------|
 | T1 | Context Isolation (Electron 官方教程) | https://www.electronjs.org/docs/latest/tutorial/context-isolation | Electron 官方对上下文隔离机制的权威说明（默认开启、与沙箱关系） | canonical |
 | T2 | Chatbox 仓库（preload/IPC 层与 context isolation） | https://github.com/chatboxai/chatbox | 真实 Electron AI 客户端，deepwiki 架构显示其通过 preload.js + contextBridge 暴露安全 API，可作隔离实现参考 | verified |
-| T3 | 《contextIsolation | Electron 安全》（腾讯云开发者，深度解析） | https://cloud.tencent.com/developer/article/2411203 | 逐版本实测 contextIsolation 默认值（5.0/12.0/29.3）与安全含义的技术报告 | verified |
+| T3 | 《contextIsolation \| Electron 安全》（腾讯云开发者，深度解析） | https://cloud.tencent.com/developer/article/2411203 | 逐版本实测 contextIsolation 默认值（5.0/12.0/29.3）与安全含义的技术报告 | verified |
 | T4 | freeCodeCamp《Create Desktop Apps with Electron, React, and TypeScript》 | https://freecodecamp.org/news/create-desktop-apps-with-electron-react-and-typescript | 4 小时视频课程含“secure communication”章节，覆盖 context isolation 配置 | verified |
 | T5 | r/electronjs（context isolation 讨论） | https://www.reddit.com/r/electronjs/ | 社区关于隔离上下文、预加载脚本暴露 API 的实操讨论 | verified（社区入口） |
 

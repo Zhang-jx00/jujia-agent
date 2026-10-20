@@ -1789,6 +1789,117 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 29. Markdown 表格的数据行格数必须与表头一致（R36 · 排查4 实测）
+ *
+ * 为什么立它：**GFM 的表格行是按"未转义的竖线"切格的**，所以一个裸 `|`
+ * —— 哪怕它在行内代码里（`(?:TOKEN|…)`）、哪怕它只是标题的一部分
+ * （《contextIsolation | Electron 安全》）—— 都会**真的把一格劈成两格**。
+ * 而渲染器（GitHub / marked / 任何 CommonMark 实现）的处理是：
+ *   · 多出来的格子**静默丢弃**（那一格的内容人间蒸发）
+ *   · 少掉的格子**补空**
+ * 于是文档"看起来写全了"，读的人却在渲染后的表格里**看不到那一列**。
+ *
+ * 本轮实测（27 处，跨 10 个文件）都是这一种：
+ *   · `docs/TRACK-ROADMAP.md` 的 T60 行：`\`KV_SECRET_RE\` 的键名段写作
+ *     \`[A-Za-z0-9_.-]*(?:TOKEN|…)[A-Za-z0-9_.-]*\`` ⇒ 竖线劈开"条目"与"严重"两列，
+ *     渲染后"严重"落到了"状态"列、"状态"列的内容整列消失。
+ *   · `docs/PROGRESS.md` 的"扩容1（第3步·下半）"行：只有 2 格而表头 4 格 ⇒
+ *     "标签"与"关键证据"两列渲染成空。
+ *   · `knowledge/sources/S10-browser-docs.md` 的 T1 几行：数据行 6 格而表头 5 格
+ *     ⇒ "验证"列（canonical / canonical（已 WebFetch））**整列被丢弃**。
+ *
+ * 判据怎么取（这一步是本条的关键，R30 第 22 条已经证过"数列数"的老教训）：
+ *   · **按 GFM 的真实切分规则数**：只认**未转义**的竖线（`\|` 不切格）。
+ *     —— 这就是 R30 那条"刻意不取列数一致"当时踩的坑：它按**裸竖线**数，
+ *     于是一旦正文里合法地出现 `\|` 就会误报；现在按 GFM 语义数，误报源头没了。
+ *   · **逐表比**：拿**该表自己的表头**当基准，不是全仓众数。跨表比会把
+ *     "本来就是 4 列的表"和"本来是 3 列的表"混在一起。
+ *   · **跳过围栏代码块**（里面的 `|` 不是表格）与 **ARCHIVE 归档**
+ *     （审计轨迹，不改也不扫 —— 与第 22 条同一口径）。
+ *
+ * 防失焦：一条数据行都没扫到 ⇒ 直接红（"定位器失效"的老账，见第 12/13 条）。
+ * ------------------------------------------------------------------ */
+{
+  /** 按 GFM 规则切一行的格子：只认未转义的竖线；首尾竖线是分隔符不是格子。 */
+  const gfmCells = (line) => {
+    const out = [];
+    let cur = '';
+    let i = 0;
+    if (line.startsWith('|')) i = 1;
+    for (; i < line.length; i += 1) {
+      if (line[i] === '\\') {
+        cur += line[i] + (line[i + 1] ?? '');
+        i += 1;
+        continue;
+      }
+      if (line[i] === '|') {
+        out.push(cur);
+        cur = '';
+        continue;
+      }
+      cur += line[i];
+    }
+    // 行尾竖线后面若还有内容，那是**多出来的一格**（不能丢）——
+    // 所以只有"什么都没有"时才不算一格。
+    if (cur !== '' || out.length === 0) out.push(cur);
+    return out;
+  };
+  const isSepRow = (l) => /^\s*\|[\s:|-]*-[\s:|-]*\|?\s*$/.test(l) && l.includes('-');
+
+  const bad = [];
+  let dataRows = 0;
+  let tables = 0;
+  for (const rel of walkLiveFiles(['.md'])) {
+    const lines = read(rel).split('\n');
+    let fence = false;
+    let head = null; // 该表自己的表头（{ cells, lineNo }）
+    let sepSeen = false;
+    for (let i = 0; i < lines.length; i += 1) {
+      const l = lines[i];
+      if (/^\s*```/.test(l)) {
+        fence = !fence;
+        head = null;
+        sepSeen = false;
+        continue;
+      }
+      if (fence) continue;
+      if (!/^\s*\|/.test(l)) {
+        head = null;
+        sepSeen = false;
+        continue;
+      }
+      if (isSepRow(l)) {
+        sepSeen = true;
+        continue;
+      }
+      if (!sepSeen) {
+        head = { cells: gfmCells(l).length, lineNo: i + 1 };
+        tables += 1;
+        continue;
+      }
+      if (!head) continue;
+      dataRows += 1;
+      const cells = gfmCells(l).length;
+      if (cells === head.cells) continue;
+      const how = cells > head.cells
+        ? `多 ${String(cells - head.cells)} 格（渲染时会被**静默丢弃** ⇒ 那一列的内容人间蒸发）`
+        : `少 ${String(head.cells - cells)} 格（渲染时**补空** ⇒ 那一列读成空白）`;
+      bad.push(`${rel}:${String(i + 1)}  与本表表头（${rel}:${String(head.lineNo)}，${String(head.cells)} 格）对不齐：本格 ${String(cells)} 格 —— ${how}`);
+    }
+  }
+  report(
+    `Markdown 表格的数据行格数与表头一致（现扫 ${String(tables)} 张表 / ${String(dataRows)} 行；GFM 按未转义竖线切格）`,
+    dataRows > 100 && bad.length === 0,
+    [
+      dataRows <= 100 ? `只认到 ${String(dataRows)} 行表格数据 —— 定位器可能失效（防失焦先红）` : '',
+      bad.join('\n     '),
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

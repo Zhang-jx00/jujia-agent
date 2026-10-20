@@ -9,10 +9,10 @@
 
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
-| T1 | Web Embeds | Electron | https://www.electronjs.org/docs/latest/tutorial/web-embeds | 官方教程，明确给出 iframe / `<webview>` / WebContentsView 三者差异与选型建议 | canonical（已 WebFetch） |
-| T1 | `<webview>` Tag | Electron | https://www.electronjs.org/docs/latest/api/webview-tag | 官方 API，含"不建议使用 webview"警告与替代方案 | canonical |
-| T1 | WebContentsView | Electron | https://www.electronjs.org/docs/latest/api/web-contents-view | 官方 API，当前推荐的嵌入形态、替代已弃用 BrowserView | canonical（已 WebFetch） |
-| T1 | BrowserView | Electron | https://www.electronjs.org/docs/latest/api/browser-view | 官方 API，标注 deprecated，说明迁移路径 | canonical |
+| T1 | Web Embeds（Electron） | https://www.electronjs.org/docs/latest/tutorial/web-embeds | 官方教程，明确给出 iframe / `<webview>` / WebContentsView 三者差异与选型建议 | canonical（已 WebFetch） |
+| T1 | `<webview>` Tag（Electron） | https://www.electronjs.org/docs/latest/api/webview-tag | 官方 API，含"不建议使用 webview"警告与替代方案 | canonical |
+| T1 | WebContentsView（Electron） | https://www.electronjs.org/docs/latest/api/web-contents-view | 官方 API，当前推荐的嵌入形态、替代已弃用 BrowserView | canonical（已 WebFetch） |
+| T1 | BrowserView（Electron） | https://www.electronjs.org/docs/latest/api/browser-view | 官方 API，标注 deprecated，说明迁移路径 | canonical |
 | T2 | minbrowser/min（多标签页 WebContentsView 管理） | https://github.com/minbrowser/min | 真实 Electron 浏览器；主进程 `main/viewManager.js`、`js/webviews.js` 用 WebContentsView 实例管理 web 内容、安全项与事件转发 | verified（DeepWiki 抓到源码映射） |
 | T2 | wexond/browser-base | https://github.com/wexond/browser-base | 基于 Electron+React 的浏览器底座，内嵌多标签 web 内容，可作"内嵌浏览器"参考实现 | verified |
 | T2 | mamezou-tech/electron-example-browserview | https://github.com/mamezou-tech/electron-example-browserview | 官方示例级项目，`main.mjs` 演示多 WebContentsView 注册与切换（原为 BrowserView，已迁移） | verified |
@@ -30,8 +30,8 @@
 
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
-| T1 | Security | Electron | https://www.electronjs.org/docs/latest/tutorial/security | 官方安全清单（20 条），覆盖 will-navigate / setWindowOpenHandler / 权限请求 / 隔离 / 下载 / openExternal 等 | canonical（已 WebFetch） |
-| T1 | webContents | Electron（事件 will-navigate / setWindowOpenHandler / will-attach-webview / certificate-error / will-download） | https://www.electronjs.org/docs/latest/api/web-contents | 官方 API，列出所有安全相关事件与方法及其触发时机 | canonical |
+| T1 | Security（Electron） | https://www.electronjs.org/docs/latest/tutorial/security | 官方安全清单（20 条），覆盖 will-navigate / setWindowOpenHandler / 权限请求 / 隔离 / 下载 / openExternal 等 | canonical（已 WebFetch） |
+| T1 | webContents（Electron：事件 will-navigate / setWindowOpenHandler / will-attach-webview / certificate-error / will-download） | https://www.electronjs.org/docs/latest/api/web-contents | 官方 API，列出所有安全相关事件与方法及其触发时机 | canonical |
 | T1 | session（setPermissionRequestHandler / setCertificateVerifyProc） | https://www.electronjs.org/docs/latest/api/session | 官方 API，权限请求与证书校验入口 | canonical |
 | T2 | minbrowser/min · main/viewManager.js（getDefaultViewWebPreferences） | https://github.com/minbrowser/min | 真实浏览器对 WebContentsView 设置安全 webPreferences（沙箱/隔离等）的落地实现 | verified（DeepWiki） |
 | T2 | ToDesktop: Permission Request Handler JS Check | https://www.todesktop.com/static-analysis/permission-request-handler-js-check | 静态分析规则，强调对不可信源必须 `setPermissionRequestHandler`，否则相机/麦克风可被静默调用 | verified |
@@ -52,7 +52,7 @@
 
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
-| T1 | shell | Electron（shell.openExternal） | https://www.electronjs.org/docs/latest/api/shell | 官方 API，默认以系统默认应用打开 URL；Windows 限 2081 字符；沙箱渲染进程不可用 | canonical（已 WebFetch） |
+| T1 | shell（Electron：shell.openExternal） | https://www.electronjs.org/docs/latest/api/shell | 官方 API，默认以系统默认应用打开 URL；Windows 限 2081 字符；沙箱渲染进程不可用 | canonical（已 WebFetch） |
 | T1 | Security §14/§15（setWindowOpenHandler → shell.openExternal 外部放行范式） | https://www.electronjs.org/docs/latest/tutorial/security | 官方给出 `isSafeForExternalOpen` 范式：白名单内才 `shell.openExternal`，其余 `deny` | canonical（已 WebFetch） |
 | T2 | （缺失）专用开源项目 | — | 未找到以"用户自选浏览器"为核心功能的开源 Electron 仓库。相关实现均散落在通用"外链交给系统浏览器"模式（见 T1 官方范式与 T5 社区方案），无独立可指路径的项目 | 留空（宁缺勿滥，见自评） |
 | T3 | The dangers of Electron's shell.openExternal() | https://benjamin-altpeter.de/shell-openexternal-dangers | 同 96 T3；同时论证"默认只放行 http(s)/mailto"的浏览器选择前置安全约束 | verified |
@@ -109,7 +109,7 @@
 
 | 类型 | 标题 | URL | 为什么权威 | 验证 |
 |------|------|-----|-----------|------|
-| T1 | Class: Debugger | Electron | https://www.electronjs.org/docs/latest/api/debugger | 官方 CDP 传输：`debugger.attach` / `sendCommand` 接入 Chrome DevTools Protocol | canonical（已 WebFetch） |
+| T1 | Class: Debugger（Electron） | https://www.electronjs.org/docs/latest/api/debugger | 官方 CDP 传输：`debugger.attach` / `sendCommand` 接入 Chrome DevTools Protocol | canonical（已 WebFetch） |
 | T1 | webContents.executeJavaScript(code[, userGesture]) | https://www.electronjs.org/docs/latest/api/web-contents | 官方 API，在页面执行 JS、返回 Promise、userGesture 解除手势限制、加载完成前挂起 | canonical（已 WebFetch） |
 | T2 | agent-browser（Electron 自动化指南，经 CDP） | https://www.claudepluginhub.com/skills/pleaseai-agent-browser-plugins-agent-browser/electron | 经 `--remote-debugging-port` + CDP 连接任意 Electron 应用，snapshot/click/screenshot | verified |
 | T3 | When your user is an AI agent: trust boundaries for browser access | https://hablich.dev/articles/trust-boundaries-browser-agents.html | 前 Chrome 工程师分析 CDP 零认证、localhost 任意进程可连带来的信任边界（HN 热门 598 分） | verified |
