@@ -1726,6 +1726,42 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 27. 清理脚本的"空文件"判据被窄化过，且不许回到 3.9 的 API（T70 · R35 收口实测）
+ * ------------------------------------------------------------------ *
+ * 为什么要机器化：`cleanup.py` 原来把**全项目任何 0 字节文件**都当垃圾，
+ * 于是它把自己正在写的日志搬进了回收站（`.trash/20261016-153314/.evidence/r35/_t.log` 为证 ——
+ * shell 先建空文件、python 最后才打印），合成项目探针还当场量出 `docs/.gitkeep` 也会被搬走。
+ * 现在钉三件事：① 空文件只在**临时区**里才算垃圾（`in_temp_area` 的定义与调用都在位）；
+ * ② `.evidence`（台账底稿）在跳过名单里；③ 不许用 3.9 才有的 `Path.is_relative_to(`
+ * —— PATH 上的 python 实测 3.8.3，用了就是运行时 `AttributeError`。
+ * needle 全取**声明 / 调用形状**（带 `def ` 前缀、带 `(`），免得被自己的注释喂饱。
+ * ------------------------------------------------------------------ */
+
+{
+  const rel = 'scripts/cleanup.py';
+  const src = read(rel);
+  const bad = [];
+  if (src.length === 0) bad.push('读不到 `scripts/cleanup.py`');
+  const needles = [
+    ['def in_temp_area(p: Path) -> bool:', '空文件要先过"在不在临时区"这道闸 —— 没了就会又回到"全项目空文件都是垃圾"'],
+    ['(empty_files if in_temp_area(p) else empty_noted).append(p)', '区外的空文件只报不动那条分流'],
+    ['SKIP_DIR_NAMES = {".git", ".workbuddy", "node_modules", ".trash", ".evidence"}', '台账底稿 `.evidence/` 不进遍历'],
+    ['②b 区外的空文件', '报告里把"看见了但不动"的那批单列一行（不写就等于静默）'],
+  ];
+  for (const [needle, why] of needles) {
+    if (!src.includes(needle)) bad.push(`「${needle}」不在了 —— ${why}`);
+  }
+  if (src.includes('.is_relative_to(')) {
+    bad.push('用了 `Path.is_relative_to(` —— 那是 3.9 的方法，PATH 上的 python 实测 3.8.3，运行时直接 AttributeError');
+  }
+  report(
+    '清理脚本只把临时区里的空文件当垃圾（`.evidence` 受保护；不用 3.9 才有的 API；T70）',
+    bad.length === 0,
+    bad.join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

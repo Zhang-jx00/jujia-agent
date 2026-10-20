@@ -71,7 +71,28 @@ LEGACY_HINTS = [
     "docs/knowledge",     # 旧卡片目录（已迁至 knowledge/cards/）
 ]
 
-SKIP_DIR_NAMES = {".git", ".workbuddy", "node_modules", ".trash"}
+SKIP_DIR_NAMES = {".git", ".workbuddy", "node_modules", ".trash", ".evidence"}
+# ↑ `.evidence/` 是**台账的底稿**（复核里"数字只抄自真实输出"那些行的出处）。
+#   R35 实测：它里面的日志在写入当场是 0 字节，被"空文件即垃圾"这条扫走过两次
+#   （`clean-apply-r35b.log` 与 `_t.log` 都进了回收站）⇒ 整个区不再进入遍历。
+
+
+def in_temp_area(p: Path) -> bool:
+    """这只文件是否落在某个**已知临时区**里（`TEMP_DIRS` 列的那些）。
+
+    为什么要这一位：0 字节本身**不是垃圾的判据** —— 正在被写的日志、占位的 `.gitkeep`、
+    区外一个还没填内容的文档，都是 0 字节。R35 之前的写法把全项目任何空文件都搬走，
+    于是发生过"清理把自己这次的日志搬进回收站，台账里那句日志就再也读不出来"。
+    现在只有**躺在临时区里的**空文件才算垃圾；区外的只报不动。
+    """
+    # **不用 `Path.is_relative_to`**：那是 3.9 才有的方法，而 PATH 上的 python 实测是 3.8.3
+    # （本文件顶上那句 `from __future__ import annotations` 只救注解，救不了运行时调用）。
+    # 3.8 可用的等价写法是看 `parents` 里有没有那个根。
+    for d in TEMP_DIRS:
+        root = PROJECT / d
+        if p == root or root in p.parents:
+            return True
+    return False
 
 
 def iter_project_files():
@@ -88,8 +109,8 @@ def match_pattern(p: Path, patterns) -> str | None:
     return None
 
 
-def collect() -> tuple[list, list, list]:
-    temp_files, empty_files, stale_dirs = [], [], []
+def collect() -> tuple[list, list, list, list]:
+    temp_files, empty_files, empty_noted, stale_dirs = [], [], [], []
     for p in iter_project_files():
         pat = match_pattern(p, TEMP_PATTERNS)
         if pat:
@@ -97,14 +118,15 @@ def collect() -> tuple[list, list, list]:
             continue
         try:
             if p.is_file() and p.stat().st_size == 0:
-                empty_files.append(p)
+                # 只有躺在临时区里的空文件才搬；区外的**只报不动**（见 `in_temp_area` 的注释）
+                (empty_files if in_temp_area(p) else empty_noted).append(p)
         except OSError:
             pass
     for d in TEMP_DIRS:
         full = PROJECT / d
         if full.is_dir():
             stale_dirs.append(full)
-    return temp_files, empty_files, stale_dirs
+    return temp_files, empty_files, empty_noted, stale_dirs
 
 
 def collect_legacy() -> list:
@@ -170,7 +192,7 @@ def main() -> int:
     ap.add_argument("--purge-trash", action="store_true", help="同时真删 .trash 中超期条目")
     args = ap.parse_args()
 
-    temp_files, empty_files, stale_dirs = collect()
+    temp_files, empty_files, empty_noted, stale_dirs = collect()
     legacy = collect_legacy()
     plan: list[Path] = [p for p, _ in temp_files] + empty_files + stale_dirs + legacy
 
@@ -178,14 +200,17 @@ def main() -> int:
     print(f"俱佳Agent 清理预检 · 项目根：{PROJECT}")
     print("=" * 62)
     print(f"① 临时/中间产物        {len(temp_files)} 个文件")
-    print(f"② 空文件（0 字节）      {len(empty_files)} 个")
+    print(f"② 空文件（0 字节，**只算临时区里的**）  {len(empty_files)} 个")
+    print(f"②b 区外的空文件（**只报不动**）        {len(empty_noted)} 个")
     print(f"③ 缓存目录              {len(stale_dirs)} 个")
     print(f"④ 旧版遗留（仅空目录）  {len(legacy)} 个")
     print("-" * 62)
     for p, pat in temp_files:
         print(f"  [临时·{pat}] {p.relative_to(PROJECT)}")
     for p in empty_files:
-        print(f"  [空文件] {p.relative_to(PROJECT)}")
+        print(f"  [空文件·临时区] {p.relative_to(PROJECT)}")
+    for p in empty_noted:
+        print(f"  [空文件·区外·不动] {p.relative_to(PROJECT)}")
     for p in stale_dirs:
         print(f"  [缓存目录] {p.relative_to(PROJECT)}")
     for p in legacy:

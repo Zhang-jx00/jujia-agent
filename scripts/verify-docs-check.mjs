@@ -461,6 +461,17 @@ const cases = [
     to: "  page.on('destroyed', () => log(",
     expect: 'e2e 的常驻取证还在原位',
   },
+  {
+    // 第 27 条（T70 · R35 收口实测）：把"空文件只在临时区里才算垃圾"这道闸拆掉。
+    // 挑这一条的理由很具体：**旧版就是这么写的**，于是它把自己正在写的日志搬进了回收站
+    // （`.trash/20261016-153314/.evidence/r35/_t.log` 为证），合成项目探针还量出 `docs/.gitkeep` 同样会被搬走。
+    // 这不是"日志丢了"，是**仓库里任何 0 字节文件都可能被静默搬走** —— 判据必须钉住分流那一行。
+    name: 'cleanup 回到"任何空文件都算垃圾"（会把自己刚写的日志搬进回收站）',
+    file: 'scripts/cleanup.py',
+    from: '                (empty_files if in_temp_area(p) else empty_noted).append(p)',
+    to: '                empty_files.append(p)',
+    expect: '清理脚本只把临时区里的空文件当垃圾',
+  },
 ];
 
 /**

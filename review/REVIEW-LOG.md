@@ -5608,11 +5608,33 @@ e2e / smoke / perf / **`verify:pack`**（新形状真跑，六步全过 + 收尾
 
 ### 门禁与台账（数字只写一处：`docs/PROGRESS.md` 规整20 复跑块）
 
-收口后复跑：typecheck 0 · lint 0 · `check:docs` **26 条** 0 · 注入自检 **35 处**全拦 0 ·
+收口后复跑：typecheck 0 · lint 0 · 单测 **2095 通过 / 1 跳过（141 个测试文件）** —— **收口这次是复跑了的**，
+理由写在 CHANGELOG 里：动了 `check-docs.mjs` / `verify-docs-check.mjs` / `cleanup.py` 三个门禁脚本，
+不再用"只改文案所以不跑"这种口径（`grep -rl "verify-pack" --include=*.test.ts` 也确实零命中，但**这次不需要靠那条判断**）·
+`check:docs` **27 条** 0（新增第 27 条）· 注入自检 **36 处**全拦 0（新增第 36 处，实测拦住）·
 `verify:pack` **6 试 2 绿 4 红**（绿的两次六步全过 + 收尾自删目录）。
-单测**未在收口复跑**：本轮收口只改 `verify-pack.mjs` 的文案与重试形状，
-`grep -rn "verify-pack" apps/**/*.test.ts` 零命中 ⇒ 最后一跑仍是主体提交前那次（2095 通过 / 1 跳过，141 文件）。
-**这个"不复跑"的判断本身写进了 CHANGELOG**，不是悄悄省掉的。
+
+### 收口最后一步炸出来的新洞：清理脚本把自己刚写的日志搬走了（登记并当轮修掉 = T70）
+
+- **现象**：`python scripts/cleanup.py --apply > .tmp/clean-apply-r35b.log` 跑完，日志 **0 字节**；
+  把日志改写到 `.evidence/r35/_t.log` 再跑一次 —— **文件直接不见了**。
+- **取证**（不是猜）：`.trash/20261016-153314/.evidence/r35/_t.log` 就在回收站里 ⇒ **是 cleanup 自己搬的**。
+  机制在 `collect()`：那条"**任何 0 字节文件都算垃圾**"扫遍全项目，而 shell 的重定向**先**创建空文件、
+  python **最后**才打印 ⇒ **遍历的那一刻它正好是 0 字节**。这就是 [[evidence-integrity]] 里
+  "自造产物要在写入前取状态并排除自己"那一族的又一个形状。
+- **先让它红**：合成项目里放五只空文件跑旧版 —— `docs/empty-note.md`、`docs/.gitkeep`、
+  `.evidence/r39/self.log` **三只被一起搬走**（`PROBE_EMPTY_CLEANUP=RED：偏差 3 条`）。
+  **这已经不是"丢一份日志"**：仓库里任何 0 字节文件都可能被静默搬走；今天恰好没有 0 字节的**被跟踪**文件
+  （逐只 `git ls-files` 量过），那是运气，不是判据。
+- **修法三条**：① `.evidence` 进 `SKIP_DIR_NAMES` —— 台账底稿不进遍历；
+  ② 空文件**只在临时区里才算垃圾**（新增 `in_temp_area()`），区外的**只报不动**，报告里单列一行 `②b`；
+  ③ 顺手踩到一条平台坑：**`Path.is_relative_to` 是 3.9 才有的方法**，而 PATH 上的 python 实测 **3.8.3**
+  —— 第一版当场 `AttributeError`，改成 `parents` 成员判断（"判据别假定运行环境"那条同族）。
+- **后绿**：同一探针五条判据全部符合（`PROBE_EMPTY_CLEANUP=OK：偏差 0 条`），
+  而临时区里的空文件与 `*.tmp` 这些模式**照旧被收** —— 没把清理能力削弱掉。
+- **为什么还要进护栏**：只写台账等于"记进禁忌表"，**不写判据就会复发** ——
+  于是 `check:docs` 加第 27 条（`in_temp_area(` 在位、`.evidence` 在跳过名单里、
+  且**不许**用 `is_relative_to`），注入自检第 36 处证明它会红。
 
 ### 三件欠账 / 未定论
 
