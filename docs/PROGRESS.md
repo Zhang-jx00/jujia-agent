@@ -692,7 +692,11 @@ e2e 0（**65 步整跑**，48 行取证、页签切换 45 行、撞锁 0 次 —
 **CI 复取**：`c83a57e` run `38855463478`、`0b8e22e` run `38855526196` 均 **completed / success**（排查3 那两笔）。
 **本轮三笔（规整20 收口）**：主体 `94b13c3` **没有 CI run** —— 它是**随标签推上去的**（不是 `main` 的 tip），
 workflow 只在 `main` / PR 上触发 ⇒ **照实记"未触发"，不推断成败**；
-收口第一笔 `6d715e3` = run **#200 completed / success**；收口第二笔 `8a92376` = run **#201 completed / success**。
+收口第一笔 `6d715e3` = run **#200 completed / success**；收口第二笔 `8a92376` = run **#201 completed / success**；
+再往后两笔回填 `2b43784` = run **#202 completed / success**、`da6389a` = run **#203 completed / success**
+（轮询三拍到 `completed` 才收，结论只从日志自己写的行读 —— **不信后台通知里包装器的退出码**）。
+**最后一笔提交（本行这次写入的提交）自己会再触发一个 run，那一格留 R36 开工复取** ——
+本轮不追自己的尾巴（同 R34 的口径：回填那一笔的 CI 由下一轮取）。
 取真值仍走 HANDOVER §5.9 那条配方（`git credential fill` 只在内存里过令牌，只打印 run 号 / 状态 / 结论，
 密文零回显、不改 git config），日志落 `.evidence/r35/ci-r35-poll.out` —— **不再落 `.tmp`**（T70 那条：
 清理脚本会把自己刚写的日志扫走）。

@@ -103,7 +103,9 @@ cleanup 嵌套探针**先红后绿**两份日志 ·
 ⇒ 不是还原不完整。
 **CI 复取（本轮三笔）**：主体 `94b13c3` **没有 run** —— 它是**随标签推上去的**、不是 `main` 的 tip，
 而 workflow 只在 `main` / PR 触发 ⇒ **照实记"未触发"，不推断成败、也不拿上一轮的绿顶替**；
-收口第一笔 `6d715e3` = run **#200 completed / success**，收口第二笔 `8a92376` = run **#201 completed / success**。
+收口第一笔 `6d715e3` = run **#200 completed / success**，收口第二笔 `8a92376` = run **#201 completed / success**，
+两笔台账回填 `2b43784` = run **#202 success**、`da6389a` = run **#203 success**（轮询到 `completed` 才收，
+结论只从日志自己写的行读）；**最后这一笔提交触发的 run 留 R36 开工复取**，本轮不追自己的尾巴。
 取真值仍走 HANDOVER §5.9 那条 `credential fill` 配方（令牌只在内存里过、只打印 run 号 / 状态 / 结论、
 密文零回显、不改 git config）；**日志这次落 `.evidence/r35/` 而不是 `.tmp/`** —— 后者会被清理脚本自己扫走（第 8 条）。
 

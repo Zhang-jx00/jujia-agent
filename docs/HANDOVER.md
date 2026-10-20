@@ -247,7 +247,7 @@
 | **变异测试** | `npm run mut` | 按 `review/mutations.json` 逐项改坏代码验证测试真拦得住；**"无法运行"单独成类，不算被拦住** |
 | **文档一致性** | `npm run check:docs`（**项数以自身输出为准**）+ `npm run check:docs:selftest`（注入的漂移必须全部被拦住） | 见 §5.4 |
 | 许可证 | `npm run license:check` | 强 copyleft 硬拒绝；清单自动生成于 `docs/DEPENDENCY-LICENSES.md` |
-| 清理 | `python scripts/cleanup.py --apply` | 移入项目内 `.trash/<时间戳>/`，30 天可反悔，**绝不直接删** |
+| 清理 | `python scripts/cleanup.py --apply` | 移入项目内 `.trash/<时间戳>/`，30 天可反悔，**绝不直接删**；空文件**只在临时区里才算垃圾**，`.evidence/` 整区不进遍历（T70） |
 | CI | `.github/workflows/ci.yml` + `mutation.yml` | CI 跑 lint / typecheck / test / **check:docs** / **license:check**（T14 补上）/ build；**CI 不跑 smoke/perf/e2e**（需真实图形环境，本地跑）；**变异不在 CI 里** —— 独立的 `mutation.yml`，`workflow_dispatch` 手动触发（几十分钟一轮塞进每次 push 只会被关掉） |
 
 当前门禁分两档（快档每次提交前 · 慢档阶段收尾与发版前）—— **清单的唯一权威是 `docs/PROGRESS.md` 的「当前规模」段**，本文件不复述条目（复述过一次就漏一次：2026-10-09 深度审计抓到这里少了 `verify:pack` 与 `mut`，见复核 083）。
@@ -675,6 +675,12 @@ PDF 零出站、diff 扩 `GIT_DIFF` 而不新开通道，末尾九条开关）�
 8. **涉及第三方项目/信息先联网查最新**：先查公开最新版与更新日志；查不到就说搜不到，**绝不拿旧信息冒充最新**。
 9. **必须持续接触新技术**：选型要说明"为什么用现在这个做法"并记录被替代的旧做法；新技术要落到**代码或文档**。
 10. **收尾清理**：任务结束跑 `python scripts/cleanup.py` 预览 → `--apply`（移入 `.trash/`，30 天可反悔，绝不直接删）。
+    **判据范围（R35 · T70 之后）**：0 字节文件**只有在临时区里才算垃圾**（`.tmp/`、`apps/desktop/out/`、
+    `node_modules/.cache/` 等 `TEMP_DIRS` 列出的那些）；**区外的空文件只报不动**（报告里单列 `②b`）——
+    旧写法把"全项目任何空文件"都搬走，实测连 `docs/.gitkeep` 与**清理脚本自己刚写的日志**都会被扫进回收站。
+    **`.evidence/` 整区不进遍历**：那里是台账底稿（"数字只抄自真实输出"那些行的出处）。
+    **配套操作口径**：跑清理时**别把日志重定向进 `.tmp/`**（shell 先建空文件、脚本最后才打印 ⇒
+    它在自己被扫的那一刻是 0 字节），落到 `.evidence/` 或区外。
 11. **知识统一进 `knowledge/`**，规划进 `docs/`，复盘/排查进 `review/`；不另起散乱目录。
 12. **版本控制流程**：每完成一个阶段 **先写 CHANGELOG 条目**（并把 `apps/desktop/package.json` 的版本号一并改到位 ——
     **必须在跑图形类门禁之前改**，见 §5.11 与复核 025 的教训），再把 CHANGELOG 与代码一起 `git add`、提交；
