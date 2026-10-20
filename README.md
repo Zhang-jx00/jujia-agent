@@ -78,7 +78,7 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 | 想了解 | 看哪里 |
 |--------|--------|
 | 怎么用、怎么装 | 本文件「快速开始」 |
-| **第一次接手（人或 AI）：读哪一份、下一步做什么、怎么推 GitHub、用什么凭证、避哪些坑** | [docs/AI-HANDOVER.md](docs/AI-HANDOVER.md) |
+| **第一次接手（人或 AI）：唯一的交接基准 —— 项目是什么、做到哪、下一步做什么、怎么推 GitHub、用什么凭证、避哪些坑** | [俱佳Agent交接文档.md](俱佳Agent交接文档.md) |
 | 技能怎么写（按需查阅的说明书） | [docs/SKILLS.md](docs/SKILLS.md) |
 | 长任务与断点续跑怎么设计（M17 批一） | [docs/DESIGN-M17.md](docs/DESIGN-M17.md) |
 | 钩子怎么写（可拒绝的自动化） | [docs/HOOKS.md](docs/HOOKS.md) |
@@ -302,8 +302,8 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 
 ## 想在仓库里继续开发
 
-0. **第一次接手？先读接手手册** [`docs/AI-HANDOVER.md`](docs/AI-HANDOVER.md)（怎么跑起来 / 怎么推 GitHub / 用什么凭证 / 四条停牌 / 下一步做什么，按顺序写给"拿到仓库就能开工"的人或 AI）
-0.1. **要看全貌与口径**：[`docs/HANDOVER.md`](docs/HANDOVER.md)（治理台账：已完成/未完成 + 踩坑清单 + 开源前置检查单）
+0. **接手项目？只读一份就够**：[`俱佳Agent交接文档.md`](俱佳Agent交接文档.md)（唯一基准：现状 / 纪律 / 凭证与推送 / 这台机器的坑 / 下一步）
+0.1. **要看全貌与口径**：[`docs/HANDOVER.md`](docs/HANDOVER.md)（治理台账：边界说明 + 开源前置检查单 + CI 取真值配方）
 1. 读 [`docs/PROGRESS.md`](docs/PROGRESS.md) 知道**做到哪了**（状态唯一权威）
 2. 读 [`docs/TRACK-ROADMAP.md`](docs/TRACK-ROADMAP.md) 知道**下一步做什么**（编号规范 + 修复队列 + 开发队列）
 3. 读 [`docs/TRACK-PLANS.md`](docs/TRACK-PLANS.md) 知道**改动该记在哪条轨道**（记录规则）

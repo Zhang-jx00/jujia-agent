@@ -1762,6 +1762,33 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 28. 交接文档里写的每一条 `npm run <脚本>` 都必须真实存在（R35 之后 · 复核 094）
+ * ------------------------------------------------------------------ *
+ * 为什么立它：`俱佳Agent交接文档.md` 是"新接手者的第一小时清单"，它承诺的是**照着敲就能跑**。
+ * 本轮自查时就在里面写出过一条根本不存在的 `npm run cleanup`（真实入口是 `python scripts/cleanup.py`）——
+ * 而原有的"README 提到的 npm 脚本都存在"那条**只看 README**，扫不到这份新文档。
+ * 文档越像"能照抄的说明书"，就越不能有抄不通的命令。
+ * 防失焦：文档读不到 / 一条 `npm run` 都没扫到 ⇒ 直接红（"正则改坏了会读成全绿"是老账）。
+ * ------------------------------------------------------------------ */
+
+{
+  const rel = '俱佳Agent交接文档.md';
+  const src = read(rel);
+  const scripts = new Set(Object.keys(JSON.parse(read('package.json')).scripts ?? {}));
+  const used = [...src.matchAll(/npm run ([A-Za-z0-9:_-]+)/g)].map((m) => m[1]);
+  const missing = [...new Set(used)].filter((n) => !scripts.has(n));
+  const bad = [];
+  if (src.length === 0) bad.push(`读不到 ${rel}（交接文档是接手基准，不能缺）`);
+  if (used.length === 0) bad.push('文档里一条 `npm run` 都没扫到 —— 要么正文被清空，要么这条守卫失去了靶子');
+  if (missing.length > 0) bad.push(`写了不存在的脚本：${missing.join(', ')}（对照 package.json 的 scripts 现扫 ${String(scripts.size)} 条）`);
+  report(
+    `交接文档里的 npm run 脚本都真实存在（现扫 ${String(used.length)} 处引用 / ${String(scripts.size)} 条定义）`,
+    bad.length === 0,
+    bad.join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

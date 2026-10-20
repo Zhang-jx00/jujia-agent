@@ -472,6 +472,16 @@ const cases = [
     to: '                empty_files.append(p)',
     expect: '清理脚本只把临时区里的空文件当垃圾',
   },
+  {
+    // 第 28 条（交接文档里的命令要能照抄）：把一条真实脚本改成不存在的名字。
+    // 挑这一条的理由很具体：本轮真的在文档里写出过一条不存在的 `npm run cleanup` ——
+    // 交接文档是接手方的"第一小时清单"，**抄不通的命令行比没有清单更坏**（人会以为是自己的环境坏了）。
+    name: '交接文档里写了一条不存在的 npm run 脚本（照抄会失败）',
+    file: '俱佳Agent交接文档.md',
+    from: 'npm run verify:pack  # 打包产物六步验证',
+    to: 'npm run verify:packed  # 打包产物六步验证',
+    expect: '交接文档里的 npm run 脚本都真实存在',
+  },
 ];
 
 /**
