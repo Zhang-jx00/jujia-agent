@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
-import type { McpApprovalPlan } from '@jujia/shared-ipc';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import type { McpApprovalPlan, McpServerView } from '@jujia/shared-ipc';
 import { McpPanel } from './McpPanel';
 
 /**
@@ -50,6 +50,7 @@ function plan(over: Partial<McpApprovalPlan> = {}): McpApprovalPlan {
 
 const serverList = vi.fn();
 const pendingPlan = vi.fn();
+const serverSave = vi.fn();
 
 function mount(p: McpApprovalPlan | null): void {
   serverList.mockResolvedValue([]);
@@ -60,9 +61,11 @@ function mount(p: McpApprovalPlan | null): void {
 beforeEach(() => {
   serverList.mockReset();
   pendingPlan.mockReset();
+  serverSave.mockReset();
   vi.stubGlobal('jujia', {
     mcpServerList: serverList,
     mcpPendingPlan: pendingPlan,
+    mcpServerSave: serverSave,
     onMcpStateChanged: vi.fn().mockReturnValue(() => undefined),
   });
 });
@@ -119,5 +122,98 @@ describe('MCP 批准界面 · 「只读」这一档是谁说的（T53 · R47）'
 
     expect(body).not.toContain('不替它担保');
     expect(body).not.toContain('服务端声明只读');
+  });
+});
+
+/**
+ * 「掉线后自动重连」那一格（T31 · 选项 B · R52）。
+ *
+ * 为什么这个页面值得单独测这三件事：
+ * ① **默认不勾** —— 自动重连 = 在没人点过的情况下再起一个第三方进程，
+ *    所以它必须是**逐个服务端显式授权**的（白名单）。默认勾上 = 默认授权。
+ * ② **说明在** —— 勾上它的人必须知道两件事：它会被授权在掉线后自动重启，
+ *    以及**重连仍要重新批准**（自动重连只免掉"再点一次连接"）。
+ * ③ **重连的次数与原因看得见** —— 否则失败是静默的，用户只看到"失败"两个字。
+ */
+describe('MCP 界面 · 「掉线后自动重连」（T31 · 选项 B · R52）', () => {
+  function serverView(over: Partial<McpServerView> = {}): McpServerView {
+    return {
+      id: 's1',
+      name: '文件系统',
+      command: 'npx',
+      args: ['-y', 'demo-mcp'],
+      envKeys: [],
+      state: 'idle',
+      discoveredTools: 0,
+      enabledTools: [],
+      lastError: null,
+      autoReconnect: false,
+      source: 'user',
+      pluginName: null,
+      disabledByPlugin: false,
+      ...over,
+    };
+  }
+
+  function mountServer(v: McpServerView): void {
+    serverList.mockResolvedValue([v]);
+    pendingPlan.mockResolvedValue(null);
+    serverSave.mockResolvedValue(v);
+    render(<McpPanel />);
+  }
+
+  it('勾选框**默认不勾**（默认授权 = 默认替用户做决定）', async () => {
+    mountServer(serverView());
+    const box = (await screen.findByRole('checkbox', { name: /掉线后自动重连/ })) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+  });
+
+  it('说明在：说清上限，也说清"**重连仍要重新批准**"', async () => {
+    mountServer(serverView());
+    await screen.findByRole('checkbox', { name: /掉线后自动重连/ });
+    const body = document.body.textContent ?? '';
+
+    expect(body).toContain('掉线后自动重连');
+    expect(body).toContain('自己重连');
+    // 免不掉的那一半必须写在界面上
+    expect(body).toContain('再批一次工具');
+    expect(body).toContain('待你批准');
+    // 上限与退避也要说（用户有权知道它不会无限重试）
+    expect(body).toContain('最多试 3 次');
+  });
+
+  it('**已授权时**说清"这个服务端被授权在掉线后自动重启"（否则用户不知道它会自己起来）', async () => {
+    mountServer(serverView({ autoReconnect: true }));
+    const box = (await screen.findByRole('checkbox', { name: /掉线后自动重连/ })) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    const body = document.body.textContent ?? '';
+
+    expect(body).toContain('已授权');
+    expect(body).toContain('自动重新启动');
+  });
+
+  it('重连的**次数与最后一次失败原因**看得见（复用 lastError 那一格）', async () => {
+    mountServer(
+      serverView({
+        state: 'error',
+        lastError: '自动重连：已试 3 次都没成功，已放弃（最后一次：初始化被拒绝）',
+      }),
+    );
+    await screen.findByRole('checkbox', { name: /掉线后自动重连/ });
+    const body = document.body.textContent ?? '';
+
+    expect(body).toContain('已试 3 次');
+    expect(body).toContain('初始化被拒绝');
+  });
+
+  it('勾一下会带着 autoReconnect=true 去保存（走同一条保存通道）', async () => {
+    mountServer(serverView());
+    const box = (await screen.findByRole('checkbox', { name: /掉线后自动重连/ })) as HTMLInputElement;
+    fireEvent.click(box);
+
+    await vi.waitFor(() => expect(serverSave).toHaveBeenCalled());
+    const payload = serverSave.mock.calls[0]?.[0] as { id: string; autoReconnect: boolean };
+    expect(payload.id).toBe('s1');
+    expect(payload.autoReconnect).toBe(true);
   });
 });

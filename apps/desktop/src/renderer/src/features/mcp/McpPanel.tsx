@@ -196,6 +196,32 @@ export function McpPanel(): ReactElement {
       await reload();
     });
 
+  /**
+   * 勾/取消「掉线后自动重连」（T31 · 选项 B）。
+   *
+   * 走**同一条保存通道**（白名单是配置的一部分），因此：
+   * - 命令/参数原样带回（不重填），**env 省略 = 保持原值**（值从来不回传到界面）；
+   * - 改它**不会**断开连接 —— 断开只由"启动命令/参数/环境变量变了"触发。
+   * 取消勾选 ⇒ 主进程会**取消正在排队的重连**（不再重试）。
+   */
+  const toggleAutoReconnect = (s: McpServerView, next: boolean): Promise<void> =>
+    guard(async () => {
+      await window.jujia.mcpServerSave({
+        id: s.id,
+        name: s.name,
+        command: s.command,
+        args: s.args,
+        autoReconnect: next,
+      });
+      setNotice(
+        next
+          ? `已为「${s.name}」打开「掉线后自动重连」（最多试 3 次）。` +
+              '重连后仍然要你重新批准工具 —— 自动重连只免掉「再点一次连接」。'
+          : `已关闭「${s.name}」的「掉线后自动重连」，排队中的重连已取消。`,
+      );
+      await reload();
+    });
+
   return (
     <div className="w2-panel">
       <section className="p0-card">
@@ -237,6 +263,34 @@ export function McpPanel(): ReactElement {
                   发现工具 {s.discoveredTools} 个 · 已启用 {s.enabledTools.length} 个
                   {s.lastError ? ` · ${s.lastError}` : ''}
                 </div>
+                {/*
+                  「掉线后自动重连」那一格（T31 · 选项 B · R52）。
+                  **默认不勾**：自动重连 = 在没人点过的情况下再起一个第三方进程，
+                  所以它必须是**逐个服务端显式授权**的（白名单），不是全局开关。
+                  勾上之后界面必须说清两件事：① 这个服务端被授权在掉线后自动重启；
+                  ② **重连仍要重新批准**（自动重连只免掉"再点一次连接"）。
+                  重连的次数与最后一次失败原因复用上面那行 `lastError`（不新开一格）。
+                */}
+                {s.source === 'user' && (
+                  <>
+                    <label className="jj-check">
+                      <input
+                        type="checkbox"
+                        checked={s.autoReconnect}
+                        disabled={busy}
+                        onChange={() => void toggleAutoReconnect(s, !s.autoReconnect)}
+                      />
+                      <span>掉线后自动重连</span>
+                    </label>
+                    <p className="p0-subtitle">
+                      {s.autoReconnect
+                        ? '已授权：这个服务端掉线后会被自动重新启动（最多试 3 次，间隔 2 秒 / 8 秒 / 30 秒）。'
+                        : '默认关闭。勾上之后，它掉线时会自己重连（最多试 3 次，间隔 2 秒 / 8 秒 / 30 秒）。'}
+                      <strong>自动重连只免掉「再点一次连接」，不免掉「再批一次工具」</strong> ——
+                      重连后的会话会重新停在「待你批准」，一个工具都不会自动启用。随时可以取消勾选。
+                    </p>
+                  </>
+                )}
                 {s.disabledByPlugin && (
                   <p className="p0-warn">
                     插件清单把它标成了 <code>enabled: false</code> —— 已停用，不能连接。

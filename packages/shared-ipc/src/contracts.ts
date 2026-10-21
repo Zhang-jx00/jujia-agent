@@ -704,6 +704,16 @@ export const mcpServerInputSchema = z.object({
    * 传空对象 `{}` 才是"显式清空"。
    */
   env: z.record(z.string().max(4000)).optional(),
+  /**
+   * 掉线后**允许**自动重连（T31 · 选项 B）。**白名单式、默认关**。
+   *
+   * 三条口径写在这里，免得将来有人当成"全局开关"或"记住上次批准"：
+   * 1. **省略 = 保持原值**（与 `env` 同语义）。真正的"默认关"写在落盘那一侧
+   *    （`mcp-store.ts` 新建记录时写死 `false`），不靠调用方传。
+   * 2. 它只是**允许**重连这个**偏好**，**不是待重连的任务** ⇒ 应用重启后不会自动连。
+   * 3. 开了它也**不免掉重新批准**：重连走的仍是完整连接流程（新会话停在"待你批准"）。
+   */
+  autoReconnect: z.boolean().optional(),
 });
 export type McpServerInput = z.infer<typeof mcpServerInputSchema>;
 
@@ -721,6 +731,14 @@ export const mcpServerViewSchema = z.object({
   enabledTools: z.array(z.string()),
   /** 上次失败原因（成功时为 null） */
   lastError: z.string().nullable(),
+  /**
+   * 这个服务端是否在"掉线后自动重连"白名单里（T31 · 选项 B）。**默认关**。
+   *
+   * 界面上要看得见这一格 —— 否则"它怎么自己又起来了"就变成了惊吓。
+   * 重连的**次数与最后一次失败原因**复用上一格 `lastError`（不新开一格，
+   * 免得同一个失败出现在两个地方、彼此对不上）。
+   */
+  autoReconnect: z.boolean().default(false),
   /**
    * 这个服务端是谁给的：你自己配的（`user`）还是插件清单里带的（`plugin`）。
    *

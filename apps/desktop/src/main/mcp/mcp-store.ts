@@ -25,6 +25,16 @@ export interface StoredMcpServer {
   command: string;
   args: string[];
   env: Record<string, string>;
+  /**
+   * 掉线后**允许**自动重连（T31 · 选项 B）。**默认关**。
+   *
+   * 这一格是**白名单**，不是全局开关：
+   * - 落盘的是「**允许**重连」这个**偏好**，**不是待重连的任务** ⇒
+   *   应用重启后不会自动连（仍要用户自己点连接）。
+   * - 开了它也**不免掉重新批准** —— 重连走完整连接流程。
+   * - "默认关"**写死在落盘这一侧**（新建记录时恒为 false），不靠调用方传。
+   */
+  autoReconnect: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -99,6 +109,8 @@ export function createFileMcpStore(): McpStore {
           command: parsed.command,
           args: [...parsed.args],
           env: { ...(parsed.env ?? {}) },
+          // **默认关写死在落盘这一侧**：不靠调用方传，也就不会有"忘了传"这一种漏网
+          autoReconnect: parsed.autoReconnect === true,
           createdAt: now,
           updatedAt: now,
         };
@@ -114,6 +126,10 @@ export function createFileMcpStore(): McpStore {
         args: [...parsed.args],
         // env 省略 = 保持原值（界面拿不到值，强制传会把值静默清空）
         env: parsed.env === undefined ? { ...current.env } : { ...parsed.env },
+        // autoReconnect 省略 = 保持原值（与 env 同语义）；
+        // 旧版本落盘的记录没有这一格 → 归一化成 false（默认关）
+        autoReconnect:
+          parsed.autoReconnect === undefined ? current.autoReconnect === true : parsed.autoReconnect,
         updatedAt: now,
       };
       all[index] = next;
@@ -152,6 +168,8 @@ export function createMemoryMcpStore(initial: StoredMcpServer[] = []): McpStore 
           command: parsed.command,
           args: [...parsed.args],
           env: { ...(parsed.env ?? {}) },
+          // 与文件实现同一口径：**默认关写死在落盘这一侧**
+          autoReconnect: parsed.autoReconnect === true,
           createdAt: now,
           updatedAt: now,
         };
@@ -165,6 +183,9 @@ export function createMemoryMcpStore(initial: StoredMcpServer[] = []): McpStore 
         command: parsed.command,
         args: [...parsed.args],
         env: parsed.env === undefined ? { ...current.env } : { ...parsed.env },
+        // autoReconnect 省略 = 保持原值（与文件实现一致）
+        autoReconnect:
+          parsed.autoReconnect === undefined ? current.autoReconnect === true : parsed.autoReconnect,
         updatedAt: now,
       };
       servers = servers.map((s, i) => (i === index ? next : s));

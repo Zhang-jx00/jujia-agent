@@ -17,6 +17,10 @@
  * 另有一个由并发暴露的坑：**generation 守卫**。
  * "断开 → 立刻重连"时旧连接的 `onExit` 回调会晚到；若不校验 generation，
  * 它会摘掉**新连接**刚注册的工具，表面现象是"工具莫名消失"。
+ *
+ * 第五条约定（R52 · T31 选项 B）：**掉线后可以自动重连，但重连仍要重新批准。**
+ * 自动重连只免掉"再点一次连接"，**不免掉"再批一次工具"** ——
+ * 落盘的白名单默认关、最多试 3 次、退避 2s/8s/30s，详见本文件下方「自动重连」一节。
  */
 
 import {
@@ -96,6 +100,68 @@ export interface ExternalMcpServer {
 /** 外部服务端的 id 前缀：用它来判断"这条是不是插件给的" */
 export const PLUGIN_SERVER_ID_PREFIX = 'plugin:';
 
+/* ------------------------------------------------------------------ *
+ * 自动重连（T31 · 选项 B · R52）
+ * ------------------------------------------------------------------ *
+ *
+ * **只做「掉线后可以自动重连」，但重连仍然要重新批准。**
+ *
+ * 四条边界（写死在这里，免得将来被"顺手优化"掉）：
+ * 1. **白名单式、默认关**：只有用户自己勾了 `autoReconnect` 的服务端才重连；
+ *    插件带来的服务端没有这一格（它们由插件清单决定）⇒ 永不自动重连。
+ * 2. **有上限、有退避**：最多 {@link RECONNECT_MAX_ATTEMPTS} 次；
+ *    第 1/2/3 次尝试之前分别等 {@link RECONNECT_BACKOFF_MS}。
+ *    用尽后**放弃**、会话留在 `error`，并说清"已试 N 次、最后一次因为什么失败"。
+ * 3. **不跨应用重启**：落盘的只是「允许重连」这个**偏好**，**不是待重连的任务**
+ *    ⇒ 启动时没有任何待办，本模块也就无从自动起进程。
+ * 4. **重连仍要重新批准**：重连走的是**完整连接流程**（`connectInternal`），
+ *    因此新会话必然停在 `awaiting_approval`、已启用工具为空 ——
+ *    这一点由 {@link McpService.assertReconnectNeedsApproval} 在运行期钉住，
+ *    由测试钉住"不许给重连开复用上次批准的捷径"。
+ */
+
+/** 最多自动重连几次（用尽即放弃） */
+export const RECONNECT_MAX_ATTEMPTS = 3;
+
+/**
+ * 退避表（毫秒）：**第 N 次尝试之前**等这么久。
+ *
+ * 口径原文是"退避 2s → 8s → 30s；第三次后放弃"——三个退避值配三次尝试，
+ * 唯一自洽的读法是"第 1 次等 2s、第 2 次等 8s、第 3 次等 30s"：
+ * 若改成"失败之后才等"，30s 那一档永远用不上。
+ */
+export const RECONNECT_BACKOFF_MS = [2_000, 8_000, 30_000] as const;
+
+/**
+ * 「这一轮让位」的固定说法。
+ *
+ * 用固定文案（而不是随手拼一句）是为了让**调用方能精确识别**它：
+ * 自动重连遇到它 ⇒ 收手、不计失败、不再重试（用户已经接管了）。
+ */
+export const RECONNECT_YIELDED = '自动重连让位给用户的手动连接';
+
+/** 一个服务端的重连轮次（一次掉线 ⇒ 一轮；轮次结束就丢弃） */
+interface ReconnectState {
+  /** 已经发起过的自动连接次数（0 = 还没试过） */
+  attempt: number;
+  /** 当前阶段 */
+  phase: 'waiting' | 'attempting' | 'awaiting' | 'gave_up' | 'cancelled';
+  /** 排队中的定时器（等下一次尝试） */
+  timer: ReturnType<typeof setTimeout> | null;
+  /**
+   * 本轮期望看到的会话对象。
+   *
+   * 用途：**判定"用户是否已经接管"**。若它已经不是当前会话了
+   * （用户自己点了连接、删了服务端、改了启动命令……），自动重连就**让位**，
+   * 绝不去动用户手上那条连接。
+   */
+  expected: Session | null;
+  /** 最后一次失败原因 */
+  lastError: string | null;
+  /** 已被取消（用户接管 / 授权被收回）——即使状态对象已从表里移除也仍然作数 */
+  cancelled: boolean;
+}
+
 interface Session {
   /** 单调递增的连接代次，用于挡住「旧连接的晚到回调」 */
   generation: number;
@@ -118,6 +184,17 @@ export class McpService {
   private generationSeq = 0;
   private changedListener: ((views: McpServerView[]) => void) | null = null;
   private storePromise: Promise<McpStore> | undefined;
+  /** 每个服务端的重连轮次（不在表里 = 没有待办的重连） */
+  private readonly reconnects = new Map<string, ReconnectState>();
+  /** 正在连接中的服务端（计数）：用来判断"用户此刻正在驱动"，自动重连要让位 */
+  private readonly connecting = new Map<string, number>();
+  /**
+   * **用户意图的序号**：只有"用户点连接"会加它。
+   *
+   * 用途：自动重连发起连接时记下当时的序号；若期间用户又点了一次连接
+   * （序号变了）⇒ 自动重连是**过时的那一个** ⇒ 让位，不去覆盖用户那条。
+   */
+  private readonly userConnectSeq = new Map<string, number>();
 
   constructor(private readonly deps: McpServiceDeps) {}
 
@@ -169,7 +246,10 @@ export class McpService {
       state: session?.state ?? 'idle',
       discoveredTools: session?.tools.length ?? 0,
       enabledTools: session?.enabledQualified ?? [],
-      lastError: session?.lastError ?? null,
+      // 重连的次数与原因**复用这一格**（不新开一格，免得同一个失败出现在两处）
+      lastError: this.composeLastError(record.id, session),
+      // 白名单那一格：默认关（落盘侧写死）
+      autoReconnect: record.autoReconnect === true,
       source: 'user',
       pluginName: null,
       disabledByPlugin: false,
@@ -187,11 +267,46 @@ export class McpService {
       state: session?.state ?? 'idle',
       discoveredTools: session?.tools.length ?? 0,
       enabledTools: session?.enabledQualified ?? [],
-      lastError: session?.lastError ?? null,
+      lastError: this.composeLastError(external.id, session),
+      // 插件带来的服务端**没有这一格**（由插件清单决定）⇒ 永不自动重连
+      autoReconnect: false,
       source: 'plugin',
       pluginName: external.pluginName,
       disabledByPlugin: external.disabledByPlugin,
     });
+  }
+
+  /**
+   * 把「重连情况」与「上次失败原因」合成**一格** `lastError`。
+   *
+   * 为什么不新开一格：同一个失败出现在两个地方，迟早会对不上（界面上两处说法不一致）。
+   * 为什么重连信息要进 `lastError` 这一格：界面上"状态标签 + 这行字"已经是现成的两处，
+   * 多开一格就得在渲染层再加一行，收益只是排版。
+   */
+  private composeLastError(id: string, session: Session | undefined): string | null {
+    const note = this.reconnectNote(id);
+    const reason = session?.lastError ?? null;
+    if (note === null) return reason;
+    if (reason === null) return note;
+    return `${note} · 上次失败：${reason}`;
+  }
+
+  /** 这一格给用户看的重连说明（没有轮次 = null） */
+  private reconnectNote(id: string): string | null {
+    const st = this.reconnects.get(id);
+    if (!st) return null;
+    switch (st.phase) {
+      case 'waiting':
+        return `自动重连：第 ${st.attempt}/${RECONNECT_MAX_ATTEMPTS} 次尝试已排队`;
+      case 'attempting':
+        return `自动重连：正在做第 ${st.attempt}/${RECONNECT_MAX_ATTEMPTS} 次尝试`;
+      case 'awaiting':
+        return `自动重连：已重新连上（第 ${st.attempt} 次尝试），仍需你重新批准工具`;
+      case 'gave_up':
+        return `自动重连：已试 ${st.attempt} 次都没成功，已放弃（最后一次：${st.lastError ?? '未说明原因'}）`;
+      case 'cancelled':
+        return '自动重连：已取消（你已收回授权）';
+    }
   }
 
   /**
@@ -231,8 +346,24 @@ export class McpService {
     });
     if (!check.ok) throw new Error(`服务端配置被拒绝：${check.errors.join('；')}`);
 
+    // 改动前的白名单状态（用来判"授权被收回"）
+    const before = parsed.id === undefined ? undefined : await (await this.store()).find(parsed.id);
+    const wasAllowed = before?.autoReconnect === true;
+    const nowAllowed = parsed.autoReconnect === undefined ? wasAllowed : parsed.autoReconnect;
+
     const { record, launchChanged } = await (await this.store()).upsert(parsed);
     if (launchChanged) await this.disconnect(record.id);
+
+    if (parsed.id !== undefined && wasAllowed !== nowAllowed) {
+      if (nowAllowed) {
+        // 刚打开白名单：**没有待办的重连**（落盘的只是"允许"这个偏好，不是任务）
+        this.clearReconnect(record.id);
+      } else {
+        // **授权被收回** ⇒ 正在排队的重连立刻取消（不再重试），并留一句给界面看
+        this.markReconnectCancelled(record.id);
+      }
+    }
+
     this.notify();
     return this.viewOf(record);
   }
@@ -265,7 +396,35 @@ export class McpService {
 
   /* ------------------------------ 连接 ------------------------------ */
 
+  /**
+   * 用户点「连接」。
+   *
+   * **用户的动作永远压过自动化**：进连接流程之前先把排队中的自动重连撤掉 ——
+   * 否则用户刚点完连接，两秒后自动重连又把他这条连接断掉重连一遍。
+   */
   async connect(id: string): Promise<McpConnectResult> {
+    this.clearReconnect(id);
+    // **用户意图的序号**：只有"用户点连接"会加它。
+    // 自动重连据此判断"用户是不是在我连的时候也点了一下" ⇒ 让位（用户永远压过自动化）。
+    const seq = (this.userConnectSeq.get(id) ?? 0) + 1;
+    this.userConnectSeq.set(id, seq);
+    return this.connectInternal(id, { expectUserSeq: seq });
+  }
+
+  /**
+   * 真正的连接流程 —— 用户点连接与**自动重连共用这一条路径**。
+   *
+   * 为什么不分叉出一条"自动专用"的连接流程：分叉就等于给自动重连开一条
+   * "可以不走批准"的捷径 —— 那正是本产品最不能出现的事。
+   * 只留一条路，重连也必然落到 `awaiting_approval`（见 `reconnectApprovalViolation`）。
+   *
+   * `opts.onlySession` 是**自动重连专用的那把钥匙**：它让重连
+   * **只断自己那条旧会话**，绝不碰用户手上正在用的那条。
+   */
+  private async connectInternal(
+    id: string,
+    opts: { onlySession?: Session; expectUserSeq?: number } = {},
+  ): Promise<McpConnectResult> {
     const target = await this.resolveServer(id);
     if (!target) throw new Error(`MCP 服务端不存在: ${id}`);
 
@@ -277,73 +436,113 @@ export class McpService {
       );
     }
 
-    // 先彻底断掉旧连接：否则会有两个进程同时跑，且工具重名会让第二次注册被跳过
-    await this.disconnect(id);
-
-    const generation = (this.generationSeq += 1);
-    // 用户配置与插件配置在这里汇成同一个形状 —— 之后的流程（握手、批准、权限门）**完全一致**
-    const config: McpServerConfig =
-      target.kind === 'user'
-        ? {
-            id: target.record.id,
-            name: target.record.name,
-            command: target.record.command,
-            args: [...target.record.args],
-            env: { ...target.record.env },
-          }
-        : {
-            id: target.external.id,
-            name: target.external.name,
-            command: target.external.config.command,
-            args: [...target.external.config.args],
-            env: { ...target.external.config.env },
-          };
-
-    const transport = this.deps.createTransport(config, {
-      onExit: (info) => this.handleExit(config.id, generation, info),
-    });
-    const client = new McpClient(transport, {
-      ...(this.deps.requestTimeoutMs !== undefined ? { requestTimeoutMs: this.deps.requestTimeoutMs } : {}),
-      ...(this.deps.initializeTimeoutMs !== undefined
-        ? { initializeTimeoutMs: this.deps.initializeTimeoutMs }
-        : {}),
-      onDebug: (m) => this.debug(`[mcp:${config.id}] ${m}`),
-    });
-
-    const session: Session = {
-      generation,
-      client,
-      tools: [],
-      enabledQualified: [],
-      registeredNames: [],
-      pendingPlan: null,
-      state: 'connecting',
-      lastError: null,
-      closing: false,
-    };
-    this.sessions.set(config.id, session);
-    this.notify();
-
+    this.connecting.set(id, (this.connecting.get(id) ?? 0) + 1);
     try {
-      await client.connect();
-      // 前缀必须用**我们配置的 id**，不能用服务端自报的名字 ——
-      // 否则两个自报同名的服务端会撞成同一组 qualifiedName，后者的工具会被静默跳过
-      const tools = await client.listTools(config.id);
-      session.tools = tools;
-      session.pendingPlan = planConnectionApproval(config, tools);
-      session.state = 'awaiting_approval';
+      /**
+       * 先彻底断掉旧连接：否则会有两个进程同时跑，且工具重名会让第二次注册被跳过
+       *
+       * **自动场景下这一步安全吗？**（口径要求核清，见 docs/DESIGN-T31-PROBE-RECONNECT.md）
+       * 安全，而且是**按身份**安全的 —— 三条一起看：
+       * ① 自动重连**只从"已经掉线"的会话触发**（进程已退出 / 调用超时不应声）——
+       *    那条会话本来就不可用了（`callTool` 在 state≠connected 时直接拒绝），
+       *    所以这一步断的不是"用户正在用的连接"，而是"已经坏掉的那条"。
+       * ② **只断自己那条**（`onlySession`）：若此刻表里那条已经不是"我以为要断的那条"
+       *    （= 用户刚自己连过），就**直接让位** —— 一个进程都不起，更不会去动用户那条。
+       * ③ 用户点「连接」会**先撤掉排队的自动重连**（`clearReconnect`），
+       *    所以"用户刚点完、自动重连又来一遍"这件事不会发生。
+       */
+      const current = this.sessions.get(id);
+      if (opts.onlySession !== undefined && current !== undefined && current !== opts.onlySession) {
+        // 表里那条不是我要断的 ⇒ 用户已经接管了 ⇒ 这一轮让位
+        return { ok: false, error: RECONNECT_YIELDED };
+      }
+      await this.disconnectInternal(id, opts.onlySession);
+
+      // 断的过程中用户又点了一次连接 ⇒ 我是过时的那一个 ⇒ 让位（不去覆盖用户那条）
+      if (opts.expectUserSeq !== undefined && this.userConnectSeq.get(id) !== opts.expectUserSeq) {
+        return { ok: false, error: RECONNECT_YIELDED };
+      }
+
+      const generation = (this.generationSeq += 1);
+      // 用户配置与插件配置在这里汇成同一个形状 —— 之后的流程（握手、批准、权限门）**完全一致**
+      const config: McpServerConfig =
+        target.kind === 'user'
+          ? {
+              id: target.record.id,
+              name: target.record.name,
+              command: target.record.command,
+              args: [...target.record.args],
+              env: { ...target.record.env },
+            }
+          : {
+              id: target.external.id,
+              name: target.external.name,
+              command: target.external.config.command,
+              args: [...target.external.config.args],
+              env: { ...target.external.config.env },
+            };
+
+      const transport = this.deps.createTransport(config, {
+        onExit: (info) => this.handleExit(config.id, generation, info),
+      });
+      const client = new McpClient(transport, {
+        ...(this.deps.requestTimeoutMs !== undefined
+          ? { requestTimeoutMs: this.deps.requestTimeoutMs }
+          : {}),
+        ...(this.deps.initializeTimeoutMs !== undefined
+          ? { initializeTimeoutMs: this.deps.initializeTimeoutMs }
+          : {}),
+        onDebug: (m) => this.debug(`[mcp:${config.id}] ${m}`),
+      });
+
+      const session: Session = {
+        generation,
+        client,
+        tools: [],
+        enabledQualified: [],
+        registeredNames: [],
+        pendingPlan: null,
+        state: 'connecting',
+        lastError: null,
+        closing: false,
+      };
+      this.sessions.set(config.id, session);
       this.notify();
-      // 用 shared-ipc 的 schema 再校验一次：agent-core 与 shared-ipc 两处形状若漂移，
-      // 这里立刻抛错，而不是把字段对不上的对象发给 UI（UI 只会显示成一片空白，极难排查）
-      return { ok: true, plan: mcpApprovalPlanSchema.parse(session.pendingPlan) };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      session.state = 'error';
-      session.lastError = message;
-      // 握手/列工具失败 → 必须真的退掉进程，不能留一个连不上的第三方进程在跑
-      this.teardown(config.id, session);
-      this.notify();
-      return { ok: false, error: message };
+
+      try {
+        await client.connect();
+        /**
+         * 握手期间若有人抢先设了别的会话（用户在同一瞬间也点了连接）⇒
+         * 我是那个被顶掉的 ⇒ **把刚起的进程退掉**（别留一个没人管的第三方进程），
+         * 并且不去抢当前那条会话。
+         */
+        if (this.sessions.get(config.id) !== session) {
+          this.teardown(config.id, session);
+          return { ok: false, error: RECONNECT_YIELDED };
+        }
+        // 前缀必须用**我们配置的 id**，不能用服务端自报的名字 ——
+        // 否则两个自报同名的服务端会撞成同一组 qualifiedName，后者的工具会被静默跳过
+        const tools = await client.listTools(config.id);
+        session.tools = tools;
+        session.pendingPlan = planConnectionApproval(config, tools);
+        session.state = 'awaiting_approval';
+        this.notify();
+        // 用 shared-ipc 的 schema 再校验一次：agent-core 与 shared-ipc 两处形状若漂移，
+        // 这里立刻抛错，而不是把字段对不上的对象发给 UI（UI 只会显示成一片空白，极难排查）
+        return { ok: true, plan: mcpApprovalPlanSchema.parse(session.pendingPlan) };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        session.state = 'error';
+        session.lastError = message;
+        // 握手/列工具失败 → 必须真的退掉进程，不能留一个连不上的第三方进程在跑
+        this.teardown(config.id, session);
+        this.notify();
+        return { ok: false, error: message };
+      }
+    } finally {
+      const left = (this.connecting.get(id) ?? 1) - 1;
+      if (left <= 0) this.connecting.delete(id);
+      else this.connecting.set(id, left);
     }
   }
 
@@ -404,6 +603,9 @@ export class McpService {
     }
 
     session.state = 'connected';
+    // 重连轮次到此结束：用户已经批过了，这一轮的目的达成。
+    // （此后若再掉线，会按新的轮次重新计数 —— 上限是"每次掉线最多 3 次"，不是"一辈子 3 次"）
+    this.clearReconnect(id);
     this.notify();
     return mcpApproveResultSchema.parse({
       approved: true,
@@ -414,10 +616,28 @@ export class McpService {
     });
   }
 
-  /** 断开：摘工具 + 退进程。返回是否真的断开了一个存在的连接 */
+  /**
+   * 用户点「断开」。**用户的动作压过自动化** ⇒ 排队中的自动重连一并取消。
+   *
+   * 不取消会怎样：用户明明断开了，两秒后自动重连又把它连回来 ——
+   * 那等于"用户说不要，系统替他决定要"。
+   */
   async disconnect(id: string): Promise<boolean> {
+    this.clearReconnect(id);
+    return this.disconnectInternal(id);
+  }
+
+  /**
+   * 断开：摘工具 + 退进程。返回是否真的断开了一个存在的连接
+   *
+   * `only` 是**自动重连专用的那把钥匙**：只断**指定的那一条**会话。
+   * 若表里那条已经换了人（用户自己连过了），就**一条都不动** ——
+   * 这一句就是"自动重连不会静默杀掉用户正在用的连接"的落点。
+   */
+  private async disconnectInternal(id: string, only?: Session): Promise<boolean> {
     const session = this.sessions.get(id);
     if (!session) return false;
+    if (only !== undefined && session !== only) return false; // 不是我要断的那条 ⇒ 不动
     this.teardown(id, session);
     // 先删除会话再广播：否则 viewOf 会读到一个已经清空的会话，UI 上会闪出一次错误的中间态
     this.sessions.delete(id);
@@ -443,7 +663,210 @@ export class McpService {
       this.teardown(id, session);
       this.sessions.delete(id);
     }
+    // 应用退出：排队的自动重连也一并撤掉（别在退出后还去起第三方进程）
+    for (const id of [...this.reconnects.keys()]) this.clearReconnect(id);
     return count;
+  }
+
+  /* ------------------------- 自动重连（T31 · 选项 B） ------------------------- */
+
+  /**
+   * 这个服务端在不在「掉线后自动重连」白名单里。
+   *
+   * **默认关**，判定只认**落盘的那一格**（`StoredMcpServer.autoReconnect`）：
+   * 插件带来的服务端没有这一格（由插件清单决定）⇒ 永不自动重连。
+   */
+  private async autoReconnectAllowed(id: string): Promise<boolean> {
+    const record = await (await this.store()).find(id);
+    return record?.autoReconnect === true;
+  }
+
+  /**
+   * 掉线了 —— 要不要排一次自动重连？
+   *
+   * **只在两种事实下触发**（口径：掉线是被"用"出来的，不是被"测"出来的 ⇒ **不做后台探活**）：
+   * - 进程真的退了（`handleExit`）
+   * - 一次调用什么都没等到（`recordCallFailure` 的 transport 超时 ⇒ 僵而不退）
+   *
+   * **不触发**的情况：用户主动断开、手动连接握手失败、服务端自己回了错（那证明它还在说话）。
+   */
+  private noteDrop(id: string, session: Session): void {
+    const st = this.reconnects.get(id);
+    if (st) {
+      // 正在尝试中时掉线 —— 那就是**这次尝试自己的结果**，由尝试的收尾统一处理；
+      // 这里再推一把会把"最多 3 次"算错。
+      if (st.phase === 'attempting') return;
+      st.expected = session;
+      void this.advanceReconnect(id, st);
+      return;
+    }
+    // 先同步占位：两次掉线连着来时，第二次不能因为"表里还没有轮次"而再开一轮
+    const fresh: ReconnectState = {
+      attempt: 0,
+      phase: 'waiting',
+      timer: null,
+      expected: session,
+      lastError: null,
+      cancelled: false,
+    };
+    this.reconnects.set(id, fresh);
+    void this.armReconnect(id, fresh);
+  }
+
+  /** 白名单核一遍：不在表里就**根本不起这一轮**（默认关 = 大多数情况到此为止） */
+  private async armReconnect(id: string, st: ReconnectState): Promise<void> {
+    if (st.cancelled) return;
+    if (!(await this.autoReconnectAllowed(id))) {
+      this.clearReconnect(id);
+      return;
+    }
+    await this.advanceReconnect(id, st);
+  }
+
+  /**
+   * 推进一轮：要么排下一次尝试，要么放弃。
+   *
+   * 退避表是"**第 N 次尝试之前**等这么久"：2s → 8s → 30s，配三次尝试。
+   * 用尽 {@link RECONNECT_MAX_ATTEMPTS} 次 ⇒ 放弃、会话留在 `error`。
+   */
+  private async advanceReconnect(id: string, st: ReconnectState): Promise<void> {
+    if (st.cancelled) return;
+    if (st.attempt >= RECONNECT_MAX_ATTEMPTS) {
+      this.giveUpReconnect(id, st);
+      return;
+    }
+    st.attempt += 1;
+    st.phase = 'waiting';
+    const delay =
+      RECONNECT_BACKOFF_MS[st.attempt - 1] ??
+      RECONNECT_BACKOFF_MS[RECONNECT_BACKOFF_MS.length - 1] as number;
+    st.timer = setTimeout(() => {
+      void this.runReconnectAttempt(id, st);
+    }, delay);
+    this.notify();
+  }
+
+  /**
+   * 真正发起一次自动重连。
+   *
+   * 闸门（任何一道不过就**让位**，不做任何事）：
+   * ① 这一轮没被取消；② 白名单还在（授权可随时收回）；③ 用户此刻没在驱动；
+   * ④ 用户没有接管这条连接（会话对象比对）。
+   *
+   * 真正起连接时还有**两道身份闸**在 `connectInternal` 里：
+   * **只断自己那条**（`onlySession`）与**用户序号**（`expectUserSeq`）。
+   */
+  private async runReconnectAttempt(id: string, st: ReconnectState): Promise<void> {
+    st.timer = null;
+    if (st.cancelled) return;
+
+    // 授权可能刚被收回 ⇒ **起进程之前**再核一次（不能只信发起时那一眼）
+    if (!(await this.autoReconnectAllowed(id))) {
+      this.markReconnectCancelled(id);
+      return;
+    }
+    // 用户此刻正在驱动（自己点了连接）⇒ 自动重连让位，不去动他手上那条
+    if ((this.connecting.get(id) ?? 0) > 0) {
+      this.clearReconnect(id);
+      return;
+    }
+    // 用户已经接管了这条连接（手动连过 / 删了 / 改了启动命令）⇒ 让位
+    if (this.sessions.get(id) !== st.expected) {
+      this.clearReconnect(id);
+      return;
+    }
+
+    st.phase = 'attempting';
+    this.notify();
+
+    // **走的是完整连接流程**（与用户点「连接」同一条路径）⇒ 必然要重新批准。
+    // `onlySession` = 只断自己那条旧会话；`expectUserSeq` = 用户又点了就让位。
+    const result = await this.connectInternal(id, {
+      onlySession: st.expected ?? undefined,
+      expectUserSeq: this.userConnectSeq.get(id) ?? 0,
+    });
+    if (st.cancelled) return; // 期间用户接管了 ⇒ 这一轮作废，不再推进
+    st.expected = this.sessions.get(id) ?? null;
+
+    if (result.ok) {
+      // 握手成功。但**还不算数**：新会话必须停在"待你批准"、一个工具都没启用
+      const violation = this.reconnectApprovalViolation(this.sessions.get(id));
+      if (violation !== null) {
+        st.lastError = violation;
+        st.phase = 'waiting';
+        await this.advanceReconnect(id, st);
+        return;
+      }
+      st.lastError = null;
+      st.phase = 'awaiting';
+      this.notify();
+      return;
+    }
+
+    // 「让位」不是失败：用户已经接管了 ⇒ 收手，不计次数、不再重试
+    if (result.error === RECONNECT_YIELDED) {
+      this.clearReconnect(id);
+      return;
+    }
+
+    st.lastError = result.error;
+    st.phase = 'waiting';
+    await this.advanceReconnect(id, st);
+  }
+
+  /**
+   * 源锁：重连出来的会话**必须**停在 `awaiting_approval`、且**已启用工具为空**。
+   *
+   * 防的是将来有人给重连开一条"复用上次批准"的捷径 —— 那才是真正的风险
+   * （"每次连接都重新征得同意"是本产品的红线）。
+   * 返回 null = 没问题；返回字符串 = 内部不变量被破坏（这一轮不算成功）。
+   */
+  private reconnectApprovalViolation(session: Session | undefined): string | null {
+    if (!session) return '重连之后没有会话';
+    if (session.state !== 'awaiting_approval') {
+      return `重连后的会话状态是 ${session.state}，不是「待你批准」`;
+    }
+    if (session.enabledQualified.length > 0) {
+      return `重连后的会话已经启用了 ${session.enabledQualified.length} 个工具（必须一个都没有）`;
+    }
+    return null;
+  }
+
+  /** 用尽上限：放弃，留在 `error`（不新增状态值），并把"已试 N 次、最后一次因为什么失败"说清楚 */
+  private giveUpReconnect(id: string, st: ReconnectState): void {
+    if (st.timer) {
+      clearTimeout(st.timer);
+      st.timer = null;
+    }
+    st.phase = 'gave_up';
+    const session = this.sessions.get(id);
+    if (session) session.state = 'error';
+    this.notify();
+  }
+
+  /** 彻底撤掉一轮（用户接管 / 服务端没了 / 不在白名单） */
+  private clearReconnect(id: string): void {
+    const st = this.reconnects.get(id);
+    if (!st) return;
+    st.cancelled = true;
+    if (st.timer) {
+      clearTimeout(st.timer);
+      st.timer = null;
+    }
+    this.reconnects.delete(id);
+  }
+
+  /** 授权被收回：撤掉排队中的重连，但**留一句**给界面看（"看得见"是硬要求） */
+  private markReconnectCancelled(id: string): void {
+    const st = this.reconnects.get(id);
+    if (!st) return;
+    st.cancelled = true;
+    if (st.timer) {
+      clearTimeout(st.timer);
+      st.timer = null;
+    }
+    st.phase = 'cancelled';
+    this.notify();
   }
 
   /** 某个模型侧工具名是否由本服务注册（用于区分"需要工作区"的内置工具与外部工具） */
@@ -514,10 +937,14 @@ export class McpService {
     if (session.state === 'exited') return;
     session.lastError = reason;
     // 迟到的失败回调不能污染已经重连/已断开的会话（与 generation 守卫同一类时序问题）
+    let dropped = false;
     if (failure === 'transport' && !session.closing && this.sessions.get(serverId) === session) {
       session.state = 'error';
+      dropped = true;
     }
     this.notify();
+    // 僵而不退（调用超时没等到回应）⇒ **掉线了** ⇒ 也许该自动重连
+    if (dropped) this.noteDrop(serverId, session);
   }
 
   /** 收尾：摘工具 + 释放客户端。幂等（重复调用无副作用） */
@@ -554,5 +981,7 @@ export class McpService {
       session.enabledQualified = [];
     }
     this.notify();
+    // 进程真没了 ⇒ **掉线了** ⇒ 也许该自动重连（白名单 / 上限 / 退避都在那一侧把关）
+    this.noteDrop(id, session);
   }
 }

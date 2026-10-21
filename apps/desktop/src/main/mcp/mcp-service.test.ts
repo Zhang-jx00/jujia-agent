@@ -1,178 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
-import { ToolRegistry, runTool, type McpTransport, type StoredTool } from '@jujia/agent-core';
-import { McpService, type ExternalMcpServer, type McpExitInfo, type McpTransportHooks } from './mcp-service';
+import { describe, expect, it, afterEach, vi } from 'vitest';
+import { ToolRegistry, runTool } from '@jujia/agent-core';
+import { McpService, type ExternalMcpServer } from './mcp-service';
 import { createMemoryMcpStore } from './mcp-store';
-
-/* ------------------------------------------------------------------ *
- * 假传输：直接扮演一个 MCP 服务端（按 method 回应），
- * 因此可以在毫秒级内把「握手失败 / 挂死 / 进程退出」这些真实但难复现的场景跑全。
- * ------------------------------------------------------------------ */
-
-interface FakeScript {
-  serverName?: string;
-  tools?: Array<Record<string, unknown>>;
-  /** 不回应任何请求，模拟挂死 */
-  silent?: boolean;
-  /** initialize 回一个 JSON-RPC error */
-  failHandshake?: boolean;
-  /** tools/call 回 isError: true */
-  callFails?: boolean;
-  /** **只**对 tools/call 不回话：进程还在、就是不应声（外部审查 T31 的"僵而不退"） */
-  ignoreCall?: boolean;
-  /** tools/call 回一个 JSON-RPC error：服务端答了，只是答的是错误 */
-  callProtocolError?: boolean;
-  onCall?: (name: string, args: Record<string, unknown>) => void;
-}
-
-class FakeTransport implements McpTransport {
-  readonly sent: string[] = [];
-  disposed = false;
-  private readonly handlers = new Set<(line: string) => void>();
-
-  constructor(
-    private readonly script: FakeScript,
-    private readonly hooks: McpTransportHooks,
-  ) {}
-
-  send(line: string): void {
-    if (this.disposed || this.script.silent === true) return;
-    this.sent.push(line);
-    const msg = JSON.parse(line) as { id: number; method: string };
-    if (msg.method === 'initialize') {
-      if (this.script.failHandshake === true) {
-        this.replyError(msg.id, '初始化被拒绝');
-        return;
-      }
-      this.reply(msg.id, {
-        protocolVersion: '2025-06-18',
-        serverInfo: { name: this.script.serverName ?? 'fake', version: '1.0.0' },
-      });
-      return;
-    }
-    if (msg.method === 'tools/list') {
-      this.reply(msg.id, { tools: this.script.tools ?? [] });
-      return;
-    }
-    if (msg.method === 'tools/call') {
-      // 请求照发照记（sent 里看得见它确实被送到过远端），但**不回话**
-      if (this.script.ignoreCall === true) return;
-      const params = (JSON.parse(line) as { params: { name: string; arguments: Record<string, unknown> } })
-        .params;
-      this.script.onCall?.(params.name, params.arguments);
-      if (this.script.callProtocolError === true) {
-        this.replyError(msg.id, '服务端内部故障');
-        return;
-      }
-      if (this.script.callFails === true) {
-        this.reply(msg.id, { isError: true, content: [{ type: 'text', text: '远端报错' }] });
-        return;
-      }
-      this.reply(msg.id, { content: [{ type: 'text', text: `echo:${params.name}` }] });
-      return;
-    }
-  }
-
-  private reply(id: number, result: unknown): void {
-    queueMicrotask(() => this.emit(JSON.stringify({ jsonrpc: '2.0', id, result })));
-  }
-  private replyError(id: number, message: string): void {
-    queueMicrotask(() => this.emit(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32000, message } })));
-  }
-  private emit(line: string): void {
-    for (const h of this.handlers) h(line);
-  }
-
-  onLine(handler: (line: string) => void): () => void {
-    this.handlers.add(handler);
-    return () => {
-      this.handlers.delete(handler);
-    };
-  }
-  dispose(): void {
-    this.disposed = true;
-  }
-
-  /** 模拟子进程退出（真实实现里由 stdio-transport 的 onExit 触发） */
-  exit(info: McpExitInfo): void {
-    this.hooks.onExit(info);
-  }
-}
-
-const TOOLS = [
-  { name: 'read_thing', description: '读点东西', annotations: { readOnlyHint: true } },
-  { name: 'do_thing', description: '干点事' },
-];
-
-/** 一个最小可用的工具定义，用来占住工具名（验证"重名会被跳过而不是覆盖"） */
-function stubTool(name: string): StoredTool {
-  return {
-    name,
-    description: '占位工具',
-    kind: 'read',
-    parameters: { type: 'object', properties: {} },
-    parse: (raw: unknown) => raw,
-    run: async () => ({ ok: true, content: '' }),
-  };
-}
-
-function setup(
-  script: FakeScript = {},
-  opts: {
-    requestTimeoutMs?: number;
-    initializeTimeoutMs?: number;
-    externalServers?: ExternalMcpServer[];
-  } = {},
-) {
-  const registry = new ToolRegistry();
-  const transports: FakeTransport[] = [];
-  const service = new McpService({
-    registry,
-    store: createMemoryMcpStore(),
-    createTransport: (_config, hooks) => {
-      const t = new FakeTransport(script, hooks);
-      transports.push(t);
-      return t;
-    },
-    requestTimeoutMs: opts.requestTimeoutMs ?? 500,
-    initializeTimeoutMs: opts.initializeTimeoutMs ?? 1000,
-    ...(opts.externalServers ? { externalServers: () => opts.externalServers! } : {}),
-  });
-  return {
-    service,
-    registry,
-    transports,
-    last: (): FakeTransport => {
-      const t = transports[transports.length - 1];
-      if (!t) throw new Error('还没有创建过传输');
-      return t;
-    },
-  };
-}
-
-const SERVER = {
-  name: '测试服务端',
-  command: 'npx',
-  args: ['-y', 'demo-mcp'],
-  env: {},
-};
-
-/** 建一个服务端并连接，返回它拿到的批准计划 */
-async function connectFresh(
-  script: FakeScript = {},
-  opts: {
-    requestTimeoutMs?: number;
-    initializeTimeoutMs?: number;
-    externalServers?: ExternalMcpServer[];
-  } = {},
-) {
-  const ctx = setup(script, opts);
-  const view = await ctx.service.save(SERVER);
-  const result = await ctx.service.connect(view.id);
-  return { ...ctx, id: view.id, result };
-}
+import {
+  FakeTransport,
+  SERVER,
+  TOOLS,
+  connectFresh,
+  setup,
+  stubTool,
+} from './test-support/fake-mcp';
 
 /* ------------------------------------------------------------------ */
 
@@ -785,5 +625,332 @@ describe('插件带来的 MCP 服务端（W11c）', () => {
     const ctx = setup({ tools: TOOLS }, { externalServers: [external()] });
     await ctx.service.connect('plugin:my-team:files');
     expect(await ctx.service.disconnect('plugin:my-team:files')).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 自动重连（T31 · 选项 B · R52）
+ *
+ * 这一组守三条线：
+ * ① **重连仍要重新批准**（最要紧的一条）—— 重连出来的新会话必须停在
+ *    `awaiting_approval`、未批准前**一个工具都不启用**、**不重放在途调用**；
+ * ② **默认关**（白名单外不重连）+ **上限与退避**（2s → 8s → 30s，最多 3 次，第 4 次不再试）；
+ * ③ **用户的动作压过自动化**（收回授权 / 手动连接 / 手动断开 ⇒ 排队中的重连取消），
+ *    以及**不跨应用重启**（落盘的只是"允许"这个偏好，不是待重连的任务）。
+ * ------------------------------------------------------------------ */
+
+/** 假时钟下把微任务队列冲干净（vitest 的假时钟不提供 setImmediate 可用） */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) await vi.advanceTimersByTimeAsync(0);
+}
+
+/** 建一个服务端、连上、批完（= 此刻它是"能用"的状态），返回 id */
+async function armed(
+  ctx: ReturnType<typeof setup>,
+  autoReconnect: boolean,
+): Promise<string> {
+  const view = await ctx.service.save({ ...SERVER, autoReconnect });
+  await ctx.service.connect(view.id);
+  await ctx.service.approve(view.id, { action: 'approve_all' });
+  return view.id;
+}
+
+/** 传输上发过的 tools/call 次数（用来判"在途调用有没有被重放"） */
+function callCount(sent: string[] | undefined): number {
+  return (sent ?? []).filter((l) => l.includes('"tools/call"')).length;
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('自动重连 · 重连仍要重新批准（T31 · 选项 B · R52）', () => {
+  it('进程退出后自动重连：新会话停在「待你批准」、未批准前**一个工具都没启用**', async () => {
+    vi.useFakeTimers();
+    const ctx = setup({ tools: TOOLS });
+    const id = await armed(ctx, true);
+    expect(ctx.registry.all()).toHaveLength(2);
+
+    // 进程真的退了 ⇒ 掉线
+    ctx.last().exit({ code: 3, signal: null });
+    expect((await ctx.service.views())[0]?.state).toBe('exited');
+
+    await flush();
+    await vi.advanceTimersByTimeAsync(2_000); // 退避 2 秒
+    await flush();
+
+    const after = (await ctx.service.views())[0];
+    // 关键：**重连不等于连上** —— 它停在"待你批准"，等着用户再批一次
+    expect(after?.state).toBe('awaiting_approval');
+    expect(after?.enabledTools).toEqual([]);
+    // 注册表里也必须一个都没有（没批准就不许有调用路径）
+    expect(ctx.registry.all()).toHaveLength(0);
+    // 确实起了新进程
+    expect(ctx.transports).toHaveLength(2);
+    expect(id).toBeTruthy();
+  });
+
+  it('**不重放在途调用**：掉线时没回完的那次调用，不会被自动重连再发一遍', async () => {
+    vi.useFakeTimers();
+    const ctx = setup({ tools: TOOLS, ignoreCall: true }, { requestTimeoutMs: 200 });
+    await armed(ctx, true);
+
+    // 发起一次在途调用：服务端收下了就是不应声 ⇒ 这条会超时 ⇒ 掉线
+    const inFlight = ctx.service.callTool('srv-1__do_thing', {});
+    await vi.advanceTimersByTimeAsync(250);
+    const out = await inFlight;
+    expect(out.ok).toBe(false);
+    expect(out.text).toContain('超时');
+    await flush();
+
+    await vi.advanceTimersByTimeAsync(2_000); // 退避 2 秒后自动重连
+    await flush();
+
+    expect((await ctx.service.views())[0]?.state).toBe('awaiting_approval');
+    // 新进程上**一次 tools/call 都没有** ⇒ 那条在途调用没有被重放
+    expect(callCount(ctx.last().sent)).toBe(0);
+    // 旧进程上那次调用只发过一次（没有补发第二遍）
+    expect(callCount(ctx.transports[0]?.sent)).toBe(1);
+  });
+
+  it('重连换了 generation：旧连接的晚到退出回调打不掉新会话', async () => {
+    vi.useFakeTimers();
+    const ctx = setup({ tools: TOOLS });
+    const id = await armed(ctx, true);
+
+    ctx.last().exit({ code: 3, signal: null });
+    await flush();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flush();
+
+    // 批完这一轮 ⇒ 工具重新进表
+    await ctx.service.approve(id, { action: 'approve_all' });
+    expect(ctx.registry.all()).toHaveLength(2);
+
+    // 旧连接（第一个传输）的退出回调此刻才到 —— 它属于**上一代** generation
+    ctx.transports[0]?.exit({ code: 0, signal: null });
+
+    const still = (await ctx.service.views())[0];
+    expect(still?.state).toBe('connected');
+    expect(ctx.registry.all()).toHaveLength(2);
+  });
+
+  it('重连成功也要**重新批准**：不批就一个工具都调不到（批准复用捷径被源锁挡住）', async () => {
+    vi.useFakeTimers();
+    const ctx = setup({ tools: TOOLS });
+    const id = await armed(ctx, true);
+
+    ctx.last().exit({ code: 3, signal: null });
+    await flush();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flush();
+
+    // 没批准 ⇒ 调不动
+    const denied = await ctx.service.callTool('srv-1__do_thing', {});
+    expect(denied.ok).toBe(false);
+    expect(denied.text).toContain('未被批准');
+    // 批准之后才恢复可用
+    const out = await ctx.service.approve(id, { action: 'approve_all' });
+    expect(out.enabledTools).toHaveLength(2);
+    expect((await ctx.service.views())[0]?.state).toBe('connected');
+  });
+});
+
+describe('自动重连 · 默认关、上限与退避（T31 · 选项 B · R52）', () => {
+  it('**白名单外不重连**（反向对照）：默认关 ⇒ 掉线后什么都不发生', async () => {
+    vi.useFakeTimers();
+    const ctx = setup({ tools: TOOLS });
+    await armed(ctx, false); // 没勾那一格
+
+    ctx.last().exit({ code: 3, signal: null });
+    await flush();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+
+    expect(ctx.transports).toHaveLength(1); // 没有新进程
+    expect((await ctx.service.views())[0]?.state).toBe('exited');
+  });
+
+  it('退避是递增的 2s → 8s → 30s，且**最多 3 次**（第 4 次不再尝试）', async () => {
+    vi.useFakeTimers();
+    // 第 0 个传输（手动那次）成功；第 1 个起握手就失败 ⇒ 三次重连全连不上
+    const ctx = setup({ tools: TOOLS, failHandshakeFrom: 1 });
+    await armed(ctx, true);
+
+    ctx.last().exit({ code: 3, signal: null });
+    await flush();
+
+    // 第 1 次尝试：2 秒后
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(ctx.transports).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(ctx.transports).toHaveLength(2);
+
+    // 第 2 次尝试：再等 8 秒
+    await vi.advanceTimersByTimeAsync(7_999);
+    expect(ctx.transports).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(ctx.transports).toHaveLength(3);
+
+    // 第 3 次尝试：再等 30 秒
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(ctx.transports).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1);
+    await flush();
+    expect(ctx.transports).toHaveLength(4);
+
+    // **第 4 次不再尝试**（上限就是 3 次）
+    await vi.advanceTimersByTimeAsync(120_000);
+    await flush();
+    expect(ctx.transports).toHaveLength(4);
+
+    // 放弃后：留在 error，且说清"已试 N 次、最后一次因为什么失败"
+    const view = (await ctx.service.views())[0];
+    expect(view?.state).toBe('error');
+    expect(view?.lastError).toContain('已试 3 次');
+    expect(view?.lastError).toContain('初始化被拒绝');
+  });
+
+  it('**不跨应用重启**：落盘的只是「允许重连」这个偏好，不是待重连的任务', async () => {
+    vi.useFakeTimers();
+    const store = createMemoryMcpStore();
+    const first = new McpService({
+      registry: new ToolRegistry(),
+      store,
+      createTransport: (_config, hooks) => new FakeTransport({ tools: TOOLS }, hooks),
+    });
+    await first.save({ ...SERVER, autoReconnect: true });
+    first.disposeAll();
+
+    // 模拟"应用重启"：换一个服务实例，同一份存储
+    const created: FakeTransport[] = [];
+    const second = new McpService({
+      registry: new ToolRegistry(),
+      store,
+      createTransport: (_config, hooks) => {
+        const t = new FakeTransport({ tools: TOOLS }, hooks);
+        created.push(t);
+        return t;
+      },
+    });
+    const views = await second.views();
+    expect(views[0]?.autoReconnect).toBe(true); // 偏好还在
+    expect(views[0]?.state).toBe('idle'); // 但没有待办
+    expect(created).toHaveLength(0); // 启动时一个进程都没起
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(created).toHaveLength(0); // 也不会自己补连
+    second.disposeAll();
+  });
+});
+
+describe('自动重连 · 用户的动作压过自动化（T31 · 选项 B · R52）', () => {
+  it('**授权可随时收回**：取消勾选 ⇒ 排队中的重连取消（不再重试）', async () => {
+    vi.useFakeTimers();
+    const ctx = setup({ tools: TOOLS });
+    const id = await armed(ctx, true);
+
+    ctx.last().exit({ code: 3, signal: null });
+    await flush(); // 排程已挂上（2 秒后那一次）
+
+    // 用户取消勾选（收回授权）
+    await ctx.service.save({
+      id,
+      name: SERVER.name,
+      command: SERVER.command,
+      args: SERVER.args,
+      autoReconnect: false,
+    });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+
+    expect(ctx.transports).toHaveLength(1); // 一次都没再试
+    // 界面上看得见"取消了"
+    expect((await ctx.service.views())[0]?.lastError).toContain('已取消');
+  });
+
+  it('用户手动点「连接」⇒ 自动重连**让位**（不会把用户正在用的连接断掉重连一遍）', async () => {
+    vi.useFakeTimers();
+    const ctx = setup({ tools: TOOLS });
+    const id = await armed(ctx, true);
+
+    ctx.last().exit({ code: 3, signal: null });
+    await flush();
+
+    // 用户自己点连接（此刻他就在这件事上）
+    const manual = await ctx.service.connect(id);
+    expect(manual.ok).toBe(true);
+    expect((await ctx.service.views())[0]?.state).toBe('awaiting_approval');
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+
+    // 自动重连没有再动一次（否则用户刚点的连接会被自己断掉重来）
+    expect(ctx.transports).toHaveLength(2);
+    expect((await ctx.service.views())[0]?.state).toBe('awaiting_approval');
+  });
+
+  it('用户点「断开」⇒ 不再自动重连（用户说不要，系统不能替他决定要）', async () => {
+    vi.useFakeTimers();
+    const ctx = setup({ tools: TOOLS });
+    const id = await armed(ctx, true);
+
+    ctx.last().exit({ code: 3, signal: null });
+    await flush();
+
+    await ctx.service.disconnect(id);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+
+    expect(ctx.transports).toHaveLength(1);
+    expect((await ctx.service.views())[0]?.state).toBe('idle');
+  });
+
+  it('**自动重连正在发起**时用户点了连接：用户那条毫发无伤，自动重连那个进程被退掉（不泄漏）', async () => {
+    vi.useFakeTimers();
+    // 第 1 个传输（手动那次）正常；第 2 个（自动重连那次）不应声 ⇒ 握手挂着
+    const ctx = setup({ tools: TOOLS, silentAt: [1] });
+    const id = await armed(ctx, true);
+
+    ctx.last().exit({ code: 3, signal: null });
+    await flush();
+    await vi.advanceTimersByTimeAsync(2_000); // 自动重连开始，握手挂着
+    await flush();
+    expect(ctx.transports).toHaveLength(2); // 自动重连确实起了第 2 个进程
+    expect(ctx.transports[1]?.disposed).toBe(false);
+
+    // 用户此刻点连接（自动重连还挂在握手里）
+    const manual = await ctx.service.connect(id);
+    expect(manual.ok).toBe(true);
+
+    const view = (await ctx.service.views())[0];
+    // 用户那条活着，而且**仍要重新批准**（自动重连没有替它批）
+    expect(view?.state).toBe('awaiting_approval');
+    expect(view?.enabledTools).toEqual([]);
+    // 自动重连那个进程被退掉了 —— 不留一个没人管的第三方进程
+    expect(ctx.transports[1]?.disposed).toBe(true);
+    // 也没有第三个进程（自动重连没有再去重连一遍）
+    expect(ctx.transports).toHaveLength(3);
+
+    // 再等一分钟：自动重连**不许**再试（用户已经接管了）
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+    expect(ctx.transports).toHaveLength(3);
+  });
+
+  it('「自动重连」那一格默认**不勾**，且勾上它也不会立刻去连（它只是"允许"）', async () => {
+    const ctx = setup({ tools: TOOLS });
+    const view = await ctx.service.save(SERVER);
+    expect(view.autoReconnect).toBe(false);
+
+    const armedView = await ctx.service.save({ ...SERVER, autoReconnect: true });
+    expect(armedView.autoReconnect).toBe(true);
+    // 勾上不等于连接：状态仍是 idle，进程一个都没起
+    expect(armedView.state).toBe('idle');
+    expect(ctx.transports).toHaveLength(0);
+    expect(view.id).toBeTruthy();
   });
 });

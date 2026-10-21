@@ -28,6 +28,15 @@ export function registerMcpIpc(ctx: IpcContext): void {
     return z.array(mcpServerViewSchema).parse(await mcp.views());
   });
 
+  /**
+   * 保存 / 更新服务端配置。
+   *
+   * **「掉线后自动重连」那一格也走这条通道**（T31 · 选项 B）：
+   * 它是配置的一部分（白名单偏好），因此与命令/参数/环境变量同一套校验与落盘。
+   * 两条语义：
+   * - **省略 = 保持原值**（与 `env` 同语义）；真正的"默认关"写死在落盘那一侧。
+   * - 改它**不**会断开连接（`launchChanged` 只看命令/参数/环境变量）。
+   */
   handle(IPC.MCP_SERVER_SAVE, async (_e, input: unknown) => {
     return mcpServerViewSchema.parse(await mcp.save(input));
   });
