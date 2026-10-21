@@ -20,6 +20,26 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * 当前 HEAD —— 自检期间用它发现「**有人在这段时间里提交了**」。
+ *
+ * 为什么需要它（2026-10-21 实测踩到）：注入自检会**临时改工作树**（把靶文本换成坏形态）。
+ * 如果这段时间里**有人提交**，那一笔提交收进去的就是**注入形态** ⇒ 仓里多出一个坏的表格行，
+ * 而下一次 `check:docs` 报出来的红会指向一个「看起来像文档漂移」的地方 —— **现场被换掉了**。
+ * ⇒ 自检必须在收尾时发现「HEAD 变了」并**当场红**，把静默的破坏变成一句能读的话。
+ *
+ * 用**异步** spawn：本机同步 spawn（`spawnSync`）一律 EBUSY（`mutation-check.mjs` 头里记过同一条）。
+ */
+function gitHead() {
+  return new Promise((done) => {
+    const child = spawn('git', ['rev-parse', 'HEAD'], { cwd: repoRoot });
+    let out = '';
+    child.stdout.on('data', (d) => (out += String(d)));
+    child.on('error', () => done(null));
+    child.on('close', () => done(out.trim()));
+  });
+}
+
 function runCheck() {
   return new Promise((done) => {
     const child = spawn(process.execPath, ['scripts/check-docs.mjs'], { cwd: repoRoot });
@@ -582,10 +602,14 @@ const cases = [
  * 最后**再跑一次检查器**，把"注入到底清干净了没有"当成一条真值说出来，而不是让人 `git status` 才发现。
  */
 let aborted = false;
+/** 每个被注入过的文件的**原文**（收尾时逐字节核对 ⇒ 还原不能只靠"检查器恢复通过"）。 */
+const backups = new Map();
+const headAtStart = await gitHead();
 try {
   for (const c of cases) {
     const path = join(repoRoot, c.file);
     const original = readFileSync(path, 'utf8'); // 内存备份，不落盘
+    backups.set(path, original);
     if (!original.includes(c.from)) {
       fail(`用例「${c.name}」的锚点未命中 —— 请更新本脚本的锚点`);
     }
@@ -617,4 +641,30 @@ if (aborted) {
 }
 if (after.code !== 0) die('还原后检查器仍失败 —— 基线已被污染，请人工检查');
 
-console.log(`\nDOCS-CHECK SELFTEST OK：${cases.length} 处注入的漂移全部被拦住，还原后检查器恢复通过。`);
+/**
+ * 收尾两道自查（2026-10-21 加）：
+ * ① **被注入的每个文件必须逐字节回到原文** —— 「检查器恢复通过」不等于「文件没被留下别的形态」；
+ * ② **HEAD 必须没变** —— 变了就说明**期间有人提交**，那一笔收进去的可能就是注入形态。
+ */
+const notRestored = [...backups.entries()]
+  .filter(([p, original]) => readFileSync(p, 'utf8') !== original)
+  .map(([p]) => p);
+if (notRestored.length > 0) {
+  console.error(
+    `\n❌ 自检跑完，但**这些文件没有逐字节回到原文**：${notRestored.join('、')}\n` +
+      '   ⇒ 注入的形态可能还在工作树里（"检查器恢复通过"不等于"文件是原文"）—— 请对照 `git diff` 手工清掉。',
+  );
+  process.exit(1);
+}
+const headAtEnd = await gitHead();
+if (headAtStart !== null && headAtEnd !== null && headAtStart !== headAtEnd) {
+  console.error(
+    `\n❌ 自检期间 **HEAD 变了**（${headAtStart.slice(0, 7)} → ${headAtEnd.slice(0, 7)}）—— 期间有人提交了。\n` +
+      '   注入还曾在文件里 ⇒ 那一笔提交**可能把注入一起收进了仓**。\n' +
+      '   ⇒ 立刻 `git status --porcelain` 与 `git diff` 核对（`git diff` 为空 = 那一笔收进去的就是注入）。\n' +
+      '   **顺序纪律**：注入自检会临时改工作树 ⇒ **跑它的时候不许提交**；提交要等它报出"还原成功"之后。',
+  );
+  process.exit(1);
+}
+
+console.log(`\nDOCS-CHECK SELFTEST OK：${cases.length} 处注入的漂移全部被拦住，还原后检查器恢复通过（${String(backups.size)} 个文件逐字节还原 · HEAD 未变）。`);

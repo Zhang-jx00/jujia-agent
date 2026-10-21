@@ -272,13 +272,14 @@ describe('权限页 · 执行审计', () => {
   });
 });
 
-describe('规则表读坏了要有话（T37 的界面一半 · R23）', () => {
-  it('主文件读不出来（按空表运行）→ 横幅如实说，并指出 .bak 有上一份', async () => {
+describe('规则表读坏了要有话（T37 的界面一半 · R23；真收口 R49）', () => {
+  it('主文件与备份都读不出来 → 横幅如实说，但**不许承诺 .bak**（那时它自己也坏了）', async () => {
     health.mockResolvedValue({ source: 'default', recovered: true });
     mount([]);
     const banner = await screen.findByText(/规则文件读不出来/);
-    expect(banner.textContent).toContain('.bak');
     expect(banner.textContent).toContain('deny');
+    // **空承诺是这一条最容易犯的错**：走到"读不出来"这一支，说明主文件与备份**都**不可用
+    expect(banner.textContent).not.toContain('在 .bak 里');
   });
 
   it('从备份恢复 → 说的是"已从备份恢复、请核对"（不许与"读不出来"混成一句）', async () => {
@@ -292,5 +293,19 @@ describe('规则表读坏了要有话（T37 的界面一半 · R23）', () => {
     mount([view()]);
     await screen.findByText(/覆盖范围/); // 等页面真的装完（reload 已跑过）
     expect(screen.queryByText(/规则文件读不出来|已从备份/)).toBeNull();
+  });
+
+  it('**从来没有规则文件**（首装）→ 一条横幅都不许出现（R49 修掉的那个误报）', async () => {
+    health.mockResolvedValue({ source: 'default', recovered: false });
+    mount([]);
+    await screen.findByText(/还没有任何规则/); // 等页面真的装完
+    expect(screen.queryByText(/规则文件读不出来|已从备份/)).toBeNull();
+  });
+
+  it('降级且列表为空 → **不许说「还没有任何规则」**（那是把「读不出来」说成了「没有规则」）', async () => {
+    health.mockResolvedValue({ source: 'default', recovered: true });
+    mount([]);
+    await screen.findByText(/规则文件读不出来/);
+    expect(screen.queryByText(/还没有任何规则/)).toBeNull();
   });
 });

@@ -134,16 +134,32 @@ export function PermissionRulesPanel(): ReactElement {
     });
 
   const isDenyAll = action === 'deny' && (pattern.trim() === '*' || pattern.trim() === '**');
+  /**
+   * 「真的发生过降级 / 读取失败」—— 与「**从来没有规则文件**」（正常首装）**分开**（T37 · R49）。
+   *
+   * 为什么必须分开：`readJsonSafe` 的 `source` 只有三档，而「从来没有文件」与「文件在但读不出来」
+   * 在 `source === 'default'` 这一档里**曾经同形**（`recovered` 都是 false）⇒
+   * 旧横幅条件 `source !== 'primary' || recovered` 会把**首装**也算成降级
+   * ⇒ **一台没用过规则功能的机器，打开权限页就看到「规则文件读不出来」**（误报）。
+   * 现在：`recovered === true` 才算降级（主文件坏了且备份也不可用 / 从备份恢复）。
+   */
+  const degraded = health !== null && health.recovered;
 
   return (
     <div className="w2-panel">
-      {health !== null && (health.source !== 'primary' || health.recovered) && (
-        // T37（R23）：规则读坏了**不静默** —— 旧行为是"悄悄按空表跑"，用户写过的 deny 不生效
-        // 而界面显示"还没有任何规则"。这里把来源如实说出来。
+      {degraded && (
+        // T37（R23 做界面，R49 真收口）：规则读坏了**不静默** —— 旧行为是"悄悄按空表跑"，
+        // 用户写过的 deny 不生效而界面显示"还没有任何规则"。这里把来源如实说出来。
+        //
+        // **R49 的两处改正**：
+        // ① 触发条件只看 `degraded`（"真的发生过降级/失败"）—— 旧条件把**「从来没有规则文件」**
+        //    （正常首装）也算成降级 ⇒ **首装即误报**「规则文件读不出来」。
+        // ② 降级时**不许承诺 .bak**：走到"读不出来"这一支说明**主文件与备份都不可用**
+        //    ⇒ 说"上一份在 .bak 里"是**空承诺**（那一支的 .bak 自己也坏了）。
         <p className="p0-err" role="status">
-          {health.source === 'default'
-            ? '规则文件读不出来，已按「没有规则」运行 —— 你写过的 deny 可能没有生效；请检查数据目录的 permission-rules.json（上一份在 .bak 里）'
-            : '规则主文件损坏，已从备份 .bak 恢复 —— 请核对下面的列表是否完整'}
+          {health?.source === 'backup'
+            ? '规则主文件损坏，已从备份 .bak 恢复 —— 请核对下面的列表是否完整'
+            : '规则文件读不出来（主文件与备份 .bak 都不可用），已按「没有规则」运行 —— 你写过的 deny 可能没有生效；请检查数据目录的 permission-rules.json'}
         </p>
       )}
       <section className="p0-card">
@@ -296,7 +312,11 @@ export function PermissionRulesPanel(): ReactElement {
         </div>
 
         {rules.length === 0 ? (
-          <p className="p0-subtitle">还没有任何规则。</p>
+          // 降级时说"还没有任何规则"= **把「读不出来」说成了「没有规则」** ——
+          // T37 的题面要的正是分清这两者（R49）
+          <p className="p0-subtitle">
+            {degraded ? '规则表读不出来，下面没有可显示的规则。' : '还没有任何规则。'}
+          </p>
         ) : (
           <ul className="jj-perm-list">
             {rules.map((r) => (

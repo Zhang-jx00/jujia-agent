@@ -23,8 +23,12 @@ export interface PermissionRulesHealth {
 export interface PermissionRulesStore {
   list(): Promise<PermissionRule[]>;
   /**
-   * 规则表的健康度。**先只给执行审计用**（每条账带上"当时是从哪一档读的"）；
-   * 把它显示到权限页上属 T37 的剩余部分（那一半要改契约与界面，排在 R10）。
+   * 规则表的健康度。
+   *
+   * - **审计侧**：每条账带上"当时是从哪一档读的"（`ipc/context.ts` 的 `lastHealth`）。
+   * - **界面侧**：R23 已把这一格接到权限页横幅（T37 的界面一半）；**R49 真收口**了它的口径 ——
+   *   `recovered` 才是"真的发生过降级/失败"，而 `source === 'default' && !recovered`
+   *   是**「从来没有规则文件」**（正常首装，**不该说成「读坏了」**）。
    */
   health(): Promise<PermissionRulesHealth>;
   /** 新增；非法输入抛错。返回落盘后的完整记录 */

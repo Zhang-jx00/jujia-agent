@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { PermissionRule } from '@jujia/agent-core';
-import { createMemoryPermissionRulesStore } from './permission-rules-store';
+import { createFilePermissionRulesStore, createMemoryPermissionRulesStore } from './permission-rules-store';
 
 function existing(over: Partial<PermissionRule> = {}): PermissionRule {
   return {
@@ -78,6 +80,74 @@ describe('权限规则存储（校验走同一段代码）', () => {
  * 以及"去重"要按三元组算 —— 同一个工具、同一个动作、不同的命令前缀，
  * 是两条都成立的规则（`rm -rf` 拒、`git push` 问），把它们判成重复就等于只允许一条。
  */
+/**
+ * 文件实现的健康度（T37 真收口 · R49）。
+ *
+ * 为什么单列一份：这份文件**整份只跑内存实现**，而内存实现的 health **恒为**
+ * `{ source: 'primary', recovered: false }` ⇒ **坏文件路径一条都没被测过**。
+ *
+ * 这条锁盯的就是三件事必须**互不串台**：
+ * ① **文件不存在** ⇒ 「从来没有规则文件」（正常首装）⇒ **不是「读坏了」**
+ * ② **文件在但读不出来**（坏 JSON / **空的**）⇒ 「读坏了」
+ * ③ **主文件坏、备份好** ⇒ 「从备份恢复」
+ */
+describe('文件实现的健康度：读坏了与「没有规则文件」必须分得开', () => {
+  const roots: string[] = [];
+  const prevRoot = process.env['JUJIA_DATA_BASE_DIR'];
+
+  afterEach(async () => {
+    if (prevRoot === undefined) delete process.env['JUJIA_DATA_BASE_DIR'];
+    else process.env['JUJIA_DATA_BASE_DIR'] = prevRoot;
+    for (const r of roots.splice(0)) await rm(r, { recursive: true, force: true });
+  });
+
+  /** 一次性数据根（`getDataRoot()` 每次现读 `JUJIA_DATA_BASE_DIR`，无缓存 ⇒ 建店前设好即可） */
+  const makeRoot = async (): Promise<string> => {
+    const root = await mkdtemp(join(process.cwd(), '.tmp', 'perm-rules-'));
+    roots.push(root);
+    process.env['JUJIA_DATA_BASE_DIR'] = root;
+    return root;
+  };
+
+  const rulesPath = (root: string): string => join(root, 'permission-rules.json');
+
+  it('文件不存在 → **不是「读坏了」**（首装的正常状态，界面不该出横幅）', async () => {
+    await makeRoot();
+    const store = createFilePermissionRulesStore();
+    expect(await store.health()).toEqual({ source: 'default', recovered: false });
+    expect(await store.list()).toEqual([]);
+  });
+
+  it('文件是坏 JSON → 「读坏了」（recovered=true）', async () => {
+    const root = await makeRoot();
+    await writeFile(rulesPath(root), '{ 这不是 JSON', 'utf8');
+    const store = createFilePermissionRulesStore();
+    expect(await store.health()).toEqual({ source: 'default', recovered: true });
+  });
+
+  it('文件是**空的**（被写坏 / 被截断）→ 「读坏了」，**不是「没有文件」**', async () => {
+    const root = await makeRoot();
+    await writeFile(rulesPath(root), '', 'utf8');
+    const store = createFilePermissionRulesStore();
+    expect(await store.health()).toEqual({ source: 'default', recovered: true });
+  });
+
+  it('主文件坏 + 备份好 → 说「从备份恢复」', async () => {
+    const root = await makeRoot();
+    await writeFile(rulesPath(root), '{ 坏', 'utf8');
+    await writeFile(rulesPath(root) + '.bak', JSON.stringify({ rules: [] }), 'utf8');
+    const store = createFilePermissionRulesStore();
+    expect(await store.health()).toEqual({ source: 'backup', recovered: true });
+  });
+
+  it('正常文件 → 健康（primary / 没降级）', async () => {
+    const root = await makeRoot();
+    await writeFile(rulesPath(root), JSON.stringify({ rules: [] }), 'utf8');
+    const store = createFilePermissionRulesStore();
+    expect(await store.health()).toEqual({ source: 'primary', recovered: false });
+  });
+});
+
 describe('命令前缀存取', () => {
   it('前缀会去掉首尾空白后存下来，并原样读回', async () => {
     const store = createMemoryPermissionRulesStore();

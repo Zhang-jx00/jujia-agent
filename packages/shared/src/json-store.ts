@@ -123,7 +123,11 @@ async function readCandidate<T>(
 ): Promise<{ data: T; version?: number } | undefined> {
   if (!(await exists(path))) return undefined;
   const raw = await readFile(path, 'utf8');
-  if (raw.trim() === '') return undefined;
+  // **空文件是「损坏」，不是「没有」**（T37 · R49）。
+  // 把它当成"没有文件" ⇒ 一次被写坏/被截断的规则表会**静默变成「没有规则」**：
+  // 用户写过的 deny 悄悄不再生效，而**零提示**（连 console.warn 都没有）。
+  // 抛出去 ⇒ readJsonSafe 把它记进 problems ⇒ `recovered: true` + 一条 console.warn。
+  if (raw.trim() === '') throw new Error('文件是空的（可能是写坏了）');
 
   const parsed: unknown = JSON.parse(raw);
   let payload: unknown = parsed;
