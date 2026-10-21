@@ -3574,7 +3574,36 @@ try {
   // ④ 停用是真停用：写盘、且水位线不再往前走
   const beforeStop = String(seededTask.lastRunAt);
   await row.locator('button', { hasText: '停用' }).first().click();
-  await win3.waitForTimeout(400);
+  /**
+   * **T72 那一族里的真隐患**（R46 · 排查14 现扫出来的唯一一处）：
+   * 原先这里是「点『停用』→ **固定睡 400ms** → 读 `tasks.json`」——
+   * 拿固定睡眠**赌落盘完成**，与 T71 那一族（清除 / 允许一次 / 记住这一点）**同形**：
+   * **动作发出了 ≠ 状态生效了**。机器一忙，写盘还没落定就开读 ⇒ 读到旧账。
+   *
+   * 改成等**界面上已经存在的那句回执**：`定时任务「E2E 定时补跑」已停用（账还在）`
+   * —— 那是 `SchedulePanel.tsx` 的 `toggle()` → `handleMutationResult()` 的 `okText`，
+   * 它在 `await window.jujia.scheduleToggle(...)` **返回之后**才 `setNotice`。
+   * 而主进程那一侧（`ipc/schedule.ts` → `schedule-store.ts` 的 `setEnabled()`）是
+   * `await writeAll(...)` **之后**才返回 ⇒ **这句回执出现 = `tasks.json` 真的写完了**。
+   *
+   * 为什么等它就够（因果链，逐段可核）：
+   *   `setEnabled` → `await writeAll(...)`（落盘完成）
+   *     → `simple()` → `await store().list()`（**从盘上重读一遍**清单）
+   *       → IPC 返回 `{ok:true, tasks}`（里面就是刚写完的那份）
+   *         → 渲染层 `handleMutationResult` → `setNotice('…已停用（账还在）')` ← **等的就是这句**
+   * ⇒ 这句出现时，盘上早已是新账；比那 400ms 睡得更晚，也比它更准。
+   *
+   * **不是放宽断言**：下面两条读盘断言（`enabled === false` / 水位线不再走）一字未动；
+   * 这里换掉的只是"凭什么认为写完了"——从"睡够 400ms 就算"换成"等它自己的回执"。
+   * 超时上限取 10s（`waitText3` 的默认档，与本文件其它回执等待同一档）。
+   */
+  const stopNotice = await waitText3('定时任务「E2E 定时补跑」已停用（账还在）', 10_000);
+  if (stopNotice !== true) {
+    fail(
+      '点了「停用」之后界面上没有给出「已停用（账还在）」那句回执（停用到底生效没有？）—— 不许再拿固定睡眠顶替',
+      (await body3()).slice(-900),
+    );
+  }
   const stopped = JSON.parse(readFileSync(taskFile, 'utf8')).data.tasks.find((t) => t.id === seededTaskId);
   if (stopped.enabled !== false) fail('点了停用而磁盘上还是启用（界面与账各说各话）', JSON.stringify(stopped));
   if (String(stopped.lastRunAt) !== beforeStop) {
