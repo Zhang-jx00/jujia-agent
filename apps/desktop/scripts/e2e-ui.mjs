@@ -452,6 +452,51 @@ await new Promise((resolve) => echoServer.listen(0, '127.0.0.1', resolve));
 const echoPort = echoServer.address().port;
 
 /**
+ * 文生图的假远端（M11 剩余 · R51 · S1）：扮演 `POST /v1/images/generations`。
+ *
+ * 真值三样都从这里出：
+ * ① **服务端收到的提示词字节**（`genHits[].body.prompt`）—— 证明提示词真的发出去了；
+ * ② **回程的图片字节**（`genPngBytes`，固定 ⇒ 磁盘上可逐字节比）；
+ * ③ **请求次数**（`genHits.length`）—— 用来证明"只回 url 的形态**不会**被主进程再 GET 一次"（SSRF 面）。
+ */
+const GEN_PROMPT_MARKER = 'E2E-GEN-PROMPT';
+/** 回程图片字节：最小 PNG 头 + 一个 tEXt 块（哨兵串在里面 ⇒ 磁盘上认得出来） */
+const genPngBytes = (() => {
+  const chunk = (type, payload) => {
+    const out = Buffer.alloc(12 + payload.length);
+    out.writeUInt32BE(payload.length, 0);
+    out.write(type, 4, 'ascii');
+    payload.copy(out, 8);
+    return out;
+  };
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', Buffer.alloc(13)),
+    chunk('tEXt', Buffer.from('E2E-GEN-IMAGE-BYTES', 'ascii')),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+})();
+/** 服务端收到过什么（一次一条） */
+const genHits = [];
+const genServer = createServer((req, res) => {
+  let raw = '';
+  req.on('data', (c) => (raw += String(c)));
+  req.on('end', () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = { __unparsed: raw };
+    }
+    genHits.push({ path: req.url ?? '', body: parsed });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ data: [{ b64_json: genPngBytes.toString('base64') }] }));
+  });
+});
+await new Promise((resolve) => genServer.listen(0, '127.0.0.1', resolve));
+const genPort = genServer.address().port;
+
+/**
  * 本地"发布页"（R11 更新检查）：`JUJIA_UPDATE_API` 指向它 —— 只换"问谁"，不换"问什么"。
  * `updateHits` 是计数器：**点之前它必须是 0**（证明没有自动检查在出站），点了之后恰好 1。
  */
@@ -480,6 +525,8 @@ const updatePort = updateServer.address().port;
 const seededConnId = 'e2e-conn-1';
 const seededStreamConnId = 'e2e-stream-1';
 const seededEchoConnId = 'e2e-6b-1';
+/** 文生图那条（R51 · S1）：指向本地"假远端"，它扮演 `POST /v1/images/generations` */
+const seededGenConnId = 'e2e-gen-1';
 /**
  * 种子②（R25 · T33 的界面级证据）：一个 **131 条**历史的会话目录。
  * 首屏读 120 条、剩 11 条在盘上 —— "翻得到最早一条 / 不跳条"这件事只能在界面级验。
@@ -562,6 +609,17 @@ writeFileSync(
           apiFormat: 'openai-compatible',
           model: 'e2e-echo-model',
           // 与流式那条同理：真的发问，所以给一个本地-only 的假密钥（永不外发）
+          secret: { scheme: 'plain', value: 'e2e-local-only' },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: seededGenConnId,
+          name: 'e2e 生图假服务',
+          baseUrl: `http://127.0.0.1:${String(genPort)}/v1`,
+          apiFormat: 'openai-compatible',
+          model: 'e2e-image-model',
+          // 文生图这条也要真的发问 ⇒ 同样给一个本地-only 的假密钥
           secret: { scheme: 'plain', value: 'e2e-local-only' },
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -4588,6 +4646,98 @@ try {
       ` · 940px 下页签不折行（最高 ${String(narrow.maxH)}px）`,
   );
 
+  /* ---------------- M11 剩余 · R51 · S1：文生图 ----------------
+   *
+   * 三层真值（报备稿 §五-6 要求的那三层，一条都不能少）：
+   * ① **服务端收到的提示词字节** —— 提示词真的发给了当前连接配置的服务商；
+   * ② **落盘产物字节** —— 回程图片真的落在本应用数据目录里，且**逐字节**等于服务端发的那份；
+   * ③ **界面那句回执** —— 路径 / 大小 / 类型三样都在界面上。
+   *
+   * 顺带把界面上那三句口径也钉住（能力差异 / 成本上限 / 本机保留副本）。
+   */
+  step('M11 剩余 · R51 S1 文生图：提示词真的发出去 · 图片字节真的落盘 · 界面说得清');
+  await win4.locator('nav.app-tabs button', { hasText: '绘图' }).first().click();
+  await win4.locator('select[aria-label="用哪条连接生成"]').selectOption(seededGenConnId);
+
+  const genPrompt = win4.locator('textarea[aria-label="提示词"]');
+  const wantedPrompt = `${GEN_PROMPT_MARKER} 一只坐在窗台上的猫`;
+  /**
+   * 填值要**核对**（本仓踩过的坑）：Playwright 的 `fill()` 与 React 受控输入的
+   * 挂载期恢复写入会撞车 ⇒ **插入变追加**（内容被拼成"旧+新"）。
+   * 所以：填完读回来看一眼，不一致**再填一次**；两次都不一致就**当场红**。
+   */
+  await genPrompt.fill(wantedPrompt);
+  let gotPrompt = await genPrompt.inputValue();
+  if (gotPrompt !== wantedPrompt) {
+    await genPrompt.fill(wantedPrompt);
+    gotPrompt = await genPrompt.inputValue();
+  }
+  if (gotPrompt !== wantedPrompt) {
+    fail(`提示词框里不是我们要的那句（实际是「${gotPrompt}」）—— 界面上的输入没落地`);
+  }
+
+  await win4.locator('button[data-gen-submit="true"]').click();
+  const genReceipt = win4.locator('[data-gen-receipt]');
+  try {
+    await genReceipt.waitFor({ timeout: 25_000 });
+  } catch {
+    fail('按了生成之后界面上没有出现回执（生成链路没走通）', (await win4.evaluate(() => document.body.innerText)).slice(-800));
+  }
+  const genReceiptText = await genReceipt.innerText();
+  if (!genReceiptText.includes('image/png')) {
+    fail('回执里没有产物类型（按魔数认出来的那个）', genReceiptText.slice(0, 400));
+  }
+  if (!genReceiptText.includes('generated-images')) {
+    fail('回执里没有产物路径（产物没落在本应用数据目录里）', genReceiptText.slice(0, 400));
+  }
+
+  // ① 服务端收到的提示词字节
+  if (genHits.length !== 1) {
+    fail(`假远端被问了 ${String(genHits.length)} 次（应当恰好 1 次 —— 不许有第二次出站）`, JSON.stringify(genHits));
+  }
+  if (genHits[0].path !== '/v1/images/generations') {
+    fail(`生成请求打错了端点（${genHits[0].path}）`, JSON.stringify(genHits[0]));
+  }
+  if (genHits[0].body.prompt !== wantedPrompt) {
+    fail(
+      '服务端收到的提示词不是界面上那一句（发出去的东西与用户写的不一致）',
+      JSON.stringify(genHits[0].body),
+    );
+  }
+
+  // ② 落盘产物字节（逐字节）
+  const genDir = join(dataDir, 'generated-images');
+  const genFiles = existsSync(genDir) ? readdirSync(genDir) : [];
+  if (genFiles.length !== 1) {
+    fail(`产物目录里应该有且只有 1 个文件，实际 ${String(genFiles.length)} 个：${JSON.stringify(genFiles)}`);
+  }
+  const genBytes = readFileSync(join(genDir, genFiles[0]));
+  if (!genBytes.includes('E2E-GEN-IMAGE-BYTES')) {
+    fail('落盘的产物里没有回程字节的哨兵串 —— 落盘的与服务端发的不是同一份');
+  }
+  if (genBytes.length !== genPngBytes.length) {
+    fail(`落盘产物的字节数不对（${String(genBytes.length)} ≠ ${String(genPngBytes.length)}）`);
+  }
+  if (!genBytes.equals(genPngBytes)) {
+    fail('落盘产物与服务端发来的字节**逐字节**不一致');
+  }
+
+  // ③ 界面上那三句口径
+  const genBody = await win4.evaluate(() => document.body.innerText);
+  if (!genBody.includes('成本上限')) {
+    fail('界面上没有事先说清成本上限（张数 / 大小 / 上限）');
+  }
+  if (!genBody.includes('本机保留副本')) {
+    fail('界面上没有说清"本机保留副本"');
+  }
+  if (genBody.includes('没人存你的提示词')) {
+    fail('界面说了"没人存你的提示词"—— 那是另一条边界（服务商那边的留存本应用管不了）');
+  }
+  ok(
+    `文生图：提示词真的到了当前连接的假远端（${String(genHits.length)} 次出站）· 回程字节逐字节落在数据目录` +
+      `（${genFiles[0]}）· 界面回执给出类型与路径 · 成本上限与"本机保留副本"都写在明面上`,
+  );
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;
@@ -4606,6 +4756,7 @@ try {
 } finally {
   streamServer.close();
   echoServer.close();
+  genServer.close();
   updateServer.close();
   if (app !== undefined) await app.close().catch(() => undefined);
   try {

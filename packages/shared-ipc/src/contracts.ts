@@ -8,6 +8,16 @@ import {
 } from './limits';
 import { CHAT_IMAGE_MAX_PER_MESSAGE, chatImageInputSchema } from './contracts-media';
 
+/**
+ * 媒体相关的形状（图片输入 / 媒体生成）都在 `./contracts-media.ts`，这里**一并出货**。
+ *
+ * 为什么在这里再出一次（`index.ts` 本来就有 `export * from './contracts-media'`）：
+ * 消费方从 `@jujia/shared-ipc` 一处取，而"这个包里到底有哪些媒体形状"在**本文件**这一处
+ * 就看得全 —— 星号导出的名字在编辑期是看不见的（`index.ts` 的 `export *` 不给提示）。
+ * 两条星号导出解析到的是**同一个声明**，所以不会变成"重复导出"（TS2308）。
+ */
+export * from './contracts-media';
+
 /** 应用与运行时信息（P0 打通链路用；后续阶段会逐步扩充字段）。 */
 export const appInfoSchema = z.object({
   name: z.string(),

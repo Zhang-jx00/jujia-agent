@@ -63,11 +63,21 @@ function stuckError(
  * - 去掉末尾斜杠
  * - 若未包含 `/v1`，补上（DeepSeek/GLM/OpenAI 的 OpenAI 兼容端点都在 /v1 下）
  * - 若用户已经填了完整路径（含 /chat/completions），则原样使用
+ *
+ * 端点路径是**一个联合类型**（`EndpointPath`），不是"加个 if 特判" ——
+ * 特判会长出"这一支忘了加"的漏网之鱼，而漏掉的症状是**拼出一条不存在的 URL**，
+ * 排查起来极难看出是端点名拼错了。改这一处请改联合类型。
  */
-export function resolveEndpoint(baseUrl: string, path: 'chat/completions' | 'models'): string {
+export const ENDPOINT_PATHS = ['chat/completions', 'models', 'images/generations'] as const;
+export type EndpointPath = (typeof ENDPOINT_PATHS)[number];
+
+export function resolveEndpoint(baseUrl: string, path: EndpointPath): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');
-  if (trimmed.endsWith('/chat/completions') || trimmed.endsWith('/models')) {
-    return trimmed.replace(/\/(chat\/completions|models)$/, `/${path}`);
+  // 用户填了完整路径（已经指到某个端点上）⇒ 换成目标端点，保留前缀
+  for (const known of ENDPOINT_PATHS) {
+    if (trimmed.endsWith(`/${known}`)) {
+      return trimmed.slice(0, trimmed.length - known.length) + path;
+    }
   }
   const withVersion = /\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/v1`;
   return `${withVersion}/${path}`;
@@ -569,6 +579,183 @@ export async function listModels(
     .map((item) => (item as Record<string, unknown>)['id'])
     .filter((id): id is string => typeof id === 'string')
     .sort();
+}
+
+/* ------------------------------ 文生图（M11 剩余 · R51 · S1） ------------------------------ */
+
+/** 文生图一次请求的参数（OAI 兼容 `POST /images/generations`） */
+export interface ImageGenParams {
+  baseUrl: string;
+  /** 明文密钥：**只在主进程里用**（渲染层拿不到它） */
+  apiKey: string;
+  model: string;
+  prompt: string;
+  /** 要几张（默认 1） */
+  count?: number;
+  /** 尺寸（默认 `1024x1024` —— OAI 兼容那一族唯一全都认的一档） */
+  size?: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * 文生图的失败分类。
+ *
+ * 比通用 `ProviderError` 细一档，因为**界面要"各有各的一句话"**（报备稿 §五-2）：
+ * 端点不存在（"这个连接不支持生成"）、只回了图片链接、返回结构不对 —— 三者在用户那里
+ * 是三件完全不同的事，合成一句"生成失败"就等于让用户自己猜。
+ */
+export type ImageGenErrorCode =
+  | 'http_error'
+  | 'network_error'
+  | 'bad_response'
+  | 'timeout'
+  /** 端点不存在 / 不支持生成（404 / 405 / 501） */
+  | 'unsupported'
+  /** 服务商只回了图片**链接**（本应用不去下载它） */
+  | 'url_only';
+
+export interface ImageGenError extends Error {
+  code: ImageGenErrorCode;
+  status?: number;
+}
+
+function makeImageGenError(code: ImageGenErrorCode, message: string, status?: number): ImageGenError {
+  const err = new Error(message) as ImageGenError;
+  err.code = code;
+  if (status !== undefined) err.status = status;
+  return err;
+}
+
+/**
+ * 单次生成的响应体上限（**粗粒度护栏**，不是产品上限）。
+ *
+ * 产品上限在下游（单张 5MB，`image-prep.ts` 的 `IMAGE_MAX_BYTES`）；
+ * 这里挡的是"服务端发回来一个 200MB 的响应体"这种会把进程撑爆的情况 ——
+ * 那是**可用性**问题，必须在读进内存之前判。
+ * 4 张 × 5MB 的 base64 ≈ 27MB ⇒ 32MB 留了余量。
+ */
+const IMAGE_GEN_MAX_RESPONSE_CHARS = 32 * 1024 * 1024;
+
+/**
+ * 单次生成的**时长上限**（毫秒）。
+ *
+ * 报备稿 §五-3 点名的三样上限之一（张数 / 时长 / 大小）：生成比对话慢，
+ * 但也**不能无限等** —— 上游挂住时界面会一直转圈，用户既看不到发生了什么、也停不掉。
+ * 120 秒是"正常的图片生成能跑完、明显卡死的能被挡住"之间的一条线。
+ */
+export const IMAGE_GEN_TIMEOUT_MS = 120_000;
+
+/**
+ * 文生图：一次请求换回图片字节（base64 字符串数组）。
+ *
+ * 三条口径（与 `docs/DECISION-M11-MEDIA-GEN.md` §五 逐条对齐）：
+ * 1. **只支持 `b64_json`**：只从 `data[]` 里取 `b64_json` 字段。
+ *    服务商若只回 `url` ⇒ 抛 `url_only`，**绝不**去下载那个 URL
+ *    （那要主进程再发一次 GET，而 URL 由服务端给 ⇒ SSRF 面）；
+ * 2. **形状不对就报错**：不静默失败、不假装成功 —— "生成成功但没有图"是最坏的一种；
+ * 3. **注入式 fetcher**（`deps.fetcher ?? fetch`）：与 `listModels` 同一条路，
+ *    所以测试里能塞一台**本地假远端**（`node:http`），零新依赖。
+ */
+export async function generateImage(
+  params: ImageGenParams,
+  deps: ProviderDeps = {},
+): Promise<string[]> {
+  const doFetch = deps.fetcher ?? fetch;
+  const url = resolveEndpoint(params.baseUrl, 'images/generations');
+  const body: Record<string, unknown> = {
+    model: params.model,
+    prompt: params.prompt,
+    n: params.count ?? 1,
+    size: params.size ?? '1024x1024',
+    /**
+     * **显式要 base64**。
+     *
+     * 为什么必须显式：OAI 兼容那一族的默认形态是**链接**（`dall-e-2/3` 默认 `url`），
+     * 而本应用只接受字节（口径 1）⇒ 不显式要，服务商会回一个我们**按规矩不能去下载**的链接，
+     * 于是"这个连接明明支持生成"被误报成"不支持"。
+     * 代价：有些新模型（`gpt-image-1` 一类）不认这个参数，会回 400 ——
+     * 那时界面显示上游的原文错误，**如实说**，不静默。
+     */
+    response_format: 'b64_json',
+  };
+
+  let res: Response;
+  try {
+    /**
+     * 时长上限（报备稿 §五-3）：上游挂住时不能无限等。
+     * 与调用方给的 signal **合并**：任一方触发都会断开 fetch，
+     * 但**后果不同** —— 超时报错可重试，调用方中止是正常结束。
+     */
+    const timeoutMs = deps.totalTimeoutMs ?? IMAGE_GEN_TIMEOUT_MS;
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = params.signal ? AbortSignal.any([params.signal, timeoutSignal]) : timeoutSignal;
+    res = await doFetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${params.apiKey}`,
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (err) {
+    if (isAbort(err)) throw makeImageGenError('network_error', '请求被取消');
+    if (isTimeout(err)) throw makeImageGenError('timeout', '上游在超时时间内没有响应（生成可以重试）');
+    throw makeImageGenError('network_error', `连接失败：${presentable(causeText(err), 300)}`);
+  }
+
+  if (!res.ok) {
+    const detail = await safeText(res);
+    // 端点不存在 ⇒ **这个连接不支持生成**（不是"生成失败了"）—— 报备稿 §五-2 要求的分档
+    if (res.status === 404 || res.status === 405 || res.status === 501) {
+      throw makeImageGenError(
+        'unsupported',
+        `这个连接不支持生成（服务商没有图片生成端点，HTTP ${String(res.status)}${detail ? `：${detail}` : ''}）`,
+        res.status,
+      );
+    }
+    throw makeImageGenError('http_error', `HTTP ${String(res.status)}${detail ? `：${detail}` : ''}`, res.status);
+  }
+
+  const raw = await res.text();
+  if (raw.length > IMAGE_GEN_MAX_RESPONSE_CHARS) {
+    throw makeImageGenError('bad_response', '返回内容过大，已中止（不是一张正常的图片响应）');
+  }
+  let json: Record<string, unknown>;
+  try {
+    json = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw makeImageGenError('bad_response', '返回内容不是 JSON（不是 OAI 兼容的生成响应）');
+  }
+
+  const data = json['data'];
+  if (!Array.isArray(data) || data.length === 0) {
+    throw makeImageGenError('bad_response', '返回结构里没有图片数据 data[]（不是 OAI 兼容的生成响应）');
+  }
+
+  const images: string[] = [];
+  let sawUrl = false;
+  for (const item of data) {
+    if (typeof item !== 'object' || item === null) continue;
+    const obj = item as Record<string, unknown>;
+    const b64 = obj['b64_json'];
+    if (typeof b64 === 'string' && b64 !== '') {
+      images.push(b64);
+      continue;
+    }
+    if (typeof obj['url'] === 'string' && obj['url'] !== '') sawUrl = true;
+  }
+  if (images.length === 0) {
+    if (sawUrl) {
+      throw makeImageGenError(
+        'url_only',
+        '这个连接只返回图片链接，不返回图片数据 —— 本应用不会去下载链接指向的内容',
+      );
+    }
+    throw makeImageGenError('bad_response', '返回结构里没有 b64_json（不是 OAI 兼容的生成响应）');
+  }
+  return images;
 }
 
 /**

@@ -23,6 +23,9 @@ const ConnectionsPanel = lazy(() =>
 const ChatPanel = lazy(() =>
   import('./features/chat/ChatPanel').then((m) => ({ default: m.ChatPanel })),
 );
+const MediaGenPanel = lazy(() =>
+  import('./features/media/MediaGenPanel').then((m) => ({ default: m.MediaGenPanel })),
+);
 const AppearancePanel = lazy(() =>
   import('./features/appearance/AppearancePanel').then((m) => ({ default: m.AppearancePanel })),
 );
@@ -87,6 +90,7 @@ type Tab =
   | 'overview'
   | 'connections'
   | 'chat'
+  | 'media'
   | 'terminal'
   | 'browser'
   | 'docs'
@@ -110,6 +114,7 @@ const TAB_LABEL: Record<Tab, string> = {
   overview: '概览',
   connections: '连接',
   chat: '对话',
+  media: '绘图',
   terminal: '终端',
   browser: '浏览器',
   docs: '文档',
@@ -272,6 +277,8 @@ export function App(): ReactElement {
           {state.phase === 'ready' && tab === 'connections' && (
             <ConnectionsPanel onChanged={setConnections} />
           )}
+          {/* 媒体生成 · 文生图（M11 剩余 · R51 · S1）：走当前连接，产物落本应用数据目录 */}
+          {state.phase === 'ready' && tab === 'media' && <MediaGenPanel connections={connections} />}
           {state.phase === 'ready' && tab === 'terminal' && (
             <TerminalPanel workspaceRoot={state.loaded.config.config.workspace} />
           )}

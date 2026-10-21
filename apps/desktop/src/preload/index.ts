@@ -11,6 +11,8 @@ import {
   chatTaskResumeResultSchema,
   chatTaskDismissResultSchema,
   imageIntakeResultSchema,
+  mediaImageGenerateRequestSchema,
+  mediaImageGenerateResultSchema,
   logPageViewSchema,
   logReportResultSchema,
   logRevealResultSchema,
@@ -84,6 +86,8 @@ import {
   type ChatTaskResumeResult,
   type ChatTaskDismissResult,
   type ImageIntakeResultView,
+  type MediaImageGenerateRequest,
+  type MediaImageGenerateResultView,
   type UpdateCheckResultView,
   type McpApprovalChoice,
   type McpApprovalPlan,
@@ -482,6 +486,18 @@ const api = {
     return imageIntakeResultSchema.parse(
       await ipcRenderer.invoke(IPC.CHAT_IMAGES_PREPARE, z.array(chatImageBytesSchema).max(8).parse(images)),
     );
+  },
+
+  /**
+   * 文生图（M11 剩余 · R51 · S1）。
+   *
+   * **这里没有 apiKey**：渲染层只送「连接 id + 提示词 + 张数」，
+   * 密钥由主进程从连接记录里取 —— 渲染层永远拿不到明文（SECURITY.md 铁律）。
+   * 载荷与回执**都过契约**：形状不对在 preload 这一侧就炸，不让它流到界面上。
+   */
+  async mediaImageGenerate(input: MediaImageGenerateRequest): Promise<MediaImageGenerateResultView> {
+    const parsed = mediaImageGenerateRequestSchema.parse(input);
+    return mediaImageGenerateResultSchema.parse(await ipcRenderer.invoke(IPC.MEDIA_IMAGE_GENERATE, parsed));
   },
 
   /**
