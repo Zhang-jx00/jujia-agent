@@ -10,7 +10,7 @@
 > 轨道分类见 `docs/TRACK-PLANS.md`；排期与修复队列见 `docs/TRACK-ROADMAP.md`。
 ---
 
-## [v1.9.0-排查18 · T37 真收口：把「读坏了」与「没有规则」分得开 —— 首装不再误报、降级不再承诺 .bak、空文件算损坏（R49）] — 2026-10-21 22:05
+## [v1.9.0-排查18 · T37 真收口：把「读坏了」与「没有规则」分得开 —— 首装不再误报、降级不再承诺 .bak、空文件算损坏（R49）] — 2026-10-21 21:50
 
 **范围**：`packages/shared/src/json-store.ts`（**空文件算损坏**，不再当成「没有文件」）·
 `apps/desktop/src/renderer/src/features/permissions/PermissionRulesPanel.tsx`（横幅只认 `degraded` · 降级不承诺 .bak · 降级时不说「还没有任何规则」）·
