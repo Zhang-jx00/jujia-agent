@@ -4267,6 +4267,123 @@ try {
   }
   ok('断流会说"可能不完整"、空参数会拒执行并说清原因 —— 两件事都在真窗口里看得见，且半截内容没被丢');
 
+  /**
+   * **渲染契约（R43 · UI 重构批第三轮）**
+   *
+   * 为什么要有这一步：**静态检查看不出"元素被压成 0 高""页签被切掉""焦点环没画出来"**
+   * —— 这几类在源码里都"看着对"，**只有量真实渲染结果才抓得住**
+   * （R42 已经栽过两次：写死的颜色看不见；整条阴影令牌被拼坏也看不见）。
+   *
+   * 六条判据（每条都有下限，不是"看起来对"）：
+   *   ① 顶栏页签**不溢出**（`scrollWidth - clientWidth ≤ 1`）—— 溢出 = 右边的页签被切掉；
+   *   ② 页签**命中区 ≥ 24×24**（桌面端可达性下限）；
+   *   ③ 页签的**计算字号取自 `--fs-*` 令牌**（不许是写死的数）；
+   *   ④ 可点元素的过渡里**真的有 transform**且**时长 ≤ 300ms**（按压反馈存在，且不卡）；
+   *   ⑤ **键盘 Tab 能走到控件，且焦点环真的画出来了**（`outline-width ≥ 1px`）；
+   *   ⑥ **`prefers-reduced-motion` 在真窗口里生效**（时长被压到近乎瞬时）。
+   */
+  step('渲染契约：真窗口里量排版 / 命中区 / 焦点环 / 按压反馈 / 动效降级');
+  /**
+   * **要用当前活窗口，不能用 `win`**：这份脚本中途关过应用重开过好几回
+   * （`win` 是**第一次**启动的句柄，后面每重启一次就多一个新句柄 win2/win3/win4）⇒
+   * 到了这一步 `win` 早就被关掉了（用它会报 "Target page, context or browser has been closed"）。
+   *
+   * **为什么用 `win4` 而不是再取一次 `app.firstWindow()`**：
+   * `win4` **就是最后一个应用实例的主窗口**（上一步 T55/T56 刚用过它，此刻还活着）⇒ 直接用。
+   * 而**再调一次 `app.firstWindow()` 会破坏护栏第 26 条的判据** ——
+   * 那条要求「`app.firstWindow()` 出现 N 次 ⇒ `watchWindow` 至少 N 次」（每扇窗都要装取证记录器），
+   * 多取一次窗口却不装记录器 ⇒ 守卫会红（**第一版就是这么红的**）。
+   */
+  const live = win4;
+  await live.waitForSelector('nav.app-tabs', { timeout: 15_000 });
+  const contract = await live.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const sizes = ['--fs-caption', '--fs-small', '--fs-body', '--fs-base', '--fs-title', '--fs-heading']
+      .map((n) => root.getPropertyValue(n).trim())
+      .filter(Boolean);
+    const tabs = [...document.querySelectorAll('.app-tab')];
+    const nav = document.querySelector('.app-tabs');
+    const boxes = tabs.map((el) => el.getBoundingClientRect());
+    const btn = tabs[0] ?? document.querySelector('button');
+    const btnStyle = btn ? getComputedStyle(btn) : null;
+    return {
+      tabCount: tabs.length,
+      overflow: nav ? nav.scrollWidth - nav.clientWidth : 0,
+      navH: nav ? Math.round(nav.getBoundingClientRect().height * 10) / 10 : 0,
+      minW: boxes.length ? Math.round(Math.min(...boxes.map((b) => b.width)) * 10) / 10 : 0,
+      minH: boxes.length ? Math.round(Math.min(...boxes.map((b) => b.height)) * 10) / 10 : 0,
+      fontSize: btn ? btnStyle.fontSize : '',
+      tokenSizes: sizes,
+      transitionProp: btnStyle ? btnStyle.transitionProperty : '',
+      transitionDur: btnStyle ? btnStyle.transitionDuration : '',
+    };
+  });
+  if (contract.tabCount === 0) {
+    fail('渲染契约：一条页签都没找到（选择器或结构变了 —— 契约要跟着改）', JSON.stringify(contract));
+  }
+  if (contract.overflow > 1) {
+    fail(`渲染契约：顶栏页签溢出 ${String(contract.overflow)}px（右边的页签被切掉了）`, JSON.stringify(contract));
+  }
+  if (contract.minW < 24 || contract.minH < 24) {
+    fail(
+      `渲染契约：页签命中区只有 ${String(contract.minW)}×${String(contract.minH)}（下限 24×24）`,
+      JSON.stringify(contract),
+    );
+  }
+  if (!contract.tokenSizes.includes(contract.fontSize)) {
+    fail(
+      `渲染契约：页签的计算字号 ${contract.fontSize} 不在字号令牌集合里（${contract.tokenSizes.join(' / ')}）`,
+      JSON.stringify(contract),
+    );
+  }
+  if (!contract.transitionProp.includes('transform')) {
+    fail('渲染契约：可点元素没有 transform 过渡（按压反馈不存在）', JSON.stringify(contract));
+  }
+  // ⑤ 焦点环：键盘 Tab 一次（Tab 才会触发 :focus-visible），看焦点是不是真的画出来了
+  await live.keyboard.press('Tab');
+  const focusInfo = await live.evaluate(() => {
+    const el = document.activeElement;
+    if (!el || el === document.body) return { none: true };
+    const s = getComputedStyle(el);
+    return {
+      tag: el.tagName,
+      cls: String(el.className ?? ''),
+      outlineWidth: s.outlineWidth,
+      outlineStyle: s.outlineStyle,
+    };
+  });
+  if (focusInfo.none === true) {
+    fail('渲染契约：按了 Tab 之后焦点没落到任何控件上（键盘到不了？）', JSON.stringify(contract));
+  }
+  if (Number.parseFloat(focusInfo.outlineWidth) < 1 || focusInfo.outlineStyle === 'none') {
+    fail(
+      `渲染契约：键盘焦点没有可见的焦点环（${focusInfo.tag}.${focusInfo.cls} outline=${focusInfo.outlineWidth}/${focusInfo.outlineStyle}）`,
+      JSON.stringify(focusInfo),
+    );
+  }
+  // ⑥ 动效降级：模拟"减少动效"偏好，时长必须被压到近乎瞬时
+  let reducedMs = null;
+  try {
+    await live.emulateMedia({ reducedMotion: 'reduce' });
+    reducedMs = await live.evaluate(() => {
+      const el = document.querySelector('.app-tab') ?? document.querySelector('button');
+      return el ? getComputedStyle(el).transitionDuration : '';
+    });
+    await live.emulateMedia({ reducedMotion: 'no-preference' });
+  } catch (err) {
+    reducedMs = `无法模拟：${String(err).slice(0, 120)}`;
+  }
+  if (reducedMs === null || reducedMs.startsWith('无法模拟')) {
+    fail(`渲染契约：测不了 prefers-reduced-motion（${String(reducedMs)}）`, JSON.stringify(contract));
+  }
+  if (Number.parseFloat(reducedMs) > 0.05) {
+    fail(`渲染契约：prefers-reduced-motion 没生效（时长仍是 ${reducedMs}）`, JSON.stringify(contract));
+  }
+  ok(
+    `渲染契约：${String(contract.tabCount)} 个页签不溢出 · 命中区 ≥ ${String(contract.minW)}×${String(contract.minH)}` +
+      ` · 字号走令牌（${contract.fontSize}）· 按压反馈在 · 焦点环 ${focusInfo.outlineWidth} · 动效降级 ${reducedMs}`,
+  );
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;

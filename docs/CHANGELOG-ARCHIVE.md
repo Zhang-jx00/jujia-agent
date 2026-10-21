@@ -9,6 +9,65 @@
 ---
 ---
 
+## [v0.90.0-加固19 · provider 诚实批：把"没听说结束"与"跑完了"这两件事从数据里分开（R31）] — 2026-10-15 16:20
+
+**范围**：`packages/agent-core`（providers/types/loop/tools）· `packages/shared-ipc`（contracts + canvas-run）·
+`apps/desktop`（main 的 canvas-runner / renderer 的 done-notice / e2e 脚本）· 新增 `docs/DESIGN-T55-STREAM-END.md`。
+**零新依赖、零新通道、不碰权限映射**。
+
+1. **T55 定口径并落地：`no_end_marker` 这一态**（本轮最重）。
+   `streamChat` 里 `let finishReason: FinishReason = 'stop'` 一直是**初值**，全文件没有任何一处记录
+   "到底收到过结束标记没有" —— 代理 `proxy_read_timeout` 到点 `res.end()` 那种半截回答，
+   一路顶着 `stop` 出去：`length` / `content_filter` 那套区分全程不触发，
+   界面上**半截回答与完整回答长得一模一样**（比静默失败更糟，是**静默成功**）。
+   口径（`docs/DESIGN-T55-STREAM-END.md` §二）：**结束证据有两种，有一种就算写完** ——
+   `[DONE]` 或任何 `finish_reason`（含厂商自造的未知值，仍按 `stop` 收尾）；两条都没有 → `no_end_marker`。
+   **为什么不选"一律判截断"**：有一批自建端点从不发 `finish_reason`、只给 `[DONE]`，
+   把它们打成"不完整"会让这批厂商直接不可用 —— 兼容面写成**三条正面用例**钉住。
+   **为什么也不选"照旧算写完"**：那等于承认区分不了、然后替上游撒谎。
+   判定收在**一处** `endOfStream()`（与 T25 的 `assertProduced` 同纪律：两条收尾路径不许各写一份"算不算成功"）。
+2. **T56 与它是同一枚硬币**：`ToolCallAccumulator.finish()` 现在**必须**收到"流是怎么结束的"（参数必填，
+   漏传就编译不过）。空参数只在**有结束证据**时才当合法零参；没有结束证据时"这工具本来无参"与
+   "参数还没送到"分不出来 ⇒ 选副作用小的那边：**拒执行 + 说清原因**，不再猜一个 `{}` 交给 `run_tool`。
+   **顺序闸（本轮最容易写错的一格）**：`endOfStream()` 里必须**先问有没有证据、再问有没有工具调用** ——
+   反过来写，"空参数调用 + 断流"会拿到 `tool_calls` 这个结论、拼装器据此放行 `{}`，洞原样留着。
+   红证：把这两行调换，`openai-compat.test.ts` 那条新用例当堂红。
+3. **新增一态要动的五处，缺一处就是静默**：provider 判据 → `StreamEnd` / `TruncationReason`（用
+   `Exclude` 推，不另写字面量）→ 循环 `truncated` → 契约 `DONE_END_REASONS` → 界面穷举表
+   `DONE_REASON_NOTICE`（**新增成员不补文案就编译不过**，T58 那张表的价值在这里兑现）。
+4. **T54：命令的"跑完"与"跑对"分成两格机器可读数据**。`ToolOutcome.evidence` 新增 `exitCode`（`null` =
+   被信号结束、真的不知道，**不归 0**）与 `timedOut`；`run_command` 填上；
+   `canvas-runner` 把两者搬到 `NodeResult`；`canvas-run` 成功那一步的 note 由 `successNote()` 生成 ——
+   修之前**画布里一条失败的 `git push` 显示成 ok**（那句"退出码 128"只活在正文里，而节点状态是
+   `ok: res.outcome.ok`）。**判定一行没动**（非零退出仍是给模型的 information，报成工具失败会让模型
+   看不见 stdout/stderr 去瞎猜）；提示词节点与退出码 0 一律**不加噪声**（每次都出现的废话，三次之后没人看）。
+5. **T57 随批两条**：① 三条早退路径以前只 `releaseLock()`（"我不再读了"）不 `cancel()`
+   （"这条流我不要了"），上游连接留在池里直到它自己关 —— 改成 `finally` 一处收口，
+   清理动作自己报错不许盖掉真正的退出原因；② `network_error` 的文案只取 `err.message`，
+   而 undici 的真原因（`ECONNREFUSED` / `CERT_HAS_EXPIRED` / `SocketError`）在 `cause` 上 ——
+   **判定链早沿 `cause` 走四层、文案却没走**，五种故障在界面上是同一句话。新增 `causeText()`：
+   原话一个字不丢、真原因追加在括号里、仍过 `presentable`（剔密 + 截上界）。
+   ③ `child-process-gone` **不动代码**：这与 utilityProcess 迁移是同一题，是架构决定不是缺陷，登记为评估项。
+6. **两条"合法增长养瞎锁"当场换成结构判据**（本仓第五、第六次撞同一形状，见 `docs/DESIGN-T55-STREAM-END.md` §五）：
+   `truncation-wiring.test.ts` 抄字面量的那两条（`ev.reason === 'length' || …` 与契约数组）→
+   改钉"循环按除两种之外判"+"循环能带出的每种原因契约里都得有那一格（现扫 `StreamEnd ∪ FinishReason` 对账）"；
+   `stream-event.test.ts` 那条"成员清单就是那五个"→ 改成**出处对账**（每个契约成员必须能在源码里指出谁会发它，
+   说不出出处 = 死成员；`tool_calls` 依然被拒，因为它既不在主进程的赋值里也被循环吞掉）。
+   **两处都不是改阈值，是改判据**；校准都做了：从契约里摘掉 `no_end_marker` ⇒ 三条锁同时红；
+   塞进一个假成员 `rate_limited` ⇒ 出处锁点名它。
+7. **T55 的兼容面另有一条自己会红的历史**：`openai-compat.test.ts` 里"无 [DONE] 直接断流"那条用例
+   原本只断 `toMatchObject({type:'done'})` —— 它 **bless 了这个坏形状**。改成断
+   `{type:'done', reason:'no_end_marker'}`，并写明改的是判据、意图（"半截也要给个 done"）一字未动。
+
+**验证方式**：typecheck 0 · lint 0（1 条 warning 是自己写的 `import()` 内联类型，已改掉）·
+单测 **2080 通过 / 1 跳过（139 文件）**（本轮 +20 例）· e2e **64 → 65 步**（第 [65] 步真窗口验两件事：
+断流那句"没有给出结束标记"要出现、且**半截内容不许被丢**；空参数调用必须走 `[invalid_args]` 拒执行）·
+其余门禁与变异见 `docs/PROGRESS.md` 加固19 复跑块。
+
+**回退点**：`v0.89.0-规整18`（上一版；本轮全部改动可 `git revert` 单笔退回，无数据迁移、无格式变更）。
+
+---
+
 ## [v0.89.0-规整18 · 发布准备与两条新护栏：把"改完没人看得见"的两个形状变成闸门（R30）] — 2026-10-15 15:37
 
 **轨道**：**轨道整备计划 1**（滚动清理序列 R30 · 十轮新排期的第一轮）· **零新依赖**、**零产品运行时源码改动**。
