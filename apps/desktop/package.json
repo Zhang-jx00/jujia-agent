@@ -1,6 +1,6 @@
 {
   "name": "@jujia/desktop",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "description": "俱佳Agent：本地优先的 Windows 个人 Agent（副作用动作需确认，数据不出本机）",
   "main": "./out/main/index.js",

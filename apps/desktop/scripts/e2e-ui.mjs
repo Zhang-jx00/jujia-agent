@@ -3216,7 +3216,42 @@ try {
   writeFileSync(join(wsDir, r4DocFile), `# R4 长文档\n\n${r4DocHeads.join('\n')}\n`, 'utf8');
 
   await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
-  await win3.locator('.jj-docs-head .jj-field').first().fill(r4DocFile);
+  /**
+   * 填路径**之前必须等面板挂载那轮「恢复上次阅读」落地**，填完**必须核对**。
+   *
+   * 为什么（2026-10-21 实测踩到，R48 的 e2e 首跑就红在这一步）：
+   * 面板挂载时会**异步**恢复上次的阅读位置（T24 的设计 —— 那是产品该有的行为，不改产品），
+   * 而 Playwright 的 `fill()` 是「聚焦 → 全选 → 插入」三步 ——
+   * 恢复那一轮 React 重渲染正好落在「全选」与「插入」之间，
+   * 于是 input.value 被改回旧路径、**光标挪到末尾**，插入就变成**追加**：
+   * 现场路径被拼成 `.jujia/NOTES.mdr4-doc.md` ⇒ 文件读不到 ⇒ 这一步 15 秒超时红。
+   *
+   * 等法：**等输入框被恢复写过**（`DocPanel.open()` 里 `setPath(target)`）——
+   * 有可恢复的内容时它就非空；一直为空就说明**没有可撞的对象**，直接往下走（不等满）。
+   * 这一等是确定性的：等到了 ⇒ 恢复那一轮已经落地 ⇒ 后面不会再有第二次写。
+   * 填完再核对一次：不一致就**再填一次**（那时恢复早已落地，第二次是干净的）；
+   * 两次都不一致就当场红（那就不是竞态，是产品行为变了，不能靠重试盖过去）。
+   */
+  const docPathField = win3.locator('.jj-docs-head .jj-field').first();
+  try {
+    await win3.waitForFunction(
+      () => {
+        const el = document.querySelector('.jj-docs-head .jj-field');
+        return el instanceof HTMLInputElement && el.value !== '';
+      },
+      null,
+      { timeout: 5_000 },
+    );
+  } catch {
+    // 没有可恢复的内容（输入框一直是空的）⇒ 没有可撞的对象，继续
+  }
+  await docPathField.fill(r4DocFile);
+  if ((await docPathField.inputValue()) !== r4DocFile) {
+    await docPathField.fill(r4DocFile);
+    if ((await docPathField.inputValue()) !== r4DocFile) {
+      fail('文档路径框里不是目标路径（面板恢复上次阅读与填值反复撞车）', await docPathField.inputValue());
+    }
+  }
   await win3.locator('.jj-docs-head button', { hasText: '打开' }).first().click();
   if ((await waitText3('已显示前 240 /', 15_000)) !== true) {
     fail('长文档没有分块挂载（这一步后面三条断言都建立在"分了块"上）', await body3());
