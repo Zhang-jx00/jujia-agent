@@ -667,9 +667,9 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
             新会话
           </button>
         )}
-        {sessionId && <span className="p0-subtitle">会话 {sessionId.slice(0, 8)}</span>}
+        {sessionId && <span className="w2-chat-meta">会话 {sessionId.slice(0, 8)}</span>}
         {historyTotal > 0 && (
-          <span className="p0-subtitle">{`共 ${String(historyTotal)} 条（重启后仍在磁盘上）`}</span>
+          <span className="w2-chat-meta">{`共 ${String(historyTotal)} 条（重启后仍在磁盘上）`}</span>
         )}
         {/*
           「已压缩至第 N 条」= 这一版摘要**覆盖了到哪一条**（报备 §五）。
@@ -698,7 +698,7 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
           </button>
         )}
         {usage && (
-          <span className="p0-subtitle">
+          <span className="w2-chat-meta">
             tokens: 入 {usage.input} / 出 {usage.output}
           </span>
         )}

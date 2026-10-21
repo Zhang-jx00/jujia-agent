@@ -4379,9 +4379,149 @@ try {
   if (Number.parseFloat(reducedMs) > 0.05) {
     fail(`渲染契约：prefers-reduced-motion 没生效（时长仍是 ${reducedMs}）`, JSON.stringify(contract));
   }
+  /**
+   * ⑦ 画布：第三方（react-flow）的**出厂默认样式**不许漏进本仓的深色主题（R45 · 视觉现扫）。
+   *
+   * 为什么单独立一条：现扫实测 —— 画布节点外壳是 **252×238px 的纯白底**
+   * （`.react-flow__node-default` 出厂默认 `background: white`），缩放控件是 **26×26px 的近白底**
+   * 按钮（图标与底对比 1.08:1，几乎看不见）。
+   * 这些**在本仓源码里"看着对"**（本仓根本没写过这些类名）⇒ **静态检查看不见**，
+   * 只有真窗口里量得到 —— 与 R42/R43 同一条结论（写死的颜色看不见、坏掉的样式看不见）。
+   *
+   * 判据形状：**底色亮度**（白底 ⇒ 相对亮度 > 0.5）+ **命中区下限 32×32** + **图标与底对比 ≥ 4.5**。
+   */
+  await live.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  await live.waitForSelector('.react-flow__controls-button', { timeout: 15_000 });
+  const canvasLook = await live.evaluate(() => {
+    const btn = document.querySelector('.react-flow__controls-button');
+    const svg = btn ? btn.querySelector('svg') : null;
+    const node = document.querySelector('.react-flow__node-default');
+    const r = btn ? btn.getBoundingClientRect() : null;
+    return {
+      btnBg: btn ? getComputedStyle(btn).backgroundColor : '',
+      btnFill: svg ? getComputedStyle(svg).fill : '',
+      btnW: r ? Math.round(r.width) : 0,
+      btnH: r ? Math.round(r.height) : 0,
+      nodeBg: node ? getComputedStyle(node).backgroundColor : '',
+      nodeFound: node !== null,
+    };
+  });
+  /** CSS 颜色串 → 相对亮度（只认 rgb()/rgba()：本仓的颜色算出来都是这个形状） */
+  const relLum = (css) => {
+    const m = /rgba?\(([^)]+)\)/.exec(String(css));
+    if (m === null) return null;
+    const p = m[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+    if (p.length < 3 || p.some((v) => Number.isNaN(v))) return null;
+    const f = (v) => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * f(p[0]) + 0.7152 * f(p[1]) + 0.0722 * f(p[2]);
+  };
+  const lumRatio = (a, b) => {
+    const L1 = relLum(a);
+    const L2 = relLum(b);
+    if (L1 === null || L2 === null) return null;
+    const hi = Math.max(L1, L2);
+    const lo = Math.min(L1, L2);
+    return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+  };
+  const btnLum = relLum(canvasLook.btnBg);
+  if (btnLum === null) {
+    fail('渲染契约：量不到画布缩放控件的底色（选择器或结构变了 —— 契约要跟着改）', JSON.stringify(canvasLook));
+  }
+  if (btnLum > 0.5) {
+    fail(
+      '渲染契约：画布缩放控件是白底（react-flow 出厂默认漏进了深色主题）：' + canvasLook.btnBg,
+      JSON.stringify(canvasLook),
+    );
+  }
+  if (canvasLook.btnW < 32 || canvasLook.btnH < 32) {
+    fail(
+      '渲染契约：画布缩放控件命中区只有 ' +
+        String(canvasLook.btnW) +
+        '×' +
+        String(canvasLook.btnH) +
+        '（下限 32×32）',
+      JSON.stringify(canvasLook),
+    );
+  }
+  const iconRatio = lumRatio(canvasLook.btnFill, canvasLook.btnBg);
+  if (iconRatio !== null && iconRatio < 4.5) {
+    fail(
+      '渲染契约：画布缩放控件的图标与底对比只有 ' + String(iconRatio) + '（AA 4.5）',
+      JSON.stringify(canvasLook),
+    );
+  }
+  if (canvasLook.nodeFound) {
+    const nodeLum = relLum(canvasLook.nodeBg);
+    if (nodeLum !== null && nodeLum > 0.5) {
+      fail(
+        '渲染契约：画布节点外壳是白底（react-flow 出厂默认漏进了深色主题）：' + canvasLook.nodeBg,
+        JSON.stringify(canvasLook),
+      );
+    }
+  }
+
+  /**
+   * ⑧ 窄窗口（应用允许的最小宽度 940px）：页签标签**不许被压成竖排单字**（R45 · 视觉现扫）。
+   *
+   * 实测（改之前）：940px 下 **15 个页签全部被逐字换行**（"概/览"两行），
+   * 页签高从 33px 涨到 52px、标题「俱佳Agent」被压成两行（29→58px）——
+   * 读起来像一排竖着的单字，而不是 15 个页签。
+   * 修法：`.app-tab { white-space: nowrap }` + `.app-tabs { flex-wrap: wrap }`。
+   *
+   * 判据：**页签最高高度 ≤ 40px**（单行）且**标题高度 ≤ 40px**（不许折行）。
+   * 用"高度"而不是查 `white-space` 的计算值：高度是**渲染结果**，
+   * 查计算值等于把判据架在"我写的那行 CSS 上"，而不是"用户看到的样子"。
+   */
+  const beforeSize = await app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows()[0];
+    if (!w) return null;
+    const s = w.getSize();
+    w.setSize(940, 620);
+    return { w: s[0], h: s[1] };
+  });
+  await live.waitForTimeout(900);
+  const narrow = await live.evaluate(() => {
+    const tabs = [...document.querySelectorAll('.app-tab')];
+    const boxes = tabs.map((el) => el.getBoundingClientRect());
+    const title = document.querySelector('.p0-title');
+    return {
+      tabCount: tabs.length,
+      maxH: boxes.length ? Math.round(Math.max(...boxes.map((b) => b.height))) : 0,
+      titleH: title ? Math.round(title.getBoundingClientRect().height) : 0,
+    };
+  });
+  if (beforeSize !== null) {
+    await app.evaluate(({ BrowserWindow }, s) => {
+      const w = BrowserWindow.getAllWindows()[0];
+      if (w) w.setSize(s.w, s.h);
+    }, beforeSize);
+    await live.waitForTimeout(400);
+  }
+  if (narrow.tabCount === 0) {
+    fail('渲染契约：窄窗口下一条页签都没找到（选择器或结构变了）', JSON.stringify(narrow));
+  }
+  if (narrow.maxH > 40) {
+    fail(
+      '渲染契约：窄窗口（940px）下页签被压成多行（最高 ' +
+        String(narrow.maxH) +
+        'px —— 标签不许折行）',
+      JSON.stringify(narrow),
+    );
+  }
+  if (narrow.titleH > 40) {
+    fail(
+      '渲染契约：窄窗口（940px）下标题被压成多行（' + String(narrow.titleH) + 'px）',
+      JSON.stringify(narrow),
+    );
+  }
   ok(
     `渲染契约：${String(contract.tabCount)} 个页签不溢出 · 命中区 ≥ ${String(contract.minW)}×${String(contract.minH)}` +
-      ` · 字号走令牌（${contract.fontSize}）· 按压反馈在 · 焦点环 ${focusInfo.outlineWidth} · 动效降级 ${reducedMs}`,
+      ` · 字号走令牌（${contract.fontSize}）· 按压反馈在 · 焦点环 ${focusInfo.outlineWidth} · 动效降级 ${reducedMs}` +
+      ` · 画布控件非白底（${canvasLook.btnBg}，命中区 ${String(canvasLook.btnW)}×${String(canvasLook.btnH)}）` +
+      ` · 940px 下页签不折行（最高 ${String(narrow.maxH)}px）`,
   );
 
   step('关闭应用：应干净退出（不留孤儿进程）');
