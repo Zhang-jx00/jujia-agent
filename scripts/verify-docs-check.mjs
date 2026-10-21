@@ -550,6 +550,30 @@ const cases = [
     to: 'font-size: 13px;',
     expect: '字号只许走令牌',
   },
+  {
+    // 第 34 条（渲染层样式表里的颜色只许走令牌 · R42）：
+    // 把一处颜色令牌改回写死的 hex。
+    // 挑这一条的理由很具体：**颜色比字号更危险** —— 本轮现扫到"同一个主色两个值"
+    // （令牌 `#4c8dff` vs 样式表里的旧蓝 `rgb(47,111,235)`），
+    // 而**渲染结果里看不出"这个蓝是旧版留下的"**，只看得见"有点怪"。
+    // 判据若失效，同形的漂移会悄无声息地再长出来。
+    name: '渲染层样式表里又出现了写死的颜色',
+    file: 'apps/desktop/src/renderer/src/styles.css',
+    from: 'color: var(--c-danger);',
+    to: 'color: #ff7875;',
+    expect: '写死的颜色',
+  },
+  {
+    // 第 34 条的第二路：整条值令牌被拼坏（`0 12px 40px` + 整条 `--shadow-dialog`）。
+    // 为什么单独立一条：**它是无效声明，渲染上看不出来**（box-shadow 整条失效 ⇒ 只是少一层阴影），
+    // 而"还有没有写死颜色"那条判据**扫不到它**（里面没有颜色字面量了）——
+    // 这类"拼坏"只能靠判据自己盯住。
+    name: 'box-shadow 里的整条阴影令牌被拼坏',
+    file: 'apps/desktop/src/renderer/src/styles.css',
+    from: 'box-shadow: var(--shadow-dialog);',
+    to: 'box-shadow: 0 12px 40px var(--shadow-dialog);',
+    expect: '只能**整条**用',
+  },
 ];
 
 /**

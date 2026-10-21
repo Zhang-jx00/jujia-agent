@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import stat
 import sys
 import time
 from pathlib import Path
@@ -141,7 +142,36 @@ def collect_legacy() -> list:
     return out
 
 
-def purge_old_trash(apply: bool) -> int:
+def force_remove(path: Path) -> None:
+    """删一棵目录树，**先摘掉只读位**。
+
+    为什么需要这一层（2026-10-21 实测）：回收站里躺着 e2e 工作区，
+    里面的 `.git/objects/**` 是 **git 故意设成只读**的对象文件 ——
+    Windows 上 `shutil.rmtree` 碰到它们直接 `PermissionError: [WinError 5] 拒绝访问`，
+    整棵删除就停在那儿（脚本的纪律是"删除失败立即停止并报告"，所以它**如实停了**，
+    没有静默跳过 —— 那一轮删掉了 41 个批次、剩下 78 个没动）。
+    ⇒ 删除前把只读位摘掉（`os.chmod(p, stat.S_IWRITE)`），再删。
+    """
+    def _onerror(func, p, exc):  # noqa: ANN001 - shutil 回调签名固定
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except Exception:
+            raise exc[1]
+
+    if path.is_dir():
+        shutil.rmtree(path, onerror=_onerror)
+    else:
+        os.chmod(path, stat.S_IWRITE)
+        path.unlink()
+
+
+def purge_old_trash(apply: bool, keep_days: int = TRASH_KEEP_DAYS) -> int:
+    """真删回收站里**超期**的批次（默认 30 天 = 本项目自己承诺的可反悔窗口）。
+
+    `keep_days=0` 表示**连窗口内的也一并真删** —— 那是"所有者明确要求清空临时垃圾"才走的路，
+    必须与超期清理分开写清楚，免得哪天有人把默认值改小就静默扩大了删除面。
+    """
     if not TRASH.is_dir():
         return 0
     now = time.time()
@@ -151,12 +181,36 @@ def purge_old_trash(apply: bool) -> int:
             age_days = (now - item.stat().st_mtime) / 86400
         except OSError:
             continue
-        if age_days > TRASH_KEEP_DAYS:
-            print(f"  回收站超期（{age_days:.0f} 天）：{item.relative_to(PROJECT)}")
+        if age_days > keep_days:
+            label = "回收站条目（全量模式）" if keep_days == 0 else f"回收站超期（{age_days:.0f} 天）"
+            print(f"  {label}：{item.relative_to(PROJECT)}")
             if apply:
-                shutil.rmtree(item, ignore_errors=False) if item.is_dir() else item.unlink()
+                force_remove(item)
                 n += 1
     return n
+
+
+def trash_inventory() -> tuple[int, int]:
+    """量一下回收站：批次数与总字节（用于决定"要不要清"时先看数字，不凭感觉）。"""
+    if not TRASH.is_dir():
+        return (0, 0)
+    n = 0
+    total = 0
+    for item in TRASH.iterdir():
+        n += 1
+        if item.is_dir():
+            for p in item.rglob("*"):
+                if p.is_file():
+                    try:
+                        total += p.stat().st_size
+                    except OSError:
+                        pass
+        else:
+            try:
+                total += item.stat().st_size
+            except OSError:
+                pass
+    return (n, total)
 
 
 def unique_dest(dest: Path) -> Path:
@@ -190,7 +244,15 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="俱佳Agent 任务收尾清理")
     ap.add_argument("--apply", action="store_true", help="实际执行（默认仅预览）")
     ap.add_argument("--purge-trash", action="store_true", help="同时真删 .trash 中超期条目")
+    ap.add_argument(
+        "--purge-trash-all",
+        action="store_true",
+        help="**连 30 天窗口内的也真删**（所有者明确要求清空临时垃圾时才用；与 --purge-trash 互斥）",
+    )
     args = ap.parse_args()
+    if args.purge_trash and args.purge_trash_all:
+        print("--purge-trash 与 --purge-trash-all 互斥（前者只删超期，后者全删）", file=sys.stderr)
+        return 2
 
     temp_files, empty_files, empty_noted, stale_dirs = collect()
     legacy = collect_legacy()
@@ -218,10 +280,15 @@ def main() -> int:
     print("执行顺序：整只目录先搬，文件条目后搬；已随上层目录一起走的条目会跳过并如实计数。")
 
     n_purged = 0
-    if args.purge_trash and TRASH.is_dir():
+    if (args.purge_trash or args.purge_trash_all) and TRASH.is_dir():
         print("-" * 62)
-        print(f"回收站超期检查（>{TRASH_KEEP_DAYS} 天）：")
-        n_purged = purge_old_trash(args.apply)
+        if args.purge_trash_all:
+            n_batches, n_bytes = trash_inventory()
+            print(f"回收站全量清空（所有者明确要求时）：{n_batches} 个批次 / {n_bytes / 1024 / 1024:.1f} MB")
+            n_purged = purge_old_trash(args.apply, keep_days=0)
+        else:
+            print(f"回收站超期检查（>{TRASH_KEEP_DAYS} 天）：")
+            n_purged = purge_old_trash(args.apply)
 
     if not plan and not n_purged:
         print("\n没有需要清理的内容，项目已干净 ✓")

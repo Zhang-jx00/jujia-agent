@@ -69,7 +69,7 @@ body {
 }
 
 .app-tab-active {
-  background: rgba(47, 111, 235, 0.16);
+  background: var(--c-primary-wash);
   border-color: var(--primary);
   color: var(--text);
 }
@@ -143,11 +143,11 @@ body {
 }
 
 .p0-err {
-  color: #ff7875;
+  color: var(--c-danger);
 }
 
 code {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--c-overlay-weak);
   padding: 1px 4px;
   border-radius: 4px;
 }
@@ -172,7 +172,7 @@ code {
 input,
 select,
 textarea {
-  background: #101010;
+  background: var(--c-bg-input);
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text);
@@ -231,12 +231,12 @@ button.w2-btn-danger {
 button.w2-btn-primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--c-text-strong);
 }
 
 button.w2-btn-danger {
-  color: #ff9c9c;
-  border-color: rgba(207, 34, 46, 0.5);
+  color: var(--c-danger-strong);
+  border-color: var(--c-danger-border);
 }
 
 button:disabled {
@@ -316,12 +316,12 @@ button:disabled {
 
 .w2-bubble-user {
   align-self: flex-end;
-  background: rgba(47, 111, 235, 0.18);
+  background: var(--c-primary-wash-strong);
 }
 
 .w2-bubble-agent {
   align-self: flex-start;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--c-overlay-faint);
 }
 
 .w2-bubble-role {
@@ -365,7 +365,7 @@ button:disabled {
 /* --------- 多模态附件（M11 批一）：待发清单 / 拖动高亮 / "未保留"标记 --------- */
 
 .w2-chat-input.w2-chat-input-drag {
-  outline: 1px dashed rgba(47, 111, 235, 0.65);
+  outline: 1px dashed var(--c-primary-outline);
   outline-offset: 4px;
 }
 
@@ -423,7 +423,7 @@ button:disabled {
 .w3-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--c-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -436,7 +436,7 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 20px 24px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-dialog);
 }
 
 .w3-dialog h3 {
@@ -446,7 +446,7 @@ button:disabled {
 
 .w3-dialog pre,
 .w3-probe pre {
-  background: #101010;
+  background: var(--c-bg-input);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 10px;
@@ -919,7 +919,7 @@ summary:focus-visible {
  * 现在指回真正的根；并由 styles-wiring 的"属性门控 → 目标类名"锁看着这一跳。
  */
 html[data-jj-bg-kind='gradient'] .app-root {
-  background: linear-gradient(180deg, var(--jj-bg-from, #141414), var(--jj-bg-to, #141414));
+  background: linear-gradient(180deg, var(--jj-bg-from, var(--c-bg-layout)), var(--jj-bg-to, var(--c-bg-layout)));
 }
 
 html[data-jj-bg-kind='image'] .app-root {
@@ -934,12 +934,12 @@ html[data-jj-bg-kind='image'] .app-root::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--c-scrim);
   pointer-events: none;
 }
 
 html[data-jj-bg-kind='glass'] .app-root {
-  background: color-mix(in srgb, var(--jj-bg-color, #1f1f1f) calc(var(--jj-bg-opacity, 1) * 100%), transparent);
+  background: color-mix(in srgb, var(--jj-bg-color, var(--c-bg-container)) calc(var(--jj-bg-opacity, 1) * 100%), transparent);
   backdrop-filter: blur(var(--jj-bg-blur, 0px));
 }
 
@@ -1208,7 +1208,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   align-items: flex-start;
   gap: 8px;
   padding: 6px 8px;
-  border: 1px solid var(--border, #2a2f36);
+  border: 1px solid var(--border, var(--c-border-muted));
   border-radius: 6px;
   font-size: var(--fs-body);
   line-height: 1.5;
@@ -1584,7 +1584,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 }
 
 .jj-md-pre {
-  background: #101010;
+  background: var(--c-bg-input);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px;
@@ -1702,7 +1702,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 .jj-pdf-canvas {
   max-width: 100%;
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--c-text-strong);
 }
 
 /* 逐行 diff：加/删行各自着色，其余原样（与 Git 页同一套观感） */
@@ -1719,7 +1719,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 }
 
 .jj-patch-del {
-  color: #ff7875;
+  color: var(--c-danger);
 }
 
 /* ---------------------- 无限画布（M9a：图列表 + 画布 + 节点卡片） ---------------------- */
@@ -1799,7 +1799,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 
 .jj-canvas-node-failed,
 .jj-canvas-node-denied {
-  border-color: #ff7875;
+  border-color: var(--c-danger);
 }
 
 /* ---- B2：局部重跑的"重跑段"小标 ---- */
@@ -2030,7 +2030,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   border-radius: var(--radius);
   background: var(--bg-container);
   color: var(--text);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 35%);
+  box-shadow: var(--shadow-soft);
 }
 
 .jj-failure-notice__text {

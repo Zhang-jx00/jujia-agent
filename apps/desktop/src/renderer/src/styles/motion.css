@@ -31,6 +31,18 @@
   --c-border-strong: rgba(255, 255, 255, 0.28);
   --c-scrim: rgba(0, 0, 0, 0.55);
 
+  /* ---------- 派生色（R42 新增）：都从既有令牌派生，不新增"气氛色" ---------- */
+  --c-primary-wash: color-mix(in srgb, var(--c-primary) 16%, transparent); /* 主色淡底（**旧值是 rgba(47,111,235,.16) 的旧蓝 ⇒ 归一是刻意的视觉修正**） */
+  --c-primary-wash-strong: color-mix(in srgb, var(--c-primary) 18%, transparent); /* 主色淡底（强一档；旧值同为旧蓝） */
+  --c-primary-outline: color-mix(in srgb, var(--c-primary) 65%, transparent); /* 主色虚线轮廓（旧值同为旧蓝） */
+  --c-danger-strong: #ff9c9c;          /* 危险色的**浅色变体**（危险文案压在小字上时用） */
+  --c-danger-border: rgba(207, 34, 46, 0.5); /* 危险态的边框色（红，不与主色混） */
+  --c-text-strong: #fff;               /* 纯白（比 --c-text 更亮的一档，只给极少数"要跳出来"的文字） */
+  --c-overlay-weak: rgba(255, 255, 255, 0.08); /* 白 8% 的覆盖层（浮层底/分隔） */
+  --c-overlay-faint: rgba(255, 255, 255, 0.05); /* 白 5% 的覆盖层（更淡的一档） */
+  --c-border-muted: #2a2f36;           /* 更弱的边框（原来是 var(--border, #2a2f36) 的兜底值） */
+  --shadow-soft: 0 6px 18px rgb(0 0 0 / 35%); /* 比 --shadow-popover 更轻的一档阴影 */
+
   /* ---------- 间距 ---------- */
   --space-xxs: 2px;
   --space-xs: 4px;
@@ -176,15 +188,30 @@
   transform: rotate(180deg);
 }
 
-/* ==================== 按压与悬停反馈统一接入（R18） ====================
+/* ==================== 按压与悬停反馈统一接入（R18 · R42 扩面） ====================
  * 原先只有 6 个文件手动挂 `.jj-pressable`，页签与各档按钮按下去没有任何反馈。
  * 这里按"可点元素家族"统一给 100ms 的轻微缩放（motion.css 铁律：微交互 100–200ms）。
+ *
+ * **R42 的扩面与它的理由**：R18 列的是**家族清单**（`.app-tab` / `button.jj-btn` / …），
+ * 而**清单必然漏** —— 现扫 16 个 `cursor: pointer` 家族，**9 个没被提到**：
+ * `.w2-attach-remove` · `.jj-pack` · `.jj-git-link` · `.jj-palette-item` ·
+ * `.jj-canvas-menu button` · `.jj-failure-notice__close`（**全是 `<button>`**）
+ * 与两处 `<summary>`（`.jj-import summary` · `.w3-dialog details summary`）。
+ * ⇒ **按家族列清单是错的路**（补完这 9 个，下一个新按钮又会漏）。
+ * ⇒ 改成：**所有原生可点标签一律有反馈**（`button` / `summary`），
+ * 自绘的可点元素仍用**具名选择器**（`.app-tab` / `.jj-tool-l0`）——
+ * 清单只负责"不是原生标签"的那一小部分。
+ * （`.w2-chip` / `.jj-perm-mode` / `.jj-perm-rule-main` / `.jj-mcp-tools label` 是
+ * **标签**而不是可点的按钮 —— 它们包着 `input` / `radio` / `checkbox`，
+ * 真正的焦点与反馈在**里面的那个原生控件**上，标签自己不该缩放。）
  */
 .app-tab,
+button,
 button.jj-btn,
 button.w2-btn,
 button.w2-btn-primary,
 button.w2-btn-danger,
+summary,
 .jj-tool-l0 {
   transition:
     transform var(--motion-duration-instant) var(--motion-ease-in),
@@ -194,10 +221,12 @@ button.w2-btn-danger,
 }
 
 .app-tab:active,
+button:active:not(:disabled),
 button.jj-btn:active:not(:disabled),
 button.w2-btn:active:not(:disabled),
 button.w2-btn-primary:active:not(:disabled),
 button.w2-btn-danger:active:not(:disabled),
+summary:active,
 .jj-tool-l0:active {
   transform: scale(0.97);
 }

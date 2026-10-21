@@ -2304,6 +2304,94 @@ const walkLiveFiles = (exts) => {
   );
 }
 /* ------------------------------------------------------------------ *
+ * 34. 渲染层样式表里的颜色不许写死（只许令牌）· R42
+ *
+ * 为什么立它：与第 33 条同源 —— 令牌层（W6）与 `docs/DESIGN-BASELINE.md` 的纪律
+ * 都写着"不许硬编码颜色"，**但那条一直不是机器判据**。R41 只把**字号**收进了令牌，
+ * 颜色这一批留到本轮（因为里面混着"同一个主色两个值"，要先判清该用哪个）。
+ *
+ * 判据形状：扫主样式表 `styles.css` 的每一条颜色声明 —— 值必须**只由令牌构成**
+ * （`var(--c-*)` / `var(--shadow-*)` / `color-mix(...)` 这类由令牌派生的写法）；
+ * **写死的 hex / rgb() / rgba() 一律红**。
+ * （令牌文件 `styles/motion.css` 里的字面值是**令牌本体**，不扫 —— 那正是它的定义处。）
+ *
+ * **另外两条一起判**（都是本轮真踩到的形状）：
+ *   ① `box-shadow` 必须是**整条令牌**（`var(--shadow-*)`）——
+ *      写成 `box-shadow: 0 12px 40px var(--shadow-dialog)` 是**无效声明**
+ *      （阴影值被拼在了偏移量后面）⇒ **渲染上看不出来**（只是少了一层阴影），
+ *      静态扫"还有没有写死颜色"也扫不到它 ⇒ **只能单独立一条判据**。
+ *   ② 同理，任何 `var(--x, <字面量>)` 的**兜底值**都不许是颜色 ——
+ *      兜底只在令牌不存在时生效，而令牌永远存在 ⇒ 兜底是历史残留。
+ * ------------------------------------------------------------------ */
+{
+  const styleRel = 'apps/desktop/src/renderer/src/styles.css';
+  const motionRel = 'apps/desktop/src/renderer/src/styles/motion.css';
+  const bad = [];
+  let tokenRefs = 0;
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '');
+
+  // ① 主样式表：颜色只许走令牌
+  if (!exists(styleRel)) {
+    bad.push(`${styleRel} 不在了 —— 这条守卫的定位器要跟着改`);
+  } else {
+    strip(read(styleRel))
+      .split('\n')
+      .forEach((l, i) => {
+        for (const m of l.matchAll(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|rgb\([^)]*\)|hsla?\([^)]*\)/g)) {
+          bad.push(`${styleRel}:${String(i + 1)}  写死的颜色 ${m[0].slice(0, 30)}`);
+        }
+        // ② 整条值的令牌不许被拼坏（`var(--shadow-*)` 只能整条用）
+        //    注意：`inset 0 0 0 1px var(--c-primary)`（用颜色令牌自建的环）是**合法**的，
+        //    所以这里只抓"整条阴影令牌被塞进了还有别的东西的值里"这一种形状。
+        const bs = /box-shadow:\s*([^;]+);/.exec(l);
+        if (
+          bs !== null &&
+          /var\(--shadow-/.test(bs[1]) &&
+          !/^var\(--shadow-[a-z0-9-]+\)$/.test(bs[1].trim())
+        ) {
+          bad.push(
+            `${styleRel}:${String(i + 1)}  box-shadow 里的 --shadow-* 只能**整条**用：${bs[1].trim().slice(0, 40)}`,
+          );
+        }
+        // ③ var(--x, <字面量>) 的兜底不许是颜色
+        for (const m of l.matchAll(/var\(--[a-z0-9-]+,\s*(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\))/g)) {
+          bad.push(`${styleRel}:${String(i + 1)}  var() 的兜底值不该是颜色：${m[0].slice(0, 40)}`);
+        }
+        tokenRefs += (l.match(/var\(--c-|var\(--shadow-/g) ?? []).length;
+      });
+  }
+  // 令牌文件里同样不许出现"拼坏的整条值令牌"
+  if (!exists(motionRel)) {
+    bad.push(`${motionRel} 不在了 —— 这条守卫的定位器要跟着改`);
+  } else {
+    strip(read(motionRel))
+      .split('\n')
+      .forEach((l, i) => {
+        const bs = /box-shadow:\s*([^;]+);/.exec(l);
+        if (
+          bs !== null &&
+          /var\(--shadow-/.test(bs[1]) &&
+          !/^var\(--shadow-[a-z0-9-]+\)$/.test(bs[1].trim())
+        ) {
+          bad.push(
+            `${motionRel}:${String(i + 1)}  box-shadow 里的 --shadow-* 只能**整条**用：${bs[1].trim().slice(0, 40)}`,
+          );
+        }
+      });
+  }
+  // 防失焦下限：令牌引用太少 ⇒ 扫描没走到该走的地方（恒绿比没有锁更坏）
+  if (tokenRefs < 50) {
+    bad.push(`只扫到 ${String(tokenRefs)} 处颜色令牌引用（少于 50 处）—— 扫描或样式表形状变了`);
+  }
+  report(
+    '渲染层样式表里的颜色只许走令牌（整条值令牌不许被拼坏 · R42）',
+    bad.length === 0,
+    '颜色只许用 --c-* / --shadow-* 令牌（或由令牌派生的 color-mix）—— ' +
+      '写死颜色就是"下一处漂移"，而**同一个主色两个值**更要命。\n     ' +
+      bad.join('\n     '),
+  );
+}
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 
