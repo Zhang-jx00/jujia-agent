@@ -269,24 +269,29 @@ export function PermissionRulesPanel(): ReactElement {
           </div>
           <p className="p0-subtitle">
             匹配语法：<code>*</code> 任意字符（不跨路径分隔符）、<code>**</code> 任意字符、
-            <code>?</code> 单个字符。命令前缀按<b>字面</b>匹配命令行的开头（不是 glob），
-            只有声明了自己命令行参数的工具参与 —— 目前只有 <code>run_command</code>。
-            前缀没匹配上、或命令里带了 <code>|</code> <code>&amp;</code> <code>;</code>
+            <code>?</code> 单个字符。命令前缀**不是 glob**，它比的是命令行里的
+            <b>程序名</b>与<b>参数</b>两段（程序名去引号、去目录、剥 <code>.exe</code> 这类可执行扩展名后逐字比，
+            参数按整词比）—— 只有声明了自己命令行参数的工具参与，目前只有 <code>run_command</code>。
+            命令里带 <code>|</code> <code>&amp;</code> <code>;</code>
             这类组合符时，规则一律<b>不生效</b>，执行类命令仍会照常问你一次（少拦住一次不等于多放行一次）。
           </p>
           {/*
-            T52（2026-10-15）：这一格到底管多大范围，界面要自己说出口。
-            "字面匹配开头"意味着一次改写形态就绕得开 —— 这是**当下真实的行为**，
-            不是悲观假设（收紧到按 argv 逐词比对要动"用户写下的承诺算不算数"，属待决策项）。
-            不写这句话的代价很具体：用户以为 `deny git push` 拦得住推送，于是别再检查。
+            T52（R47 · 2026-10-21）：这一格到底管多大范围，界面要自己说出口。
+            收紧之前这里写的是"改写形态会被绕开"—— 那是**当时真实的行为**，
+            收紧之后（程序名 + 参数两段比）那三种形态已经拦得住，
+            而**仍然管不到**的换成了另外两类（参数插在中间、套一层 shell）。
+            界面必须跟着判定一起改：留着旧句子 = 界面在宣称一件今天不成立的事。
           */}
           <p className="p0-warn">
-            <b>但请看清这一格的边界</b>：前缀是按<b>字面</b>比对的，所以
-            <code>git.exe push</code>、<code>"git" push</code>、<code>C:\...\git\cmd\git.exe push</code>
-            这类<b>改写形态</b>不会被 <code>deny git push</code> 命中 —— 写得越具体，越容易被绕开一步。
-            组合符（<code>|</code> <code>&amp;</code> <code>;</code>）那条虽然让规则<b>不生效</b>，
-            执行类命令<b>还是会问你</b>一次；真正会漏的只有上面这种"同一条命令换了个写法"。
-            把匹配收紧到逐词比对会改动既有规则的范围（收紧侧保守、放行侧就是放行），这条还没定。
+            <b>这一格比的是「程序名 + 参数」两段</b>：程序名去引号、去目录、剥 <code>.exe</code> 这类可执行扩展名后逐字比，
+            所以 <code>git.exe push</code>、<code>"git" push</code>、<code>C:\...\git\cmd\git.exe push</code>
+            都会被 <code>deny git push</code> 命中；参数按整词比（<code>git push</code> 管得住 <code>git push --force</code>，
+            管不住 <code>git pushx</code>）。
+            <br />
+            <b>仍管不到的两类改写形态</b>：参数插在中间（<code>git -C x push</code>）与套一层 shell
+            （<code>cmd /c git push</code>）—— 前缀证明不了整条命令做什么。
+            命令里带 <code>|</code> <code>&amp;</code> <code>;</code> 时规则<b>不生效</b>，
+            但执行类命令<b>还是会问你</b>一次；真正会漏的只有上面那两类。
           </p>
         </div>
 

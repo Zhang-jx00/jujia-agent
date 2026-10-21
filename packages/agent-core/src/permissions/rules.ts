@@ -15,18 +15,27 @@
  * 4. 同一条规则命中多个动作时取**最严格**的一侧（deny > ask > allow），
  *    与 MCP 工具分级里"自相矛盾取更严格一侧"是同一条原则。
  *
+ * 为什么不开命令级 `allow`：`alwaysAllow` 按工具名记，已经等于"以后不再问这个工具"；
+ * 再往下开"以后不再问这条命令的前缀"就是让一句话永久放行一段可被拼接的命令行，
+ * 那是**权限映射**的改动，需要单独拍板，不在收尾里顺手做（校验层直接拒，见 checkRuleInput）。
+ *
  * 「按参数匹配」做到哪一步了（M4 收尾 · 其一，2026-10-09）：
  * 只做了**命令前缀**这一种，且只用于**收紧**（deny / ask）。前提是这里说的那件事已经成立 ——
  * 工具自己声明"哪条参数是命令行"（`ToolDefinition.commandArg`，目前只有 `run_command` 声明了它）。
  * 没声明的工具**一律不参与**前缀匹配：把"这条工具没有命令参数"当成"空命令"去匹配，
  * 就会让一条写来管 `rm` 的规则莫名其妙管到别的工具上 —— 那是假能力，也是误伤。
  *
- * 为什么不开命令级 `allow`：`alwaysAllow` 按工具名记，已经等于"以后不再问这个工具"；
- * 再往下开"以后不再问这条命令的前缀"就是让一句话永久放行一段可被拼接的命令行，
- * 那是**权限映射**的改动，需要单独拍板，不在收尾里顺手做（校验层直接拒，见 checkRuleInput）。
+ * 「命令前缀」怎么比（R47 · T52 收紧，2026-10-21）：
+ * 原先比的是**整串字面开头**，于是 `git.exe push` / `"git" push` /
+ * `C:\Program Files\Git\cmd\git.exe push` 三种改写形态全都绕得开 ——
+ * 用户写下的 `deny git push` 是"不许推送"的承诺，绕得开就等于承诺是假的。
+ * 现在比的是**「程序名 + 参数」两段**（见 `commandPrefixMatch`）：
+ * 程序名去引号 / 去目录 / 剥可执行扩展名后逐字比，参数按整词比。
+ * **方向是收紧**（授权已定，见 `docs/DECISION-SELF-DIRECTED.md`），
+ * 所以它只用在 deny / ask 上；`allow` 那一侧连同"放行侧多命中一次就是放行"一起被挡住。
  */
 
-import { containsShellMetachar } from '../commands/argv';
+import { containsShellMetachar, programKey, splitCommandLine } from '../commands/argv';
 
 /** 规则动作 */
 export type RuleAction = 'allow' | 'deny' | 'ask';
@@ -39,7 +48,7 @@ export interface PermissionRule {
   /** 为什么有这条规则（写下来是为了半年后还看得懂；也会在 UI 里展示） */
   note?: string | undefined;
   /**
-   * 命令前缀（**按字面**匹配命令行开头，只用于 deny / ask）。
+   * 命令前缀（**按「程序名 + 参数」两段匹配**，只用于 deny / ask）。
    * 只有声明了 `commandArg` 的工具会看它；`allow` 规则带它会在校验层被拒。
    */
   argPrefix?: string | undefined;
@@ -100,42 +109,95 @@ export function ruleMatches(rule: PermissionRule, toolName: string): boolean {
   return globToRegExp(rule.pattern).test(toolName);
 }
 
-/** 比较用的归一化：去首尾空白、连续空白并成一个空格、转小写 */
-function normalizeCommand(text: string): string {
-  return text.trim().replace(/\s+/g, ' ').toLowerCase();
+/**
+ * 命中细节 —— 命中时要能说清"拦的是哪一段"（R47 · T52 收紧）。
+ *
+ * 为什么要有它：前缀规则从"整串字面开头"改成"程序名 + 参数"两段之后，
+ * `deny git push` 拦下的是 `git.exe push` —— 用户在界面上看见的却是 `git push`，
+ * 不说清这一段，他没法判断自己写的承诺到底被谁执行了。
+ */
+export interface CommandPrefixMatch {
+  /** 命令行里出现的程序名（原样：可能带引号与路径） */
+  rawProgram: string;
+  /** 判定时用的程序名（`splitCommandLine` 已去引号；这一层再去目录 / 去可执行扩展名 / 小写） */
+  program: string;
+  /** 前缀带的参数 */
+  prefixArgs: string[];
+  /** 命令在扣掉前缀参数之后**还剩下**的参数 */
+  restArgs: string[];
 }
 
 /**
- * `command` 是不是以 `prefix` 这一段**完整的词**开头。
+ * `command` 是不是以 `prefix` 这一段开头 —— **按「程序名 + 参数」两段判**（R47 · T52）。
  *
- * 三条判据，方向全是"宁可少命中"（少命中回落到执行类硬 ask，仍然每次过人手；
- * 错误命中则一条 deny 把没打算管的命令管掉了）：
- * 1. **含 shell 组合符就不算命中** —— `git status; curl evil` 的前缀是 `git status`，
- *    但它做的事远不止 `git status`，前缀证明不了整条命令；
- * 2. **整词边界** —— 前缀之后要么到末尾、要么是一个空格，`git status` 不盖 `git statuses`；
- * 3. 大小写与空格数量不参与判断 —— `RM -RF` 与 `rm  -rf` 是同一条命令（Windows 上命令名不分大小写，
- *    POSIX 上大小写写错的命令根本跑不起来），忽略它不会多拦住什么本该放行的东西；
- *    这条**只因为 allow 方向没开放才安全**：放宽匹配在收紧侧是保守，在放行侧就是放行。
+ * 收紧前的判法是整串字面 `startsWith`，于是三种改写形态全都绕得开：
+ * `git.exe push` / `"git" push` / `C:\Program Files\Git\cmd\git.exe push`
+ * —— 用户写下的 `deny git push` 承诺的是"不许推送"，绕得开就等于承诺是假的。
  *
- * 元字符那张表和 argv 安全检查用的是同一份（`containsShellMetachar`），不复制第二遍。
+ * 现在的判法（三条，方向全是"宁可多命中"）：
+ * 1. **程序名按归一化后比** —— 去引号、去目录、剥 `.exe/.com/.cmd/.bat` 这类可执行扩展名、
+ *    忽略大小写。**两边都带路径时比整条路径**（只带一边时比文件名），
+ *    这样 `deny C:\tools\mytool` 不会去拦 `D:\other\mytool`（那是过度拦截）。
+ * 2. **参数按整词比** —— 前缀带的参数必须逐个相同地出现在命令参数的最前面；
+ *    `git push` 管得住 `git push --force`，管不住 `git pushx`。
+ * 3. **含 shell 组合符一律不算命中**（沿用旧口径）—— `git status; curl evil` 的前缀是
+ *    `git status`，但它做的事远不止 `git status`，前缀证明不了整条命令。
+ *
+ * **这个方向只许用在收紧侧**（deny / ask）：`allow` 方向按规矩不开
+ * （`checkRuleInput` 直接拒），而收紧侧"多命中一次"是保守的、
+ * 放行侧"多命中一次"就是放行 —— 所以 `matchRules` 里对 `allow` 规则另作处理。
  */
-export function commandPrefixMatches(prefix: string, command: string): boolean {
-  if (containsShellMetachar(command) || containsShellMetachar(prefix)) return false;
-  const p = normalizeCommand(prefix);
-  const c = normalizeCommand(command);
-  if (p === '' || c === '') return false;
-  if (!c.startsWith(p)) return false;
-  return c.length === p.length || c[p.length] === ' ';
+export function commandPrefixMatch(prefix: string, command: string): CommandPrefixMatch | null {
+  if (containsShellMetachar(command) || containsShellMetachar(prefix)) return null;
+  if (prefix.trim() === '' || command.trim() === '') return null;
+
+  const p = splitCommandLine(prefix);
+  const c = splitCommandLine(command);
+  if (p.program === '' || c.program === '') return null;
+
+  const pk = programKey(p.program);
+  const ck = programKey(c.program);
+  const sameProgram = pk.hasPath && ck.hasPath ? pk.full === ck.full : pk.base === ck.base;
+  if (!sameProgram) return null;
+
+  // 参数按整词比（大小写与空格数量不参与：同一台机器上 `RM -RF` 与 `rm -rf` 是同一条命令）
+  const pArgs = p.args.map((a) => a.toLowerCase());
+  const cArgs = c.args.map((a) => a.toLowerCase());
+  if (pArgs.length > cArgs.length) return null;
+  for (let i = 0; i < pArgs.length; i += 1) {
+    if (pArgs[i] !== cArgs[i]) return null;
+  }
+
+  return {
+    rawProgram: c.program,
+    program: ck.base,
+    prefixArgs: p.args,
+    restArgs: c.args.slice(pArgs.length),
+  };
 }
 
-/** 前缀那一格是否也命中（没填前缀的老规则恒为 true） */
-function prefixApplies(rule: PermissionRule, command: string | undefined): boolean {
+/** 是不是命中（只要一个布尔时用它；要说清"拦的是哪一段"时用上面的 `commandPrefixMatch`） */
+export function commandPrefixMatches(prefix: string, command: string): boolean {
+  return commandPrefixMatch(prefix, command) !== null;
+}
+
+/**
+ * 前缀那一格是否也命中（没填前缀的老规则恒为 true）。
+ *
+ * 返回两样东西：**适不适用**与**命中细节** ——
+ * 理由文案要靠细节说出"拦的是哪一段"，所以不能只回一个布尔。
+ */
+function prefixOutcome(
+  rule: PermissionRule,
+  command: string | undefined,
+): { applies: boolean; detail: CommandPrefixMatch | null } {
   const prefix = rule.argPrefix?.trim();
-  if (prefix === undefined || prefix === '') return true;
+  if (prefix === undefined || prefix === '') return { applies: true, detail: null };
   // 工具没声明命令行参数 → 前缀规则一律不生效。
   // 绝不能把 undefined 当空串去比：那会让"没有命令参数"变成"命令是空的"。
-  if (command === undefined) return false;
-  return commandPrefixMatches(prefix, command);
+  if (command === undefined) return { applies: false, detail: null };
+  const detail = commandPrefixMatch(prefix, command);
+  return { applies: detail !== null, detail };
 }
 
 export interface RuleMatch {
@@ -168,17 +230,27 @@ export function matchRules(
 ): RuleMatch | null {
   let best: PermissionRule | null = null;
   let bestSeverity = 0;
+  let bestDetail: CommandPrefixMatch | null = null;
 
   // 用 for 而不是 forEach：TypeScript 无法追踪闭包里的赋值，
   // 会把 `best` 窄化成 never（实测 TS2339）
   for (const rule of rules) {
     if (!rule.enabled) continue;
     if (!ruleMatches(rule, toolName)) continue;
-    if (!prefixApplies(rule, command)) continue;
+    const outcome = prefixOutcome(rule, command);
+    if (!outcome.applies) continue;
+    /**
+     * `allow` + 命令前缀这一格**按规矩不存在**（`checkRuleInput` 直接拒收）。
+     * 万一真存在（老数据 / 绕过校验层写进存储），它**不放行任何东西** ——
+     * 因为收紧判定只许让 deny / ask 命中更多，不许让 allow 命中更多
+     * （放行侧"多命中一次"就是放行，那是这条改动最不该碰的一侧）。
+     */
+    if (rule.action === 'allow' && outcome.detail !== null) continue;
     const level = severity(rule.action);
     if (level > bestSeverity) {
       best = rule;
       bestSeverity = level;
+      bestDetail = outcome.detail;
     }
   }
 
@@ -186,12 +258,21 @@ export function matchRules(
   const rule = best;
   const prefix = rule.argPrefix?.trim();
   const prefixPart = prefix ? `（命令前缀：${prefix}）` : '';
+  /**
+   * 程序名对不上时要说清是"哪一个程序按哪一个名字判的" ——
+   * 用户写的是 `git push`，被拦下的是 `git.exe push`，
+   * 不说这一句，他看到的就是"我的规则怎么拦了个我没写的东西"。
+   */
+  const programPart =
+    bestDetail !== null && bestDetail.rawProgram.toLowerCase() !== bestDetail.program
+      ? `（程序名 ${bestDetail.rawProgram} 按 ${bestDetail.program} 判定）`
+      : '';
   const noteSuffix = rule.note ? `（备注：${rule.note}）` : '';
   const actionText = rule.action === 'deny' ? '拒绝' : rule.action === 'ask' ? '必须询问' : '自动放行';
   return {
     rule,
     action: rule.action,
-    reason: `命中你的规则「${rule.pattern}」${prefixPart} → ${actionText}${noteSuffix}`,
+    reason: `命中你的规则「${rule.pattern}」${prefixPart}${programPart} → ${actionText}${noteSuffix}`,
   };
 }
 

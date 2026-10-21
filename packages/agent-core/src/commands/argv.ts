@@ -48,6 +48,137 @@ export function goesThroughCmd(command: string, platform: NodeJS.Platform = proc
   return /\.(cmd|bat)$/i.test(command) || /^(npx|npm|yarn|pnpm)$/i.test(command);
 }
 
+/* ------------------------------------------------------------------ *
+ * 命令行文本 → 「程序名 + 参数」（R47 · T52 收紧）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 可执行扩展名（**只认这四个**）。
+ *
+ * 为什么只认这四个：同一个程序写成 `git` 与 `git.exe` 是**同一件事**
+ * （Windows 上 `git` 就是 `git.exe`），而 `my.tool` 里的 `.tool` **不是**扩展名 ——
+ * 把它也剥掉的话，一条 `deny my.tool` 会去拦所有 `my` 开头的别的东西（那是**过度拦截**）。
+ */
+const EXEC_EXTENSIONS = ['.exe', '.com', '.cmd', '.bat'];
+
+/** 路径的最后一段（`C:\a\b\git.exe` → `git.exe`） */
+function lastSegment(text: string): string {
+  const parts = text.split(/[\\/]/);
+  return parts[parts.length - 1] ?? text;
+}
+
+/** 这一段文本的最后一段是不是带可执行扩展名 */
+export function hasExecExtension(text: string): boolean {
+  const last = lastSegment(text);
+  const dot = last.lastIndexOf('.');
+  if (dot <= 0) return false;
+  return EXEC_EXTENSIONS.includes(last.slice(dot).toLowerCase());
+}
+
+/** 去掉末尾的可执行扩展名（`git.exe` → `git`；`my.tool` 原样返回） */
+export function stripExecExtension(text: string): string {
+  const last = lastSegment(text);
+  const dot = last.lastIndexOf('.');
+  if (dot <= 0) return text;
+  if (!EXEC_EXTENSIONS.includes(last.slice(dot).toLowerCase())) return text;
+  return text.slice(0, text.length - (last.length - dot));
+}
+
+export interface CommandLineParts {
+  /** 程序名（原样：可能带引号与路径） */
+  program: string;
+  /** 程序名之后的参数（按空白切开） */
+  args: string[];
+}
+
+/**
+ * 把一行命令行文本拆成「程序名 + 参数」。
+ *
+ * 为什么要有这一层（R47 · T52）：命令前缀规则原先比的是**整串字面开头**，
+ * 于是 `git.exe push` / `"git" push` / `C:\Program Files\Git\cmd\git.exe push`
+ * 三种形态全都绕得开 —— 而用户写下的 `deny git push` 承诺的是"不许推送"。
+ * 只比字符串前缀救不了这件事：**要先把"这个命令行跑的是哪个程序"认出来**。
+ *
+ * 三种形态各自怎么认：
+ * 1. **整词被引号包住**（`"git" push`）⇒ 去掉引号就是程序名；
+ * 2. **引号跨词**（`"C:\Program Files\Git\cmd\git.exe" push`）⇒ 引号里的整段是程序名；
+ * 3. **没引号**（`git.exe push` / `C:\Program Files\Git\cmd\git.exe push`）⇒
+ *    程序名是**最早**那个「累加后以可执行扩展名结尾」的词区间 ——
+ *    这样带空格的路径（`C:\Program Files\...`）也能认出来，
+ *    而不会把路径里的**中间目录**（`Program`）误当成程序名。
+ *
+ * 认不出来时**不猜**：引号没闭合就退回第一个词，宁可少命中（少命中回落到硬 ask）。
+ */
+export function splitCommandLine(text: string): CommandLineParts {
+  const trimmed = text.trim();
+  if (trimmed === '') return { program: '', args: [] };
+  const tokens = trimmed.split(/\s+/);
+  const first = tokens[0] as string;
+  const quote = first[0];
+
+  // ① 整词被引号包住：`"git"` / `'git'`
+  if ((quote === '"' || quote === "'") && first.length > 1 && first.endsWith(quote)) {
+    return { program: first.slice(1, -1), args: tokens.slice(1) };
+  }
+
+  // ② 引号跨词：`"C:\Program Files\Git\cmd\git.exe" push`
+  if (quote === '"' || quote === "'") {
+    const close = trimmed.indexOf(quote, 1);
+    if (close > 0) {
+      const rest = trimmed.slice(close + 1).trim();
+      return {
+        program: trimmed.slice(1, close),
+        args: rest === '' ? [] : rest.split(/\s+/),
+      };
+    }
+    // 引号没闭合：退回第一个词（不猜）
+    return { program: first, args: tokens.slice(1) };
+  }
+
+  // ③ 没引号：程序名可能是一段带空格的路径
+  let program = first;
+  let end = 0;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const acc = i === 0 ? first : `${program} ${tokens[i] as string}`;
+    if (hasExecExtension(acc)) {
+      program = acc;
+      end = i;
+      break;
+    }
+  }
+  return { program, args: tokens.slice(end + 1) };
+}
+
+export interface ProgramKey {
+  /** 归一化后的完整路径（去引号 / 统一分隔符 / 剥可执行扩展名 / 小写） */
+  full: string;
+  /** 归一化后的**最后一段**（文件名） */
+  base: string;
+  /** 原文本里带不带目录 */
+  hasPath: boolean;
+}
+
+/**
+ * 程序名的归一化形式（判定"是不是同一个程序"时用）。
+ *
+ * 为什么要分 `full` 与 `base` 两份：**两边都带路径时比整条路径**，
+ * 只带一边（或都不带）时比**文件名** ——
+ * 这样 `deny C:\tools\mytool` 不会去拦 `D:\other\mytool`（过度拦截），
+ * 而 `deny git` 仍然拦得住 `C:\...\git.exe`（漏拦）。
+ *
+ * **引号不在这一层处理** —— 它由 `splitCommandLine` 那一层摘掉（只有它知道引号在哪儿结束）。
+ * 两层都摘 = 一层是白摘的（白摘的那层还会让"改坏它"这种变异测不出任何东西）。
+ */
+export function programKey(program: string): ProgramKey {
+  const cleaned = program.replace(/\//g, '\\').toLowerCase();
+  const hasPath = cleaned.includes('\\');
+  const segs = cleaned.split('\\').filter((s) => s !== '');
+  const last = segs.length > 0 ? (segs[segs.length - 1] as string) : cleaned;
+  const base = stripExecExtension(last);
+  const full = segs.length > 0 ? [...segs.slice(0, -1), base].join('\\') : base;
+  return { full, base, hasPath };
+}
+
 export interface ArgvSpec {
   file: string;
   args: string[];

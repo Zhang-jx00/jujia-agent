@@ -1188,26 +1188,26 @@
     },
     {
       "id": "M149",
-      "desc": "前缀命中不再要求整词边界（把「git status」当成能盖住「git statuses」）：一条窄规则管到它没说过的命令",
+      "desc": "前缀命中不再要求整词边界（把「git push」当成能盖住「git pull」）：一条窄规则管到它没说过的命令（T52 收紧后判据在参数逐词比这一段）",
       "file": "packages/agent-core/src/permissions/rules.ts",
-      "find": "  return c.length === p.length || c[p.length] === ' ';",
-      "replace": "  return true;",
+      "find": "    if (pArgs[i] !== cArgs[i]) return null;",
+      "replace": "    if (pArgs[i] !== cArgs[i] && pArgs.length > cArgs.length + 1) return null;",
       "test": "packages/agent-core/src/permissions/rules.test.ts"
     },
     {
       "id": "M150",
       "desc": "组合符守卫退化成只查前缀、不查命令：「git status; rm -rf /」会被一条 deny git status 当成已经管住",
       "file": "packages/agent-core/src/permissions/rules.ts",
-      "find": "  if (containsShellMetachar(command) || containsShellMetachar(prefix)) return false;",
-      "replace": "  if (containsShellMetachar(prefix)) return false;",
+      "find": "  if (containsShellMetachar(command) || containsShellMetachar(prefix)) return null;",
+      "replace": "  if (containsShellMetachar(prefix)) return null;",
       "test": "packages/agent-core/src/permissions/rules.test.ts"
     },
     {
       "id": "M151",
       "desc": "没取到命令行时把前缀规则当成命中（等于「没有命令参数」= 空命令）：写来管 rm 的规则会误伤别的工具",
       "file": "packages/agent-core/src/permissions/rules.ts",
-      "find": "  if (command === undefined) return false;",
-      "replace": "  if (command === undefined) return true;",
+      "find": "  if (command === undefined) return { applies: false, detail: null };",
+      "replace": "  if (command === undefined) return { applies: true, detail: null };",
       "test": "packages/agent-core/src/permissions/rules.test.ts"
     },
     {
@@ -1684,9 +1684,9 @@
     },
     {
       "id": "M211",
-      "desc": "按压反馈整组被摘：页签与各档按钮按下去毫无反馈（100ms 轻微缩放没了）",
+      "desc": "按压反馈整组被摘：页签与各档按钮按下去毫无反馈（100ms 轻微缩放没了）—— 锚点随 R42 的样式重写改名（`button.jj-btn` → `button`）而漂移，本轮按现树改口",
       "file": "apps/desktop/src/renderer/src/styles/motion.css",
-      "find": ".app-tab:active,\nbutton.jj-btn:active:not(:disabled),",
+      "find": ".app-tab:active,\nbutton:active:not(:disabled),",
       "replace": "x-app-tab-disabled:active,\nbutton.x-jj-btn:active:not(:disabled),",
       "test": "apps/desktop/src/renderer/src/motion-wiring.test.ts"
     },
@@ -2349,10 +2349,10 @@
     },
     {
       "id": "M294",
-      "desc": "规则页不再举出具体的改写形态（T52 界面那句）：只剩一句抽象的「按字面比对」，用户照样以为 deny git push 拦得住推送",
+      "desc": "规则页不再举出具体的改写形态（T52 界面那句）：只剩一句抽象的说法，用户照样以为 deny git push 拦得住推送 —— 锚点随本轮界面改写而漂移，本轮按现树改口",
       "file": "apps/desktop/src/renderer/src/features/permissions/PermissionRulesPanel.tsx",
-      "find": "            <code>git.exe push</code>、<code>\"git\" push</code>、<code>C:\\...\\git\\cmd\\git.exe push</code>",
-      "replace": "            <code>某种写法</code>",
+      "find": "所以 <code>git.exe push</code>、<code>\"git\" push</code>、<code>C:\\...\\git\\cmd\\git.exe push</code>",
+      "replace": "所以 <code>某种写法</code>",
       "test": "apps/desktop/src/renderer/src/features/permissions/permission-rules-panel.test.tsx"
     },
     {
@@ -2506,6 +2506,54 @@
       "find": "      child.kill('SIGKILL');",
       "replace": "      void 0;",
       "test": "packages/agent-core/src/commands/process.test.ts"
+    },
+    {
+      "id": "M314",
+      "desc": "可执行扩展名不再被剥掉（T52 收紧的另一半）：`git.exe push` 又绕得开 `deny git push`",
+      "file": "packages/agent-core/src/commands/argv.ts",
+      "find": "const EXEC_EXTENSIONS = ['.exe', '.com', '.cmd', '.bat'];",
+      "replace": "const EXEC_EXTENSIONS: string[] = [];",
+      "test": "packages/agent-core/src/permissions/rules.test.ts"
+    },
+    {
+      "id": "M315",
+      "desc": "程序名不再去引号（T52 收紧）：`\"git\" push` 又绕得开 `deny git push`（引号由 splitCommandLine 那一层摘，改坏了它这一层就白摘）",
+      "file": "packages/agent-core/src/commands/argv.ts",
+      "find": "    return { program: first.slice(1, -1), args: tokens.slice(1) };",
+      "replace": "    return { program: first, args: tokens.slice(1) };",
+      "test": "packages/agent-core/src/permissions/rules.test.ts"
+    },
+    {
+      "id": "M316",
+      "desc": "两边都带路径时改成只比文件名（过度拦截）：`deny C:\\tools\\mytool` 连 `D:\\other\\mytool` 一起拦掉",
+      "file": "packages/agent-core/src/permissions/rules.ts",
+      "find": "  const sameProgram = pk.hasPath && ck.hasPath ? pk.full === ck.full : pk.base === ck.base;",
+      "replace": "  const sameProgram = pk.base === ck.base;",
+      "test": "packages/agent-core/src/permissions/rules.test.ts"
+    },
+    {
+      "id": "M317",
+      "desc": "放行侧护栏被删掉（收紧顺手放宽了）：一条带前缀的 allow 规则开始放行命令 —— 放行侧「多命中一次就是放行」",
+      "file": "packages/agent-core/src/permissions/rules.ts",
+      "find": "    if (rule.action === 'allow' && outcome.detail !== null) continue;",
+      "replace": "    if (rule.action === 'allow' && outcome.detail !== null && rule.id === '__never__') continue;",
+      "test": "packages/agent-core/src/permissions/rules.test.ts"
+    },
+    {
+      "id": "M318",
+      "desc": "MCP 工具那一档的标签退回「只读」（T53 界面边界）：读起来像一道本机守卫，而它其实是服务端自述",
+      "file": "apps/desktop/src/renderer/src/features/mcp/McpPanel.tsx",
+      "find": "  read: '服务端声明只读',",
+      "replace": "  read: '只读',",
+      "test": "apps/desktop/src/renderer/src/features/mcp/mcp-panel.test.tsx"
+    },
+    {
+      "id": "M319",
+      "desc": "规则页那一格退回旧说法（说改写形态拦得住）：界面开始宣称一件今天不成立的事",
+      "file": "apps/desktop/src/renderer/src/features/permissions/PermissionRulesPanel.tsx",
+      "find": "「程序名 + 参数」两段",
+      "replace": "字面匹配开头",
+      "test": "apps/desktop/src/renderer/src/features/permissions/permission-rules-panel.test.tsx"
     }
   ]
 }

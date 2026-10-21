@@ -39,6 +39,23 @@ PROJECT = Path(__file__).resolve().parent.parent
 TRASH = PROJECT / ".trash"
 TRASH_KEEP_DAYS = 30
 
+# ---------------------------------------------------------------------------
+# T69②（R47 · 2026-10-21）：登记在案的"已知残骸"—— 每次 --apply 顺手试删一次
+# ---------------------------------------------------------------------------
+# 事情本身：打包探针在**工作区根**（= 项目目录的上一级）留了一只 `default_app.asar`
+# （`pack-probe-projone/win-unpacked.tmp/resources/default_app.asar`，110KB），
+# 它被某个**看不见归属**的进程握着（实测：`WinError 32` 正由另一进程使用）。
+#
+# 为什么是"每次试一次"而不是人工反复试：占用者不可见 ⇒ 按本项目的规矩
+# **不杀归属不明的进程** ⇒ 人工反复试只是重复撞同一堵墙；
+# 而**占用一放开就删掉**才是正解 ⇒ 把它登记成"每次 --apply 顺手试一次"。
+#
+# 为什么路径写成**相对**的：它不在项目目录里，而在**工作区根**（项目根的上一级）；
+# 本机绝对路径不许进代码与配置（护栏第 9 条），所以这里只登记名字，位置由 `PROJECT.parent` 推出来。
+STUCK_RESIDUES = [
+    "pack-probe-projone",
+]
+
 # ① 临时 / 中间产物（按文件名模式）
 TEMP_PATTERNS = [
     "_generated-*.md",   # 生成 SOURCE-MATRIX 前的中间片段
@@ -240,6 +257,59 @@ def move_to_trash(p: Path, stamp: str) -> Path:
     return dest
 
 
+def stuck_residue_paths():
+    """登记在案的"已知残骸"（相对**工作区根** = 项目根的上一级）。
+
+    为什么它们不在项目目录里：打包探针把产物写在了**工作区根**（项目目录之外），
+    所以这里的位置是 `PROJECT.parent / 名字` —— 只登记名字，不写死本机绝对路径。
+
+    安全兜底：解析后的父目录必须**正好**是 `PROJECT.parent` ——
+    登记项一旦写成一个能往外跳的相对路径（`../..`），这一层会直接拒绝执行它。
+    """
+    out = []
+    for rel in STUCK_RESIDUES:
+        p = (PROJECT.parent / rel).resolve()
+        if p.parent != PROJECT.parent.resolve():
+            raise ValueError(f"登记的残骸路径越出了工作区根：{rel}")
+        out.append((p, rel))
+    return out
+
+
+def try_remove_stuck_residue(apply: bool) -> tuple[int, int]:
+    """对每一只登记在案的残骸**试删一次**（T69②）。
+
+    返回 `(删掉的, 仍被占用的)`。
+
+    三条纪律：
+    1. **删不掉不中止整轮清理** —— 这一格是**已知**的、预期中的失败；
+       它必须被如实记下来，而不是让整个清理脚本从此跑不完。
+    2. **删不掉绝不算成"已清理"** —— 台账上写着"已清"而实际还在，那是假话。
+    3. **不杀任何进程** —— 占用者不可见 ⇒ 归属不明 ⇒ 按规矩不碰它；
+       本函数只做"再试一次删文件"这一件事。
+    """
+    removed = 0
+    stuck = 0
+    for p, rel in stuck_residue_paths():
+        if not p.exists():
+            print(f"  [残骸·已不在] {rel}（之前某一次已经删掉了）")
+            continue
+        if not apply:
+            print(f"  [残骸·待试删] {rel}（占用者不可见 ⇒ 不杀进程；--apply 时试删一次）")
+            continue
+        try:
+            force_remove(p)
+            removed += 1
+            print(f"  [残骸·已删] {rel}")
+        except Exception as e:  # noqa: BLE001 - 这一格要的是"如实记一笔"，不是异常类型
+            stuck += 1
+            print(
+                f"  [残骸·仍被占用·未删] {rel}"
+                f"（{type(e).__name__}：{e}）—— 占用者不可见，按规矩不杀任何进程；"
+                f"占用一放开，下一次 --apply 会自动删掉它。**这一格不是「已清」**"
+            )
+    return removed, stuck
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="俱佳Agent 任务收尾清理")
     ap.add_argument("--apply", action="store_true", help="实际执行（默认仅预览）")
@@ -279,6 +349,13 @@ def main() -> int:
         print(f"  [旧版遗留·空目录] {p.relative_to(PROJECT)}")
     print("执行顺序：整只目录先搬，文件条目后搬；已随上层目录一起走的条目会跳过并如实计数。")
 
+    # T69②：登记在案的残骸**先**试一次 ——
+    # 「项目已干净」是**最常见**的那条路，而它返回得早；
+    # 登记在案的残骸必须**先**试过，否则"每次 --apply 试一次"就落在了最常见的路径之外。
+    print("-" * 62)
+    print("⑤ 登记在案的已知残骸（T69②：每次 --apply 顺手试删一次）")
+    n_residue_removed, n_residue_stuck = try_remove_stuck_residue(args.apply)
+
     n_purged = 0
     if (args.purge_trash or args.purge_trash_all) and TRASH.is_dir():
         print("-" * 62)
@@ -290,7 +367,7 @@ def main() -> int:
             print(f"回收站超期检查（>{TRASH_KEEP_DAYS} 天）：")
             n_purged = purge_old_trash(args.apply)
 
-    if not plan and not n_purged:
+    if not plan and not n_purged and n_residue_stuck == 0:
         print("\n没有需要清理的内容，项目已干净 ✓")
         return 0
 
@@ -329,7 +406,13 @@ def main() -> int:
                 break
 
     extra = f"；另有 {carried} 项已随整只目录一起搬走，跳过" if carried else ""
-    print(f"\n[完成] 已移入 .trash/{stamp}/：{moved} 项{extra}；失败中止：{len(failed)} 项")
+    # T69②：残骸那一格也要进收尾小结 —— "删不掉"不许在总结里消失（那才叫假装清了）
+    residue_note = ""
+    if n_residue_removed:
+        residue_note += f"；登记在案的残骸已删掉 {n_residue_removed} 只"
+    if n_residue_stuck:
+        residue_note += f"；**仍有 {n_residue_stuck} 只登记在案的残骸删不掉**（占用者不可见 ⇒ 不杀进程）：见上，**不是「已清」**"
+    print(f"\n[完成] 已移入 .trash/{stamp}/：{moved} 项{extra}{residue_note}；失败中止：{len(failed)} 项")
     if failed:
         return 1
     print("提示：.trash/ 内文件保留 30 天可反悔；执行 --apply --purge-trash 可真删超期条目。")

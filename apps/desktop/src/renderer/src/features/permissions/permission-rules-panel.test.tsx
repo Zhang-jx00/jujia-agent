@@ -73,24 +73,34 @@ describe('权限页 · 命令前缀', () => {
   });
 
   /**
-   * T52（终端与外部件批 · 2026-10-15）：**这一格管多大范围，界面要自己说出口**。
+   * T52（终端与外部件批 · 2026-10-15；R47 收紧后改写 · 2026-10-21）：**这一格管多大范围，界面要自己说出口**。
    *
-   * 前缀按字面匹配命令行的开头，所以 `deny git push` 挡不住 `git.exe push --force`、
-   * `"git" push`、`C:\Program Files\Git\cmd\git.exe push` —— 一次改写形态就绕过去了。
-   * 收紧匹配（按 argv 逐词比对）**改的是"用户写下的承诺到底算不算数"**，属停牌①，等所有者定；
-   * 定之前界面上不许留着"写了 deny 就拦得住"的错觉。
-   * 判据落在**渲染出来的文本**上而不是源码上：这句话的作用是让正在写规则的人看见，
+   * 收紧之前这一格写的是"改写形态会被绕开"（`git.exe push` / `"git" push` / `C:\...\git.exe push` 拦不住）——
+   * 那是**当时真实的行为**。R47 把匹配改成「程序名 + 参数」两段之后，那三种形态已经拦得住，
+   * **仍然管不到**的换成了另外两类（参数插在中间、套一层 shell）。
+   * ⇒ 判据落在**渲染出来的文本**上而不是源码上：这句话的作用是让正在写规则的人看见，
    * 藏在注释里等于没说（复看 084 第 4 条的同一形状）。
    */
-  it('说得出"前缀可能被改写形态绕过"，并给出具体的形态（不说抽象的"可能"）', async () => {
+  it('说得出"程序名 + 参数"怎么比，并把仍管不到的两类形态说出口', async () => {
     mount([view({ argPrefix: 'git push' })]);
     await screen.findByText('git push');
     const body = document.body.textContent ?? '';
 
-    expect(body).toContain('改写');
+    // 现在比的是两段（这句话是新判据的**正面锚点** —— 改回旧文案会当场红）
+    expect(body).toContain('「程序名 + 参数」两段');
+    expect(body).toContain('程序名');
+    expect(body).toContain('参数');
+    // 三种改写形态现在会被命中 —— 界面上不许还说"拦不住"
     expect(body).toContain('git.exe push');
-    expect(body).toContain('不生效');
+    expect(body).toContain('都会被');
+    // 旧的那句必须绝迹：它说的是**今天不成立**的事（"改写形态不会被命中"）
+    expect(body).not.toContain('但请看清这一格的边界');
+    expect(body).not.toContain('改写形态不会被');
+    // 仍管不到的两类必须说出来（不写 = 用户以为"写了 deny 就拦得住"）
+    expect(body).toContain('git -C x push');
+    expect(body).toContain('cmd /c git push');
     // 说的是"这条规则的边界"，不是"整个门没了"：组合符那一档今天仍然照常问一次
+    expect(body).toContain('不生效');
     expect(body).toContain('还是会问你');
   });
 

@@ -95,16 +95,17 @@ describe('detectRisks：风险提示（确定性规则 + 人话）', () => {
 });
 
 /**
- * T53（终端与外部件批 · 2026-10-15）：**「只读」这一档是服务端自己说的**，批准界面上必须这么说。
+ * T53（终端与外部件批 · 2026-10-15；R47 落定 · 2026-10-21）：**「只读」这一档是服务端自己说的**，批准界面上必须这么说。
  *
  * 判据在 `mcp.ts` 与 `policy.ts`：`annotations.readOnlyHint === true` → `kind:'read'` → 门直接放行。
  * 而 MCP 工具的参数是**任意 JSON 原样透传**，本机的敏感路径表只认 `path` 这一个键 ——
  * 第三方服务只要自称只读，它那个叫 `file_path` / `target` 的参数就永远碰不到那张表，
  * 于是"读什么都不会问你"是**真实可达**的状态。
  *
- * 收紧这一档（外部工具一律询问，或给档案加 `pathArg` 声明）**改的是信任边界 → 停牌①**，
- * 不由我自行改判定。在所有者定下来之前，界面上不许留"外部工具跟内置工具一样有门"的错觉，
- * 所以这条提示进 `warnings`（批准弹窗本来就渲染这一栏，措辞只有一处定义）。
+ * **R47 起这一档的处置已经定了**（`docs/DECISION-SELF-DIRECTED.md`）：**信任边界不移动** ——
+ * 服务端自述只当提示，判定仍以本机敏感路径表为准；
+ * 代价是**必须把"这是服务端声明"与"本机那张表只认哪个键"说出口**。
+ * 收紧这一档（外部工具一律询问，或给档案加 `pathArg` 声明）仍然是信任边界的移动 ⇒ 不做。
  */
 describe('只读档来自服务端自述，批准前要说出口（T53）', () => {
   const onlyRead = toToolProfiles('fs', [
@@ -119,6 +120,21 @@ describe('只读档来自服务端自述，批准前要说出口（T53）', () =
     expect(hit?.message).toContain('自述');
     expect(hit?.message).toContain('不再问你');
     expect(hit?.message).toContain('1');
+  });
+
+  /**
+   * R47：边界**不移动**（判定仍以本机敏感路径表为准）⇒ 界面上必须说清**那张表认什么**。
+   * 只说"是服务端自述"是不够的：用户会以为本机还有一道门，而那道门只认 `path` 一个键。
+   */
+  it('说清"本机仍会查敏感路径表，但只认叫 path 的那个键"（边界不移动，就得说清边界）', () => {
+    const p = plan(cfg({ command: 'mcp-server', args: [] }), onlyRead);
+    const msg = p.warnings.find((w) => w.code === 'read-only-self-reported')?.message ?? '';
+
+    expect(msg).toContain('敏感路径表');
+    expect(msg).toContain('path');
+    expect(msg).toContain('不替它担保');
+    // 旧的说法（"收紧它属待决策项"）已作废：这一档的处置在自主授权里定过了
+    expect(msg).not.toContain('待决策项');
   });
 
   it('反向对照：一个只读工具都没有时不许冒出这条噪声', () => {

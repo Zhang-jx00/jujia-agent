@@ -22,8 +22,16 @@ const STATE_LABEL: Record<McpServerView['state'], string> = {
   exited: '进程已退出',
 };
 
+/**
+ * 每一档的标签。
+ *
+ * T53（R47 · 2026-10-21）：`read` 这一档**只可能**来自服务端自述（`annotations.readOnlyHint`，
+ * 见 `inferToolKind`：没自述的一律 `exec`）—— 所以标签必须写清"这是服务端声明的"，
+ * 不许写成一个看起来像**本机判定**的「只读」。
+ * `exec` 那一档相反：它是**本机**的默认值（服务端不声明就按最严格处理），标签照实。
+ */
 const KIND_LABEL: Record<McpApprovalPlan['tools'][number]['kind'], string> = {
-  read: '只读',
+  read: '服务端声明只读',
   write: '写入',
   exec: '每次询问',
 };
@@ -425,6 +433,26 @@ function ConsentDialog({
           {plan.readOnlyCount} 个是服务端声明的只读。
           <strong> 默认一个都不勾选</strong> —— 请只勾选你确实要用的。
         </p>
+
+        {/*
+          T53（R47 · 2026-10-21）：**信任边界不移动，但要说清边界在哪**。
+          授权已定：服务端自述 `readOnlyHint` 只当提示，判定仍以本机敏感路径表为准
+          （见 `docs/DECISION-SELF-DIRECTED.md`）。
+          这句话说的是今天**仍然成立**的三件事，不许夸大也不许淡化：
+          ① 「只读」这一档是**服务端自己声明**的，本机不替它担保；
+          ② 走到这一档的调用**不再问你**；
+          ③ 本机仍会查一次敏感路径表，**但那张表只认参数里叫 `path` 的那个键** ——
+          服务端换个键名，本机就认不出那条路径。
+          配套的现状锁（`mcp-selfdeclared-readonly.test.ts`）一个字未动。
+        */}
+        {plan.readOnlyCount > 0 && (
+          <p className="p0-warn">
+            <b>「只读」这一档是服务端自己声明的</b>（它写 <code>readOnlyHint</code>，本机不替它担保）：
+            走到这一档的调用<b>不再问你</b>就直接执行。本机仍会查一次敏感路径表 ——
+            但那张表只认参数里叫 <code>path</code> 的那个键，服务端换个键名（本机叫不出名字）就认不出那条路径。
+            不放心就别勾这一档。
+          </p>
+        )}
 
         <div className="w2-actions">
           <button type="button" className="w2-btn" onClick={onSelectAll}>

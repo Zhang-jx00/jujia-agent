@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildArgvCommand, checkArgvSafety, goesThroughCmd } from './argv';
+import { buildArgvCommand, checkArgvSafety, goesThroughCmd, programKey, splitCommandLine } from './argv';
 
 /**
  * `argv.ts` 的**直接**验收（T15 这一轮补上的）。
@@ -99,5 +99,74 @@ describe('goesThroughCmd 与 buildArgvCommand 必须用同一个判据', () => {
   it('名字里含 npm/npx 但不是那个命令的，不许被误判成包装器（判据是整名，不是子串）', () => {
     expect(goesThroughCmd('C:\\tools\\npm-run.sh', 'win32')).toBe(false);
     expect(goesThroughCmd('my-npm-wrapper', 'win32')).toBe(false);
+  });
+});
+
+/**
+ * 「命令行文本 → 程序名 + 参数」（R47 · T52 收紧的新增层）。
+ *
+ * 为什么单独一组：命令前缀规则要拦得住 `git.exe push` / `"git" push` /
+ * `C:\Program Files\Git\cmd\git.exe push` 三种改写形态，
+ * 前提是**先把"这个命令行跑的是哪个程序"认出来** —— 认错了，前后都是错的
+ * （认宽了 = 过度拦截，认窄了 = 漏拦）。
+ */
+describe('splitCommandLine（认程序名）', () => {
+  it('普通形态：第一个词是程序名，其余是参数', () => {
+    expect(splitCommandLine('git push origin main')).toEqual({ program: 'git', args: ['push', 'origin', 'main'] });
+    expect(splitCommandLine('  git   push  ')).toEqual({ program: 'git', args: ['push'] });
+    expect(splitCommandLine('')).toEqual({ program: '', args: [] });
+  });
+
+  it('整词被引号包住：引号里的就是程序名', () => {
+    expect(splitCommandLine('"git" push')).toEqual({ program: 'git', args: ['push'] });
+    expect(splitCommandLine("'git' push")).toEqual({ program: 'git', args: ['push'] });
+  });
+
+  it('引号跨词：引号里的整段是程序名（带空格的路径）', () => {
+    expect(splitCommandLine('"C:\\Program Files\\Git\\cmd\\git.exe" push')).toEqual({
+      program: 'C:\\Program Files\\Git\\cmd\\git.exe',
+      args: ['push'],
+    });
+  });
+
+  it('没引号但路径带空格：最早的「以可执行扩展名结尾」的词区间才是程序名', () => {
+    expect(splitCommandLine('C:\\Program Files\\Git\\cmd\\git.exe push --force')).toEqual({
+      program: 'C:\\Program Files\\Git\\cmd\\git.exe',
+      args: ['push', '--force'],
+    });
+    // 参数里也有 .exe 时，程序名取**最早**那个（否则会把 --target C:\\out\\app.exe 当程序）
+    expect(splitCommandLine('C:\\Program Files\\Git\\cmd\\git.exe build --target C:\\out\\app.exe')).toEqual({
+      program: 'C:\\Program Files\\Git\\cmd\\git.exe',
+      args: ['build', '--target', 'C:\\out\\app.exe'],
+    });
+  });
+
+  it('引号没闭合时不猜（宁可少命中，也不把半条命令当程序名）', () => {
+    expect(splitCommandLine('"git push')).toEqual({ program: '"git', args: ['push'] });
+  });
+});
+
+describe('programKey（同一个程序吗）', () => {
+  it('去目录、剥可执行扩展名、忽略大小写', () => {
+    expect(programKey('git').base).toBe('git');
+    expect(programKey('git.exe').base).toBe('git');
+    expect(programKey('GIT.EXE').base).toBe('git');
+    expect(programKey('C:\\Program Files\\Git\\cmd\\git.exe').base).toBe('git');
+  });
+
+  it('引号由 splitCommandLine 那一层摘（这一层不重复摘 —— 重复摘的层改坏了也测不出东西）', () => {
+    expect(splitCommandLine('"git" push').program).toBe('git');
+    expect(programKey(splitCommandLine('"git" push').program).base).toBe('git');
+  });
+
+  it('`.tool` 这种不是可执行扩展名，不许被剥掉（剥了就是过度拦截）', () => {
+    expect(programKey('my.tool').base).toBe('my.tool');
+    expect(programKey('my.tool.exe').base).toBe('my.tool');
+  });
+
+  it('带不带目录要分得清（两边都带时比整条路径）', () => {
+    expect(programKey('C:\\tools\\mytool').hasPath).toBe(true);
+    expect(programKey('mytool').hasPath).toBe(false);
+    expect(programKey('C:\\tools\\mytool').full).toBe('c:\\tools\\mytool');
   });
 });

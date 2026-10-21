@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { checkArgvSafety } from '../commands/argv';
 import {
   checkRuleInput,
+  commandPrefixMatch,
   commandPrefixMatches,
   globToRegExp,
   isDenyAllPattern,
@@ -181,6 +182,60 @@ describe('commandPrefixMatches（把"绝不碰这条命令"写成整词前缀）
   });
 });
 
+/**
+ * R47 · T52 收紧：前缀比的是**「程序名 + 参数」两段**，不再是整串字面开头。
+ *
+ * 这一组是本轮**正反用例**的所在地：正例 = 三种改写形态现在都拦得住；
+ * 反例 = 不该拦的一条都不许拦（过度拦截与漏拦一样是缺陷）。
+ */
+describe('commandPrefixMatches：程序名 + 参数（R47 · T52 收紧）', () => {
+  it('正例：`git.exe push` / `"git" push` / 带路径的 `git.exe` 都被 `git push` 命中', () => {
+    // ① 可执行扩展名
+    expect(commandPrefixMatches('git push', 'git.exe push')).toBe(true);
+    expect(commandPrefixMatches('git push', 'git.exe push --force')).toBe(true);
+    // ② 引号包住的程序名
+    expect(commandPrefixMatches('git push', '"git" push')).toBe(true);
+    // ③ 带空格的绝对路径（中间目录 `Program` 不许被当成程序名）
+    expect(commandPrefixMatches('git push', 'C:\\Program Files\\Git\\cmd\\git.exe push')).toBe(true);
+    expect(commandPrefixMatches('git push', '"C:\\Program Files\\Git\\cmd\\git.exe" push')).toBe(true);
+    // ④ 前缀写成绝对路径时，同一个程序按文件名对上
+    expect(commandPrefixMatches('C:\\Program Files\\Git\\cmd\\git.exe push', 'git push')).toBe(true);
+  });
+
+  it('反例：不该拦的一条都不许拦（过度拦截和漏拦一样是缺陷）', () => {
+    // 程序名不是同一个
+    expect(commandPrefixMatches('git push', 'gitk push')).toBe(false);
+    expect(commandPrefixMatches('git push', 'gitignore push')).toBe(false);
+    // 参数不是整词前缀
+    expect(commandPrefixMatches('git push', 'git pushx')).toBe(false);
+    expect(commandPrefixMatches('git push', 'git pull')).toBe(false);
+    // 参数插在中间（这一条**仍管不到**，界面必须说出口）
+    expect(commandPrefixMatches('git push', 'git -C x push')).toBe(false);
+    // 套一层 shell（同样仍管不到）
+    expect(commandPrefixMatches('git push', 'cmd /c git push')).toBe(false);
+    // 另一个程序恰好同名但在别的目录：两边都带路径时比整条路径
+    expect(commandPrefixMatches('C:\\tools\\mytool', 'D:\\other\\mytool')).toBe(false);
+    // 但只写了一边路径时比文件名（`deny git` 仍要拦得住 `C:\\...\\git.exe`）
+    expect(commandPrefixMatches('git push', 'C:\\other\\git.exe push')).toBe(true);
+  });
+
+  it('参数按整词比：前缀带几个词就管到第几个词', () => {
+    expect(commandPrefixMatches('git push', 'git push origin main')).toBe(true);
+    expect(commandPrefixMatches('git push origin', 'git push origin main')).toBe(true);
+    expect(commandPrefixMatches('git push origin', 'git push upstream main')).toBe(false);
+  });
+
+  it('命中细节要说清"拦的是哪一段"（用户写的是 git push，被拦下的是 git.exe push）', () => {
+    const hit = commandPrefixMatch('git push', 'git.exe push --force');
+    expect(hit?.rawProgram).toBe('git.exe');
+    expect(hit?.program).toBe('git');
+    expect(hit?.prefixArgs).toEqual(['push']);
+    expect(hit?.restArgs).toEqual(['--force']);
+    // 没改写时不必多嘴
+    expect(commandPrefixMatch('git push', 'git push origin main')?.rawProgram).toBe('git');
+  });
+});
+
 describe('matchRules 带上命令之后', () => {
   const prefixDeny = rule({ pattern: 'run_command', action: 'deny', argPrefix: 'rm -rf' });
 
@@ -222,6 +277,42 @@ describe('matchRules 带上命令之后', () => {
 
   it('禁用的前缀规则不参与判定（与老规则同一口径）', () => {
     expect(matchRules([rule({ ...prefixDeny, enabled: false })], 'run_command', 'rm -rf build')).toBeNull();
+  });
+
+  /**
+   * R47 · T52：**收紧**要真的落到判定上（不只是纯函数那一层）。
+   *
+   * 原来 `deny git push` 拦不住 `git.exe push --force` ——
+   * 那是"用户写下的承诺"在执行路径上失效，不是一个显示问题。
+   */
+  it('deny 前缀规则现在拦得住改写形态（`git.exe push --force`）', () => {
+    const denyPush = rule({ pattern: 'run_command', action: 'deny', argPrefix: 'git push' });
+    expect(matchRules([denyPush], 'run_command', 'git push origin main')?.action).toBe('deny');
+    expect(matchRules([denyPush], 'run_command', 'git.exe push --force')?.action).toBe('deny');
+    expect(matchRules([denyPush], 'run_command', '"git" push')?.action).toBe('deny');
+    // 反向对照：不是同一个命令就不该被这条规则拦住
+    expect(matchRules([denyPush], 'run_command', 'git pull')).toBeNull();
+  });
+
+  it('命中理由说清"哪一个程序按哪一个名字判的"（否则用户不知道自己被什么拦下）', () => {
+    const denyPush = rule({ pattern: 'run_command', action: 'deny', argPrefix: 'git push' });
+    const m = matchRules([denyPush], 'run_command', 'git.exe push --force');
+    expect(m?.reason).toContain('git.exe');
+    expect(m?.reason).toContain('git');
+  });
+
+  /**
+   * **放行侧不许被这次收紧带宽**：`allow` + 前缀这一格按规矩不存在（`checkRuleInput` 直接拒），
+   * 万一真存在（老数据 / 绕过校验层），它也不许放行任何东西 ——
+   * "放行侧多命中一次就是放行"是这次改动最不该碰的一侧。
+   */
+  it('allow 规则带前缀时不放行任何东西（收紧不许顺带放宽）', () => {
+    const allowWithPrefix = rule({ pattern: 'run_command', action: 'allow', argPrefix: 'git push' });
+    expect(matchRules([allowWithPrefix], 'run_command', 'git push origin main')).toBeNull();
+    expect(matchRules([allowWithPrefix], 'run_command', 'git.exe push')).toBeNull();
+    // 不带前缀的 allow 规则照常按工具名命中（老行为不变）
+    const plainAllow = rule({ pattern: 'run_command', action: 'allow' });
+    expect(matchRules([plainAllow], 'run_command', 'git push origin main')?.action).toBe('allow');
   });
 });
 
