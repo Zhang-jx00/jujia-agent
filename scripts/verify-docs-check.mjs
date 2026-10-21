@@ -537,6 +537,19 @@ const cases = [
     to: '',
     expect: '没有等到「状态已生效」',
   },
+  {
+    // 第 33 条（渲染层样式表里的字号只许走令牌 · R41）：
+    // 把一处 `font-size: var(--fs-body)` 改回写死的 13px。
+    // 挑这一条的理由很具体：**写死的字号在渲染结果里看不出来** —— 本轮现扫到的 53 处全是
+    // 12/13/11 这种"看起来差不多"的值，混进去就没法再统一；而"不许硬编码"这条纪律
+    // 从 W6 起就写在令牌文件的头里（`packages/ui-tokens/src/tokens.ts`），**但它一直不是机器判据**。
+    // 判据若失效，同形的漂移会悄无声息地再长出来。
+    name: '渲染层样式表里又出现了写死的字号',
+    file: 'apps/desktop/src/renderer/src/styles.css',
+    from: 'font-size: var(--fs-body);',
+    to: 'font-size: 13px;',
+    expect: '字号只许走令牌',
+  },
 ];
 
 /**

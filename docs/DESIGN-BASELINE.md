@@ -56,9 +56,21 @@ typography:
     letterSpacing: 0px
   code-md:
     fontFamily: "Consolas, 'Cascadia Mono', monospace"
-    fontSize: 12px
+    fontSize: 12.5px
     fontWeight: 400
     lineHeight: 1.5
+    letterSpacing: 0px
+  icon-md:
+    fontFamily: "'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif"
+    fontSize: 20px
+    fontWeight: 400
+    lineHeight: 1
+    letterSpacing: 0px
+  micro:
+    fontFamily: "'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif"
+    fontSize: 10px
+    fontWeight: 400
+    lineHeight: 1.2
     letterSpacing: 0px
 rounded:
   none: 0px
@@ -167,6 +179,13 @@ CSS 侧镜像在 `apps/desktop/src/renderer/src/styles/motion.css` 的 `:root`�
 `confirmed`：六档 UI 字级 + 一档等宽（`{typography.code-md}`，代码与命令一律等宽）。
 正文 `{typography.base}` 14px / 行高 1.6；密集表格与小字用 `{typography.body}` 13px。
 **不引入新字族**：`'Segoe UI'` + `'Microsoft YaHei'` 是 Windows 上中文不塌陷的稳妥组合。
+
+**R41 补的一条（现扫出来的）**：**"字号"里混着三种别的角色**，不拆开就永远统一不了 ——
+`{typography.icon-md}` 20px 是**状态图标字形**（`.jj-state-icon`）、
+`{typography.code-md}` 12.5px 是**等宽代码区**（`.jj-hooks-editor`，半像素是给行高对齐的）、
+`{typography.micro}` 10px 是**微型标记**（`.jj-canvas-port-tag`）。
+⇒ 这三个**单开令牌**（CSS 侧 `--icon-md` / `--fs-code` / `--fs-micro`），
+**不进字号阶梯**；字号阶梯只剩那六档。
 
 ## Layout
 
@@ -281,3 +300,50 @@ CSS 侧镜像在 `apps/desktop/src/renderer/src/styles/motion.css` 的 `:root`�
    （100ms、`scale(0.97)`），页签的悬停与选中也有了颜色过渡。
 ④ 本文件自 2026-10-12 起生效；此后界面改动应先改这里再改代码
    （改动方式：先加"待裁决"条目，落地后把置信度改成 `confirmed`）。
+⑤ ✅ **已修（R41）**：**主样式表写死字号 53 处**全部改成令牌（**逐条证明值相等 ⇒ 渲染不变**），
+   另新增三个"不是排版档位"的独立令牌（`--icon-md` / `--fs-code` / `--fs-micro`），
+   并立**护栏第 33 条**钉住（写死 px = 红）。
+⑥ ⬜ **待排（R41 记下）**：**主样式表还有 23 处写死颜色**，其中**同一个"主色"有两个值**
+   （令牌 `#4c8dff` vs 样式表里的 `rgb(47,111,235)`）—— 归一它**是一次有意的视觉修正**
+   （不是等价替换），**要单独一刀**：先定"以令牌为准"，再逐处替换并逐处说明改动。
+   配套护栏（写死颜色 = 0 + 令牌表唯一）随那一刀一起立。
+
+## R41（UI 重构批 · 第一轮）：把「基线 vs 代码」的差距量出来
+
+> **前提先否证**：题面是"重构 UI / 建设计系统"，**现扫推翻了这个前提** ——
+> 令牌层（`packages/ui-tokens/src/tokens.ts` + 渲染层 `styles/motion.css`）**早就存在且完整**，
+> 动效基线（W6 · 八条铁律）**也在**，配色对比度**默认与高对比上下文全部 AA 达标**。
+> ⇒ 本轮**不是"从零建"**，而是**"把已有的那套真正接上主样式表"**。
+> 调研稿（196 条外部参考）见 `docs/RESEARCH-UI-DESIGN.md` —— 它用来**对照方向**，不照抄。
+
+### 现扫数字（2026-10-21，判据形态可复现）
+
+| 项 | 数字 | 判定 |
+|---|---|---|
+| 令牌层完整性 | 颜色 14 + 间距 7 + 字号 6 + 圆角 4 + 阴影 3 + 动效 4 档时长 + 3 条曲线 | ✅ **不是缺口** |
+| 配色对比度（默认暗色） | 正文 15.12 / 次级 6.77 / 主色 5.15 / 成功 7.94 / 警告 7.53 / 危险 6.43 | ✅ 全部 AA |
+| 配色对比度（`prefers-contrast: more`） | 次级提到 9.85，其余同上 | ✅ 全部 AA |
+| 主样式表 `styles.css` 写死字号 | **53 处 / 9 个取值** | ❌ **缺口 ①（R41 已修）** |
+| 主样式表写死颜色 | **23 处**（含 `rgb(47,111,235)` 这个**与令牌不同的旧蓝**） | ❌ **缺口 ②（未修，见下）** |
+| 动效覆盖 | 按压/悬停过渡统一接在 **6 个可点家族**（R18 做的） | ✅ 不是缺口（**但覆盖面要继续扩**） |
+| 焦点环 | 探针初判"16 个可点家族只覆盖 2 个" ⇒ **逐条核实后 14 个是探针误判**（都是 `<button>`，已被 `button:focus-visible` 覆盖）；**真缺口只有 `summary` 一类** | ✅ R41 已补（`a` / `summary` 两条） |
+
+### R41 落地的两刀
+
+1. **缺口 ①（字号）已修**：53 处写死 `font-size: Npx` 全部换成令牌，**且逐条证明值相等**
+   （12px ↔ `--fs-small`、13px ↔ `--fs-body`、…、20px ↔ `--icon-md`）⇒ **渲染不变**；
+   另把 5 处冗余兜底 `var(--fs-caption, 12px)` 收成 `var(--fs-caption)`。
+   **新护栏第 33 条**钉住它（写死 px = 红），**注入自检第 42 处**。
+2. **缺口 ②（颜色）本轮不修**：那 23 处里混着**要判断该用哪个**的
+   （同一个"主色"有两个值：令牌 `#4c8dff` vs 样式表里的 `rgb(47,111,235)`）——
+   换过去是**一次有意的视觉修正**，**不许混在"等价替换"这一刀里**。⇒ 排期见 Known Gaps ⑤。
+
+### 两条新口径（R41）
+
+- **字号只许走令牌**（`--fs-*` / `--icon-*`）或相对量（`inherit` / `em` / `rem` / `%`）——
+  **不许写死 px**。理由：写死的字号就是"下一处漂移"，而**漂移在渲染结果里看不出来**
+  （本轮那 53 处的字号全是 `12/13/11` 这种"看起来差不多"的值，混进去就没法再统一）。
+- **焦点环不立"覆盖率"判据**（R41 的教训）：本轮为算覆盖率写了两版探针，
+  **两版都判错**（第一版把 `button:focus-visible` 漏算，第二版把"容器里有 onClick"
+  当成自绘可点元素，报出 90 处假阳性）⇒ **判据本身不可靠的指标不能立成锁**
+  （恒绿的锁比没有锁更坏）。这条**改为"人核一次 + 补上真缺口"**（`summary` / `a` 已补）。

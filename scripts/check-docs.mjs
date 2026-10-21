@@ -2244,6 +2244,66 @@ const walkLiveFiles = (exts) => {
   );
 }
 /* ------------------------------------------------------------------ *
+ * 33. 渲染层样式表里的字号只许走令牌，不许写死 px（R41 · UI 重构批第一轮）
+ *
+ * 为什么立它：`packages/ui-tokens/src/tokens.ts` 的文件头**明令禁止**
+ * "渲染层不允许出现硬编码颜色与时长"，`docs/DESIGN-BASELINE.md` 的 Don't 也写着
+ * "不许硬编码颜色、时长、圆角" —— **但那两条是写在文档里的纪律，不是机器判据**。
+ * R41 现扫的结果：**主样式表 `styles.css` 里有 53 处写死的 `font-size: Npx`**
+ * （9 个不同取值；其中 12.5px / 10px / 20px 三个**根本不是排版档位** ——
+ * 那是"等宽代码区 / 微型标记 / 图标字形"三种**角色**混进了字号阶梯，
+ * 于是"统一字号"这件事永远达不成）。
+ * ⇒ **规则早就写了，缺的是判据** —— 这正是本仓最熟的那种
+ * "写进禁忌表的规矩要变成机器判据，否则照样复发"。
+ *
+ * 判据形状：扫渲染层两份样式表（`styles.css` + `styles/motion.css`）的每一条
+ * `font-size:` 声明 —— 值必须是**字号类令牌**（`var(--fs-*)`）或**图标尺寸令牌**
+ * （`var(--icon-*)`），或是 `inherit` / `em` / `rem` / `%` 这类**相对量**；
+ * **写死的 px 一律红**。
+ *
+ * **为什么先切字号这一刀**（不是颜色那一刀）：字号是**值可逐条证明等价**的那一类
+ * （12px ↔ `--fs-small` 逐个核对 ⇒ 渲染不变）；颜色那一批里藏着"同一个主色两个值"
+ * （`styles.css` 用 `rgb(47,111,235)`，令牌是 `#4c8dff`）—— 那**要判断该用哪个**，
+ * 换了就是**有意的视觉修正**，归下一刀，不许混在这一刀里。
+ * ------------------------------------------------------------------ */
+{
+  const rels = [
+    'apps/desktop/src/renderer/src/styles.css',
+    'apps/desktop/src/renderer/src/styles/motion.css',
+  ];
+  const bad = [];
+  let scanned = 0;
+  for (const rel of rels) {
+    if (!exists(rel)) {
+      bad.push(`${rel} 不在了 —— 这条守卫的定位器要跟着改`);
+      continue;
+    }
+    // 剥注释（判据自己的说明文字里就写着那些 token 名，不剥会被自己的解释骗红 —— T58 撞过同一件事）
+    const code = read(rel).replace(/\/\*[\s\S]*?\*\//g, '');
+    code.split('\n').forEach((l, i) => {
+      const m = /font-size:\s*([^;]+);/.exec(l);
+      if (m === null) return;
+      scanned += 1;
+      const v = m[1].trim();
+      if (/^var\(--(?:fs|icon)-[a-z0-9-]+\)$/.test(v)) return; // 令牌 ✔
+      if (v === 'inherit' || v === 'initial' || v === 'unset') return; // 相对量 ✔
+      if (/^(?:em|rem|%|clamp|min|max)\b/.test(v)) return; // 相对量 ✔
+      bad.push(`${rel}:${String(i + 1)}  font-size: ${v.slice(0, 40)}`);
+    });
+  }
+  // 防失焦下限：一份字号声明都没扫到 ⇒ 扫描路径写坏了（恒绿比没有锁更坏）
+  if (scanned < 20) {
+    bad.push(`只扫到 ${String(scanned)} 条字号声明（少于 20 条）—— 扫描或样式表形状变了`);
+  }
+  report(
+    '渲染层样式表里的字号只许走令牌（不许写死 px · R41）',
+    bad.length === 0,
+    '字号只许用 --fs-* / --icon-* 令牌（或 inherit / em / rem 这类相对量）—— ' +
+      '写死 px 就是"下一处漂移"（现扫曾有 53 处）。\n     ' +
+      bad.join('\n     '),
+  );
+}
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

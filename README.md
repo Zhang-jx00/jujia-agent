@@ -103,6 +103,7 @@ MCP 服务端连接后先展示**将执行的完整命令**与风险，工具清
 | **流的结束口径**（T55/T56：凭什么判"说完了"、判不出时该说什么；R31 定稿） | [docs/DESIGN-T55-STREAM-END.md](docs/DESIGN-T55-STREAM-END.md) |
 | **探活与自动重连的口径**（T31：掉线凭什么判、要不要自动重连、重连后正在跑的回合怎么办、用户在哪看得见；R37 定稿，**只有文书、没有实现**） | [docs/DESIGN-T31-PROBE-RECONNECT.md](docs/DESIGN-T31-PROBE-RECONNECT.md) |
 | **大文件拆分的评估稿**（R38：**只评估不拆**；行数一律按 eslint 口径 —— max 800 · skipBlankLines: true · skipComments: true；含 T57③ 的结论） | [docs/DESIGN-R38-BIGFILE-EVAL.md](docs/DESIGN-R38-BIGFILE-EVAL.md) |
+| **前端设计与动效的调研清单**（R41：**196 条**开源项目 / 课程 / 规范 / 技术文档，逐条带来源链接与"可借鉴点"；用来对照我们自己的设计口径，**不照抄**） | [docs/RESEARCH-UI-DESIGN.md](docs/RESEARCH-UI-DESIGN.md) |
 | **远程能力的决策备忘**（M20–M22 与"数据不出本机"的表述冲突：选项 A–C 与先决清单） | [docs/DECISION-REMOTE.md](docs/DECISION-REMOTE.md) |
 | **媒体生成的报备稿**（M11 剩余：文生图 / 图生图 / 视频 / 音频 —— 范围候选、零依赖与要装依赖的分界、选项 A–C 与先决清单；R40 **只报备、不实现**） | [docs/DECISION-M11-MEDIA-GEN.md](docs/DECISION-M11-MEDIA-GEN.md) |
 | 排期、里程碑编号与修复队列（路线图） | [docs/TRACK-ROADMAP.md](docs/TRACK-ROADMAP.md) |

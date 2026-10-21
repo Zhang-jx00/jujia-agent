@@ -28,7 +28,7 @@ body {
   background: var(--bg-layout);
   color: var(--text);
   font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-  font-size: 14px;
+  font-size: var(--fs-base);
   line-height: 1.6;
 }
 
@@ -61,7 +61,7 @@ body {
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .app-tab:hover {
@@ -93,14 +93,14 @@ body {
 
 .p0-title {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--fs-heading);
   font-weight: 600;
 }
 
 .p0-subtitle {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .p0-card {
@@ -112,7 +112,7 @@ body {
 
 .p0-card h2 {
   margin: 0 0 12px;
-  font-size: 14px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -165,7 +165,7 @@ code {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-small);
   color: var(--text-secondary);
 }
 
@@ -177,7 +177,7 @@ textarea {
   border-radius: 6px;
   color: var(--text);
   padding: 7px 10px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-family: inherit;
 }
 
@@ -201,7 +201,7 @@ textarea:focus {
   color: var(--text-secondary);
   border-radius: 999px;
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: var(--fs-small);
   cursor: pointer;
 }
 
@@ -221,7 +221,7 @@ button.w2-btn-primary,
 button.w2-btn-danger {
   border-radius: 6px;
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   cursor: pointer;
   border: 1px solid var(--border);
   background: transparent;
@@ -325,7 +325,7 @@ button:disabled {
 }
 
 .w2-bubble-role {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--text-secondary);
   margin-bottom: 4px;
 }
@@ -384,7 +384,7 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-container);
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 .w2-attach-thumb {
@@ -414,7 +414,7 @@ button:disabled {
 
 .w2-img-marker {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--text-secondary);
 }
 
@@ -441,7 +441,7 @@ button:disabled {
 
 .w3-dialog h3 {
   margin: 0 0 8px;
-  font-size: 15px;
+  font-size: var(--fs-title);
 }
 
 .w3-dialog pre,
@@ -452,7 +452,7 @@ button:disabled {
   padding: 8px 10px;
   max-height: 220px;
   overflow: auto;
-  font-size: 12px;
+  font-size: var(--fs-small);
   white-space: pre-wrap;
   word-break: break-all;
   margin: 8px 0 0;
@@ -461,7 +461,7 @@ button:disabled {
 .w3-dialog details summary {
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 .w3-probe {
@@ -471,7 +471,7 @@ button:disabled {
 .w3-args-edit {
   width: 100%;
   font-family: Consolas, 'Cascadia Mono', monospace;
-  font-size: 12px;
+  font-size: var(--fs-small);
   line-height: 1.5;
   margin-top: 8px;
 }
@@ -700,7 +700,7 @@ button:disabled {
 }
 
 .jj-state-icon {
-  font-size: 20px;
+  font-size: var(--icon-md);
   opacity: 0.8;
 }
 
@@ -755,7 +755,9 @@ button:disabled {
 button:focus-visible,
 textarea:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+a:focus-visible,
+summary:focus-visible {
   outline: 2px solid var(--c-primary);
   outline-offset: 1px;
 }
@@ -1047,7 +1049,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 }
 
 .jj-mcp-state {
-  font-size: 12px;
+  font-size: var(--fs-small);
   padding: 1px 8px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -1086,7 +1088,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-secondary);
 }
 
@@ -1098,7 +1100,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   border-radius: var(--radius);
   padding: 6px 8px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .jj-mcp-consent {
@@ -1127,7 +1129,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 
 .jj-mcp-kind {
   margin-left: 6px;
-  font-size: 12px;
+  font-size: var(--fs-small);
   color: var(--text-secondary);
 }
 
@@ -1166,7 +1168,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-secondary);
 }
 
@@ -1178,7 +1180,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   border-radius: var(--radius);
   padding: 6px 8px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .jj-perm-list {
@@ -1208,7 +1210,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   padding: 6px 8px;
   border: 1px solid var(--border, #2a2f36);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.5;
 }
 
@@ -1236,7 +1238,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 
 .jj-perm-action {
   margin-left: 6px;
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 .jj-perm-action-deny {
@@ -1268,7 +1270,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   padding-left: 20px;
   display: grid;
   gap: 6px;
-  font-size: var(--fs-caption, 12px);
+  font-size: var(--fs-caption);
   color: var(--text-secondary);
 }
 
@@ -1311,7 +1313,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 }
 
 .jj-schedule-meta {
-  font-size: var(--fs-caption, 12px);
+  font-size: var(--fs-caption);
   color: var(--text-secondary);
 }
 
@@ -1321,7 +1323,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 }
 
 .jj-schedule-prompt {
-  font-size: var(--fs-caption, 12px);
+  font-size: var(--fs-caption);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -1331,19 +1333,19 @@ html[data-jj-bg-kind='glass'] .app-root {
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 1px 10px;
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--warning);
 }
 
 .jj-schedule-line-err {
   margin: 0;
-  font-size: var(--fs-caption, 12px);
+  font-size: var(--fs-caption);
   word-break: break-word;
 }
 
 .jj-schedule-note {
   margin: 0;
-  font-size: var(--fs-caption, 12px);
+  font-size: var(--fs-caption);
   word-break: break-word;
 }
 
@@ -1358,7 +1360,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-small);
   color: var(--text-secondary);
 }
 
@@ -1371,7 +1373,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   border-radius: var(--radius);
   padding: 6px 8px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .jj-schedule-form textarea {
@@ -1385,7 +1387,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   width: 100%;
   border-collapse: collapse;
   margin: 8px 0;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .jj-hooks-table th,
@@ -1409,7 +1411,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   border-radius: var(--radius);
   padding: 8px;
   font-family: 'Cascadia Mono', Consolas, monospace;
-  font-size: 12.5px;
+  font-size: var(--fs-code);
   line-height: 1.5;
   margin-bottom: 10px;
 }
@@ -1441,12 +1443,12 @@ html[data-jj-bg-kind='glass'] .app-root {
 .jj-plugin-dir {
   word-break: break-all;
   font-family: 'Cascadia Mono', Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 /* 来源标注（用户配置 / 插件） */
 .jj-mcp-source {
-  font-size: 12px;
+  font-size: var(--fs-small);
   color: var(--text-secondary);
   border: 1px dashed var(--border);
   border-radius: 999px;
@@ -1468,7 +1470,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .jj-git-row code {
@@ -1477,7 +1479,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 
 .jj-git-code {
   font-family: 'Cascadia Mono', Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--fs-small);
   color: var(--text-secondary);
   min-width: 28px;
 }
@@ -1493,7 +1495,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   flex-wrap: wrap;
   gap: 8px;
   align-items: baseline;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .jj-git-lines {
@@ -1502,12 +1504,12 @@ html[data-jj-bg-kind='glass'] .app-root {
   padding: 0;
   flex-basis: 100%;
   font-family: 'Cascadia Mono', Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--fs-small);
   color: var(--text-secondary);
 }
 
 .jj-git-badge {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   border: 1px dashed var(--border);
   border-radius: 999px;
   padding: 0 6px;
@@ -1530,7 +1532,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   margin: 8px 0;
   padding: 8px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
   resize: vertical;
 }
 
@@ -1542,7 +1544,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   margin: 8px 0;
   padding: 8px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 /* 应用内文档查看（M10 收尾 · Markdown）。
@@ -1568,7 +1570,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  font-size: 14px;
+  font-size: var(--fs-base);
   line-height: 1.65;
   word-break: break-word;
 }
@@ -1608,7 +1610,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 .jj-md-blocked-link {
   color: var(--text-dim);
   font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 .jj-md-note {
@@ -1619,7 +1621,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 .jj-md-lang {
   float: right;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--fs-caption);
 }
 
 .jj-md-hr {
@@ -1650,7 +1652,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   width: 100%;
   text-align: left;
   padding: 2px 6px;
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 .jj-ide-main {
@@ -1748,7 +1750,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   display: block;
   width: 100%;
   text-align: left;
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 .jj-canvas-main {
@@ -1769,12 +1771,12 @@ html[data-jj-bg-kind='glass'] .app-root {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm, 6px);
   background: var(--bg-container);
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 .jj-canvas-node-kind {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--fs-caption);
 }
 
 .jj-canvas-node-body {
@@ -1784,7 +1786,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 
 .jj-canvas-node-status {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--fs-caption);
 }
 
 .jj-canvas-node-running {
@@ -1804,21 +1806,21 @@ html[data-jj-bg-kind='glass'] .app-root {
 .jj-canvas-node-rerun {
   margin-top: 4px;
   color: var(--c-warning);
-  font-size: 11px;
+  font-size: var(--fs-caption);
 }
 
 /* ---- B3：条件节点（判定关键词行 / 两出口的标签 / 被跳过态） ---- */
 .jj-canvas-node-keyword {
   margin: 4px 0 0;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--fs-caption);
 }
 
 /* B3b：节点卡片上最新一句运行说明（含"第几轮"）—— 最多两行，别把卡片撑爆 */
 .jj-canvas-node-note {
   margin: 4px 0 0;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1841,7 +1843,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   border-radius: 3px;
   background: var(--bg-container);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   line-height: 14px;
   pointer-events: none;
 }
@@ -2035,7 +2037,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   flex: 1;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 12px;
+  font-size: var(--fs-small);
   line-height: 1.5;
 }
 
@@ -2044,7 +2046,7 @@ html[data-jj-bg-kind='glass'] .app-root {
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--fs-base);
   line-height: 1;
   padding: 2px 4px;
 }

@@ -48,6 +48,11 @@
   --fs-title: 15px;
   --fs-heading: 18px;
 
+  /* ---- 以下三个**不是排版档位**，单开令牌（混进字号阶梯就永远统一不了） ---- */
+  --icon-md: 20px;      /* 状态图标字形（.jj-state-icon）——尺寸随字形，不是文字 */
+  --fs-code: 12.5px;    /* 等宽代码区（.jj-hooks-editor）——半像素是为行高对齐 */
+  --fs-micro: 10px;     /* 微型标记（.jj-canvas-port-tag）——画布端口标签 */
+
   /* ---------- 圆角 / 阴影 ---------- */
   --radius-sm: 4px;
   --radius-md: 6px;
