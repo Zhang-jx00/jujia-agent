@@ -2053,6 +2053,197 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 32. e2e 里「读真值 / 做下一个动作」之前必须先等到「状态已生效」（T71 · R39 立 · 2026-10-21）
+ *
+ * 为什么立它：T71 登记的那个红，形状是「把点下去了当成状态已生效」——
+ * 脚本「点『清除』→ 立刻点『打开』」，中间没有任何「清除真的生效了」的等待
+ * ⇒ 主进程还没清完，确认框就按**旧路径**拼出来了。
+ * 它与 T64（批准了却没写进磁盘）、T65 / T68（点了但界面/弹窗没等到）**同族**。
+ *
+ * 护栏第 24 条只盯住了「钩子配置」那一步的**读盘**那一半，而 T71 这一族是**三个形状**：
+ *   ① 「清除自选程序」之后立刻点「打开」—— 后面是**界面文案断言**（不是读盘），第 24 条扫不到；
+ *   ② 「允许一次」之后立刻读 NOTES.md —— **是读盘，但在「长期记忆写入」那一步**，
+ *      第 24 条的定位器只锚「钩子配置」那一步 ⇒ 同样扫不到；
+ *   ③ 「允许一次」之后**固定睡 600ms** 再读盘 —— 是读盘，但在「M19 保存过门」那一步。
+ * 三个形状的共同点：**动作发出了 ≠ 状态生效了**。
+ *
+ * 判据形状（**区间判定**）：
+ *   从每一处「会改状态的点击」（清除 / 允许一次 / 记住这一点）**往后**看，
+ *   到「读真值」或「下一个点击」为止 —— 这中间**必须出现过一个「等状态的 await」**。
+ *   「等状态的 await」有两种形态：
+ *   (a) `await <某个 promise>` —— 那个 promise 的结果就是「状态已生效」的真值
+ *       （工具调用自己的 promise：`await first;` / `await accepted;`；或本地异步函数的返回值）；
+ *   (b) `await wait*(...)` / `await poll*(...)` —— 等界面上会出现一个信号。
+ *   **三种明确不算**（它们都不是「状态已生效」）：
+ *   · `await win.waitForSelector(..., { state: 'detached' })` —— 弹窗消失只代表
+ *     **主进程拿到了答案**，写盘/生效还在后面（这正是 T64 自己的话）；
+ *   · `await new Promise(r => setTimeout(r, N))` —— **固定等待 = 靠时序运气**；
+ *   · `await <locator>.fill() / .selectOption() / .click() ...` —— **操作控件**，不是等状态
+ *     （`await addressBox.fill(...)` 是"等输入框填好"，与服务端状态无关）。
+ *
+ * 另加两条**必修项**（T71 那两个可等信号不许被删掉）：
+ *   `waitForText('已清除自选程序')` 与 `waitForText('已写入长期记忆')` 必须在场。
+ *
+ * **前五版栽过的坑（写在这里免得再犯）**：
+ *   第 1 版判「点击之后的**下一句**」⇒ ① 漏了等待函数的**变体名**；② 把「下一句是
+ *     if (x !== true) fail(...)」（断言**上一句**已等出的变量）当违规；③ 还把「const cleared =
+ *     await waitForText(...)」这种**声明+等待**跳过去 ⇒ **真违规一条没抓到**（16 处命中全误报）。
+ *   第 2 版改成「点击行 → 下一个 await 行」⇒ 误报降到 3 处，但那 3 处**逐条核实也全是误报**：
+ *     它们共同的漏法是**「等」的那句话不在「行首是 await」的位置**——一处是 `const x = await p;`
+ *     （赋值右边），一处是 `if ((await waitText3(...)) !== true)`（条件里）。
+ *   第 3 版改成「这一段里只要出现过 await 就放过」⇒ **校准直接不通过**（还原 T71 后它不红）：
+ *     「清除」之后的第一句是 `await addressBox.fill(...)` —— 它含 await，于是被当成了「等信号」。
+ *     ⇒ **「有 await」不等于「等到了状态信号」**。
+ *   第 4 版把「等状态的 await」与「操作控件的 await」分开 ⇒ 能咬住形状①，
+ *     但**咬不住形状②**：`await win.waitForSelector(…, { state: 'detached' })`
+ *     （**等弹窗消失**）被当成了「等状态生效」。⇒ 第 5 版把它明确排除。
+ *   第 5 版改成「从每一处**读真值**往前找最近的那个 await」⇒ 咬住了形状②，却
+ *     **咬不住形状①**（它后面是界面文案断言，根本没有读盘），还在 L1404 误报了一处
+ *     （`await first;` 才是真信号，"最近一个 await"这个启发式选错了行）。
+ *   ⇒ 第 6 版改成**区间判定**（从「会改状态的点击」往后走到「读真值 / 下一个动作」），
+ *     并把「等状态的 await」按**形态**分类（上面三种不算）。
+ *
+ * **只扫代码行，注释先剥掉** —— 这段判据的说明文字里就写着那些函数名，
+ * 不剥会被自己的解释骗红（T58 撞过同一件事）。
+ * ------------------------------------------------------------------ */
+{
+  const rel = 'apps/desktop/scripts/e2e-ui.mjs';
+  const bad = [];
+  if (!exists(rel)) {
+    bad.push(`${rel} 不在了 —— 这条守卫的定位器要跟着改`);
+  } else {
+    const src = read(rel);
+    // 只留代码行（注释先剥掉：这段判据的说明文字里就写着那些函数名）
+    let inBlock = false;
+    const code = [];
+    for (const line of src.split('\n')) {
+      const t = line.trim();
+      if (inBlock) {
+        code.push('');
+        if (t.includes('*/')) inBlock = false;
+        continue;
+      }
+      if (t.startsWith('/*')) {
+        code.push('');
+        if (!t.includes('*/')) inBlock = true;
+        continue;
+      }
+      code.push(t.startsWith('//') ? '' : line);
+    }
+    // 「会改状态的点击」：点了之后，脚本接下来要观察的正是「它到底生效没有」
+    const ARM = /hasText:\s*'(清除|允许一次|记住这一点)'/;
+    // 「读真值」：读磁盘
+    const READ = /readFileSync|existsSync|readdirSync/;
+    // 操作控件：对控件动手，不是等状态
+    const ACTION =
+      /\.(click|fill|selectOption|type|press|hover|check|uncheck|setInputFiles|focus|blur|scrollIntoViewIfNeeded|tap|dblclick)\s*\(/;
+    // 读界面（拿当前值），不是等状态
+    const UI_READ =
+      /\.(evaluate|evaluateHandle|count|textContent|innerText|inputValue|isVisible|isChecked|getAttribute|boundingBox|allTextContents|locator|getByRole|getByText|getByLabel|getByPlaceholder)\s*\(/;
+
+    /** 那一行里的 await 属于哪一类 */
+    const awaitKind = (t) => {
+      if (!/\bawait\b/.test(t)) return 'none';
+      // 等弹窗消失：只代表主进程拿到了答案，写盘/生效还在后面
+      if (/waitForSelector\([^)]*state:\s*'detached'/.test(t)) return 'dialog-gone';
+      // 固定等待 = 靠时序运气
+      if (/waitForTimeout\s*\(/.test(t)) return 'fixed-sleep';
+      if (/new Promise\s*\(/.test(t) && /setTimeout/.test(t)) return 'fixed-sleep';
+      // 操作控件：不是等状态
+      if (ACTION.test(t)) return 'action';
+      // 等一个界面条件
+      if (/\.waitFor\s*\(/.test(t)) return 'state';
+      // 等信号：await wait*(...) / await poll*(...)（不认具体函数名）
+      if (/\bawait\s+(wait|poll)[A-Za-z0-9_]*\s*\(/.test(t)) return 'state';
+      // 等操作自己的 promise：await first;  /  const x = await first;
+      if (/\bawait\s+[A-Za-z_$][\w$]*\s*;/.test(t)) return 'state';
+      // 等本地异步函数的返回值：await tailText();
+      if (/\bawait\s+[A-Za-z_$][\w$]*\s*\(/.test(t) && !UI_READ.test(t)) return 'state';
+      return 'other';
+    };
+
+    // 触发点：会改状态的点击
+    const triggers = [];
+    code.forEach((t, i) => {
+      if (/\.click\(\)/.test(t) && ARM.test(t)) triggers.push(i);
+    });
+
+    let stateHits = 0;
+    for (const i of triggers) {
+      let j = i + 1;
+      let hit = null;
+      let boundary = null;
+      let lastNotState = null;
+      while (j < code.length) {
+        const raw = code[j];
+        const t = raw.trim();
+        if (t === '' || t.startsWith('//')) {
+          j += 1;
+          continue;
+        }
+        if (READ.test(raw)) {
+          boundary = { kind: 'read', line: j + 1, text: t };
+          break;
+        }
+        if (/\.click\(\)/.test(raw)) {
+          boundary = { kind: 'click', line: j + 1, text: t };
+          break;
+        }
+        const kind = awaitKind(t);
+        if (kind === 'state') {
+          hit = { line: j + 1, text: t };
+          break;
+        }
+        if (kind === 'dialog-gone' || kind === 'fixed-sleep' || kind === 'action') {
+          lastNotState = { kind, line: j + 1, text: t };
+        }
+        j += 1;
+      }
+      if (hit !== null) {
+        stateHits += 1;
+        continue;
+      }
+      if (boundary === null) continue; // 后面既没有读真值也没有下一个动作 ⇒ 不是这个形状
+      const verb = /hasText:\s*'([^']*)'/.exec(code[i]);
+      const what = boundary.kind === 'read' ? '读真值' : '点了下一个动作';
+      bad.push(
+        `第 ${String(boundary.line)} 行${what}，但它前面那次「${verb === null ? '?' : verb[1]}」之后` +
+          '**没有等到「状态已生效」**' +
+          (lastNotState === null
+            ? ''
+            : `（区间里只有第 ${String(lastNotState.line)} 行的「${lastNotState.kind}」）`) +
+          ' —— 动作发出了 ≠ 状态生效了（T71 / T64 同族）',
+      );
+    }
+
+    // 防失焦下限：扫描没走到该走的地方，比不装更坏
+    if (triggers.length < 8) {
+      bad.push(
+        `只扫到 ${String(triggers.length)} 处「会改状态的点击」（少于 8 处）—— 扫描或脚本形状变了`,
+      );
+    }
+    if (stateHits < 8) {
+      bad.push(
+        `只扫到 ${String(stateHits)} 处「等到了状态信号」（少于 8 处）—— 扫描或脚本形状变了`,
+      );
+    }
+
+    // 必修项：T71 那两个可等信号不许被删掉（区间判据之外的兜底）
+    for (const needle of ["waitForText('已清除自选程序')", "waitForText('已写入长期记忆')"]) {
+      if (!code.some((l) => l.includes(needle))) {
+        bad.push(`T71 的可等信号没了：${needle} 必须在场 —— 那是本轮修的那两个等待`);
+      }
+    }
+  }
+  report(
+    'e2e 里「读真值 / 下一个动作」之前先等到「状态已生效」（固定等待与弹窗消失都不算 · T71）',
+    bad.length === 0,
+    '动作发出了 ≠ 状态生效了：批准/清除之后必须等界面上那句回执（或那次操作自己的 await），' +
+      '再读盘、再点下一个动作。\n     ' +
+      bad.join('\n     '),
+  );
+}
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

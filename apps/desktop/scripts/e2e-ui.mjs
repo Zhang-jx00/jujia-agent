@@ -1493,7 +1493,20 @@ try {
   ok('硬 ask 不给「总是允许」、批准不外溢；拒绝 → 零交付');
 
   // ⑤ 清除自选程序之后：缺前置条件就直接说清楚，不弹一个注定失败的确认框
+  //
+  // **T71 的修法：把"清除生效"变成一个可等的信号**（原先这里是"点『清除』→ 立刻点『打开』"，
+  // 中间没有任何"清除真的生效了"的等待 ⇒ 主进程还没清完，确认框就按**旧路径**拼出来了）。
+  //
+  // 等的是**界面上已经存在的那句回执**（`browser.ts` 的 `clearExePath()` 返回
+  // `message: '已清除自选程序（下次选档时会提示重新选择）'`，渲染层 `clearExe()` 用 `setMessage` 显示它）——
+  // 这句出现，就等于"主进程已清完 + 渲染层已刷新"。**不是新增机制，是把已经在的那句话当成信号用。**
+  //
+  // **不许放宽超时、不许删断言**：下面那两句断言（"还没有选定" / 不弹确认框）一个字没动。
   await win.locator('button', { hasText: '清除' }).first().click();
+  const cleared = await waitForText('已清除自选程序');
+  if (cleared !== true) {
+    fail('点了「清除」但主进程没回"已清除自选程序" —— 清除没生效，后面那步必然按旧路径走', String(cleared).slice(0, 800));
+  }
   const thirdUrl = '/handed-exe-3';
   await addressBox.fill(`${baseUrl}${thirdUrl}`);
   await win.locator('button', { hasText: '打开' }).first().click();
@@ -1690,6 +1703,22 @@ try {
   if (noteDialog !== true) fail('点「记住这一点」没有过权限门（写类必须问人）', String(noteDialog).slice(0, 600));
   await win.locator('button', { hasText: '允许一次' }).first().click();
   await win.waitForSelector('[role="dialog"][aria-label="权限请求"]', { state: 'detached', timeout: 8_000 });
+  /**
+   * **T71 同轮修的第二个形状（`[23]` 那一族）**：原先这里**弹窗一 detached 就立刻读盘**，
+   * 而"弹窗消失"只代表**主进程拿到了答案** —— `appendNote()` 的**写盘还在后面**。
+   * 这与 T64（批准了却没写进磁盘）是同一个形状，护栏第 24 条只管住了「钩子配置」那一步，
+   * **这一半还没被盯住**。
+   *
+   * **等的是界面上已经存在的那句回执**：`note-tool.ts` 的 `run()` 在 `await appendNote()`
+   * **之后**才返回 `content: '已写入长期记忆：…'`，渲染层 `remember()` 把它放进
+   * `noteHint`（`role="status"` 的那一行）⇒ **这句话出现 = 写盘真的完成了**。
+   * 和 T71 一样：**不是新增机制，是把已经在的那句话当成信号用**。
+   * **不许放宽超时、不许删断言**：下面两句断言一个字没动。
+   */
+  const noted = await waitForText('已写入长期记忆');
+  if (noted !== true) {
+    fail('允许之后没等到"已写入长期记忆" —— 写盘还没完成就往下走了', String(noted).slice(0, 800));
+  }
   const notesAfter = readFileSync(notesFile, 'utf8');
   if (notesAfter.length <= notesBefore.length) fail('点了按钮也允许了，NOTES.md 却没多出行');
   if (!notesAfter.includes('E2E_PERSIST_答一')) fail('记下的不是被点那条回答的内容', notesAfter.slice(-400));
@@ -2479,7 +2508,20 @@ try {
     fail('保存没有过权限门 —— 写类操作必须问人（与模型调 write_file 同一扇门）', (await body3()).slice(0, 900));
   }
   await win3.locator('button', { hasText: '允许一次' }).first().click();
-  await new Promise((r) => setTimeout(r, 600));
+  /**
+   * **T71 同族的第三处**（R39 现扫新发现，不在原题面里）：
+   * 原先这里是「批准 → 固定睡 600ms → 读盘」—— **靠时序赌运气**，
+   * 等于把"批准了"当成"写盘完成了"（T71 那一族的第三个形状）。
+   *
+   * `write_file` 的回执是 `已覆盖：<路径>（<n> 字节）`（`file-tools.ts` 的 `run()`），
+   * IDE 把它显示在 `role="status"` 那一行 ⇒ **这一句出现 = 写盘真的完成了**
+   * （`await toolRun(...)` 是写盘**之后**才返回的）。
+   * **不许放宽超时、不许删断言**：下面那句读盘断言一个字没动。
+   */
+  const ideSaved = await waitText3('已覆盖：');
+  if (ideSaved !== true) {
+    fail('批准之后没等到「已覆盖」那一句 —— 写盘还没完成就往下走了', (await body3()).slice(0, 800));
+  }
   const savedText = readFileSync(join(wsDir, ideFile), 'utf8');
   if (!savedText.includes('第三行（e2e 加的）')) {
     fail('批准了，磁盘上却没有这一行（界面说成功不算数）', savedText.slice(0, 300));
@@ -2488,7 +2530,16 @@ try {
   await win3.locator('button', { hasText: '保存' }).first().click();
   if ((await waitText3('需要你确认：', 10_000)) !== true) fail('第二次保存没有弹确认', (await body3()).slice(0, 700));
   await win3.locator('button', { hasText: '拒绝' }).first().click();
-  await new Promise((r) => setTimeout(r, 600));
+  /**
+   * 拒绝这一支也要等**决定落地**再读盘：原来同样是固定睡 600ms。
+   * 拒绝的回执是工具门那句话（`executor.ts`：`用户拒绝了本次 write_file 调用。…`），
+   * IDE 用 `role="alert"` 把它显示出来 ⇒ **这句出现 = 决定已经被处理完**。
+   * （此刻 IDE 页签是打开的，对话页签是隐藏的 ⇒ `innerText` 里那句只可能来自 IDE 面板，不是旧回执。）
+   */
+  const ideDenied = await waitText3('用户拒绝了本次 write_file 调用');
+  if (ideDenied !== true) {
+    fail('拒绝之后没等到「用户拒绝了本次 write_file 调用」那一句 —— 决定还没落地就往下走了', (await body3()).slice(0, 800));
+  }
   if (readFileSync(join(wsDir, ideFile), 'utf8').includes('不该落盘')) {
     fail('用户拒绝了，盘上却还是被写了（拒绝必须真的不做）');
   }
