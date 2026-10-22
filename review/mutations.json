@@ -2597,7 +2597,7 @@
     },
     {
       "id": "M325",
-      "desc": "主色上的按钮字色不再跟着主色走（永远取第一个候选 #101010）：深主色下按钮字与底只有 1.33:1 ⇒ 按钮看不见（R58 · T79 接线本身要靠它兜底）",
+      "desc": "主色上的按钮字色不再跟着主色走（永远取第一个候选 #101010）：主色 #1a2b3c 配固定字色 #101010 只有 1.32:1 ⇒ 按钮看不见（R58 · T79 接线本身要靠它兜底）",
       "file": "packages/ui-tokens/src/theme-pack.ts",
       "find": "    if (r > bestRatio) {",
       "replace": "    if (r > bestRatio && false) {",
@@ -2613,7 +2613,7 @@
     },
     {
       "id": "M327",
-      "desc": "导入侧的主色闸门被摘掉（不达标的深主色照样收下）：按钮字与底掉到 1.33:1 ⇒ 按钮看不见（R58 · T79）",
+      "desc": "导入侧的主色闸门被摘掉（不达标的深主色照样收下）：主色 #1a2b3c 配固定字色 #101010 掉到 1.32:1 ⇒ 按钮看不见（R58 · T79）",
       "file": "apps/desktop/src/renderer/src/features/appearance/AppearancePanel.tsx",
       "find": "      if (!usable.ok) {",
       "replace": "      if (false) {",

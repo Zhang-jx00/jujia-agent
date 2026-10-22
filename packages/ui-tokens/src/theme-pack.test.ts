@@ -199,7 +199,7 @@ describe('themePackToCssVars：只产出受控变量', () => {
 describe('主色可用性（R58 · T79）', () => {
   it('按钮字色跟着主色走：深主色用白字、浅主色用 #101010', () => {
     /**
-     * 深主色 #1a2b3c：固定 #101010 时对比只有 **1.33:1** ⇒ 按钮看不见。
+     * 深主色 #1a2b3c：固定 #101010 时对比只有 **1.32:1** ⇒ 按钮看不见。
      * 这正是 R54 撤回接线的那条理由（"字色固定 ⇒ 深主色下按钮消失"）⇒ 现在它有兜底了。
      */
     const dark = checkPrimaryUsable('#1a2b3c');
@@ -235,6 +235,20 @@ describe('主色可用性（R58 · T79）', () => {
     expect(v.surfaceRatio).not.toBeNull();
     expect(v.surfaceRatio!).toBeLessThan(3);
     expect(v.advice).toContain('焦点环');
+  });
+
+  it('灰带的**确切档数与上下界**（台账里那处数字的出处 —— 不许手写，须由这条断言守）', () => {
+    /**
+     * 为什么要有这条：台账里写着「灰带 #777777–#7b7b7b 共 5 档」——
+     * 而**那一段是我手算的**（R59 现扫发现手算的上界错了一档：#7a7a7a vs #7b7b7b）。
+     * ⇒ 凡是会漂的边界，**由单测断言、台账只引用它**，别让两个地方各写一份。
+     */
+    const band: string[] = [];
+    for (let v = 0x60; v <= 0xff; v += 1) {
+      const hex = `#${v.toString(16).padStart(2, '0').repeat(3)}`;
+      if (contrastRatio('#101010', hex)! < 4.5 && contrastRatio('#ffffff', hex)! < 4.5) band.push(hex);
+    }
+    expect(band).toEqual(['#777777', '#787878', '#797979', '#7a7a7a', '#7b7b7b']);
   });
 
   it('闸门：灰带主色被拒（#787878 —— 两种字色都到不了 4.5:1）', () => {
