@@ -88,7 +88,7 @@
 
 ### 3.4 明确不做（不必等，避免重复问）
 
-- ~~M20–M22 远程接入 / 云 worker / 调度~~ —— 与"数据不出本机"的表述冲突未解；**R16 决策备忘已出**（`docs/DECISION-REMOTE.md`：选项 A–C + 先决清单），**拍板前不动工**（见 HANDOVER §5.8）
+- ~~M20–M22 远程接入 / 云 worker / 调度~~ —— **表述冲突已解**（R53 · 已决口径 = **选项 B：修订表述**，见 `docs/DECISION-SELF-DIRECTED.md`；`SECURITY.md` 出站表已加「用户自建主机」类）—— **能力本身仍未开工**（⏳ 未开始；不再是因为"冲突没解"，见 HANDOVER §5.8）
 - ~~命令级 `allow`~~ —— 停牌①永久不开（`checkRuleInput` 直接拒）
 - ~~CodeMirror~~ —— M19 已评估"暂不引入"（触发判据见 `docs/DESIGN-M19-IDE.md` §10.2）
 
