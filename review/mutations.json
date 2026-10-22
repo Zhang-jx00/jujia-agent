@@ -2578,6 +2578,22 @@
       "find": "  if (raw.trim() === '') throw new Error('文件是空的（可能是写坏了）');",
       "replace": "  if (raw.trim() === '') return undefined;",
       "test": "apps/desktop/src/main/permission-rules-store.test.ts"
+    },
+    {
+      "id": "M323",
+      "desc": "只支持 b64_json：把服务商的图片**链接**当成图片数据收下（那等于让主进程再去下载那个 URL ⇒ SSRF 面回来）",
+      "file": "packages/agent-core/src/providers/openai-compat.ts",
+      "find": "    const b64 = obj['b64_json'];",
+      "replace": "    const b64 = (typeof obj['b64_json'] === 'string' ? obj['b64_json'] : (typeof obj['url'] === 'string' ? obj['url'] : undefined));",
+      "test": "packages/agent-core/src/providers/openai-compat-image.test.ts"
+    },
+    {
+      "id": "M324",
+      "desc": "回程字节的 5MB 上限：超限的图片也照收（超限 = 原图直发烧 token，内存与磁盘都跟着涨）",
+      "file": "apps/desktop/src/main/media/image-gen-service.ts",
+      "find": "    if (bytes.byteLength > IMAGE_MAX_BYTES) {",
+      "replace": "    if (false) {",
+      "test": "apps/desktop/src/main/media/image-gen-service.test.ts"
     }
   ]
 }

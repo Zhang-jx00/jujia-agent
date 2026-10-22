@@ -3919,6 +3919,32 @@ try {
   if (!glassOk) {
     fail(`选了「毛玻璃」，根容器上既没有 blur、也没有降级后的不透明底（探针：${JSON.stringify(backdrop)}）`);
   }
+  /**
+   * T81（2026-10-22）：**系统把透明关掉时，界面必须说清是谁关掉的**。
+   *
+   * 降级本身是对的（尊重系统偏好）⇒ 但用户只看得到"毛玻璃没生效" ⇒ 会以为应用坏了
+   * ⇒ 外观页在选中「毛玻璃」且 `prefers-reduced-transparency: reduce` 命中时，**必须有一句说明**。
+   *
+   * 判据是**双向**的：命中 ⇒ 那句话必须在；**不命中 ⇒ 那句话不许在**
+   * （否则就会变成一句"永远显示的废话"）。
+   */
+  const reducedNote = await win3.evaluate(() => {
+    const el = document.querySelector('[data-reduced-transparency="true"]');
+    return {
+      reduced: window.matchMedia('(prefers-reduced-transparency: reduce)').matches,
+      noteShown: el !== null,
+      text: el === null ? '' : (el.textContent ?? '').trim().slice(0, 40),
+    };
+  });
+  if (reducedNote.reduced && !reducedNote.noteShown) {
+    fail(
+      '系统开着「减少透明」、毛玻璃被降级成不透明底，但界面**没有一句说明**（用户只会以为应用坏了）',
+      JSON.stringify(reducedNote),
+    );
+  }
+  if (!reducedNote.reduced && reducedNote.noteShown) {
+    fail('系统没有开「减少透明」，界面却显示了那条说明（一句永远挂着的废话）', JSON.stringify(reducedNote));
+  }
   // 还原默认样式包，免得后面的步骤读到"被改过的主题"（体验诚实：改过的东西要改回去）
   await win3.locator('button', { hasText: '默认暗色' }).first().click();
   ok(
@@ -4721,6 +4747,36 @@ try {
       titleH: title ? Math.round(title.getBoundingClientRect().height) : 0,
     };
   });
+  /**
+   * T84（2026-10-22）：**窄窗口下外观页那 5 个字段不许掉行**。
+   *
+   * 实测：内宽 1025 时 `.jj-grid` 只排得下 4 列 ⇒ 第 5 项（「显示时间戳」）**独占第二行**
+   * （top 差 69px）⇒ 观感上"最后一项被甩下去了"。
+   * 修法：列最小宽 180 → **160px**（`auto-fit` 的最小列宽）⇒ 873px 宽装得下 5 列（5×160 + 4×12 = 848 ≤ 873）。
+   * 改的是**共享类** `.jj-grid` —— 现扫确认它**全仓只有 2 处、且都在外观页** ⇒ 不牵动别的面板。
+   *
+   * **判据量的是真窗口里排出来的行数**（不是 CSS 里的数字）—— 声明层说"改了"不算数，**排出来才是**。
+   */
+  await live.locator('nav.app-tabs button', { hasText: '外观' }).first().click();
+  const narrowGrid = await live.evaluate(() => {
+    let rows = 0;
+    for (const g of [...document.querySelectorAll('.jj-grid')]) {
+      const kids = [...g.children].filter((el) => el.getBoundingClientRect().width > 0);
+      if (kids.length < 5) continue; // 只看那组 5 个字段
+      const tops = new Set(kids.map((el) => Math.round(el.getBoundingClientRect().top)));
+      rows = Math.max(rows, tops.size);
+    }
+    return { rows };
+  });
+  await live.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  if (narrowGrid.rows > 1) {
+    fail(
+      '渲染契约：窄窗口（940px）下外观页那 5 个字段掉成了 ' +
+        String(narrowGrid.rows) +
+        ' 行（最后一项被甩到第二行去了）',
+      JSON.stringify(narrowGrid),
+    );
+  }
   if (beforeSize !== null) {
     await app.evaluate(({ BrowserWindow }, s) => {
       const w = BrowserWindow.getAllWindows()[0];

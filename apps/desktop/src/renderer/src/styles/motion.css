@@ -255,11 +255,14 @@ summary:active,
 
 }
 
-/* 尊重"减少透明度"偏好：主题包的玻璃背景降级为不透明（R20 修：原来指的是没人用的 .jj-glass） */
+/* 尊重"减少透明度"偏好：主题包的玻璃背景降级为不透明（R20 修：原来指的是没人用的 .jj-glass）
+   T81（2026-10-22）：降级后的底色**改成 `--c-bg-layout`**（#141414）⇒ 与"默认暗色"那块底**同色**。
+   原来用的 `--c-bg-container` 是 #1f1f1f ⇒ **比默认暗色还亮 11/255** ⇒ 用户选了"毛玻璃"，
+   看不到玻璃，却拿到一块**比默认还亮的死板** ⇒ 观感上像是"应用把主题弄坏了"。 */
 @media (prefers-reduced-transparency: reduce) {
   html[data-jj-bg-kind='glass'] .app-root {
     backdrop-filter: none !important;
-    background: var(--c-bg-container) !important;
+    background: var(--c-bg-layout) !important;
   }
 }
 

@@ -626,6 +626,15 @@ const cases = [
 let aborted = false;
 /** 每个被注入过的文件的**原文**（收尾时逐字节核对 ⇒ 还原不能只靠"检查器恢复通过"）。 */
 const backups = new Map();
+/**
+ * **自检期间被人动过的文件**（T80 · 2026-10-22 补）。
+ *
+ * 为什么单独记：旧写法在 `finally` 里**无条件**把快照写回 ⇒ 自检期间有人编辑了该文件，
+ * **人家的改动被静默抹掉**（最坏的一种：改动无声消失）；而收尾那句"没有逐字节回到原文"
+ * 又只是**假红** —— 「期间被改过」与「它没还原」两种情形**长成同一句话**。
+ * ⇒ 现在：期间被改过就**保留当前内容**（不写回），并**单独归因**（见收尾）。
+ */
+const touched = [];
 const headAtStart = await gitHead();
 try {
   for (const c of cases) {
@@ -635,8 +644,10 @@ try {
     if (!original.includes(c.from)) {
       fail(`用例「${c.name}」的锚点未命中 —— 请更新本脚本的锚点`);
     }
+    let injected = '';
     try {
-      writeFileSync(path, original.replace(c.from, c.to), 'utf8');
+      injected = original.replace(c.from, c.to);
+      writeFileSync(path, injected, 'utf8');
       const r = await runCheck();
       if (r.code !== 1) fail(`用例「${c.name}」没有被拦住（检查器退出码 ${String(r.code)}，应为 1）`);
       if (!r.out.includes(c.expect)) {
@@ -644,7 +655,15 @@ try {
       }
       console.log(`  ✅ 被拦住：${c.name}`);
     } finally {
-      writeFileSync(path, original, 'utf8');
+      // **还原前先看有没有人动过**（T80）：期间被改过 ⇒ 写回快照会**静默抹掉**人家的改动 ⇒
+      // ⇒ 保留当前内容（不写回），并交给收尾**单独归因**（"期间被改" ≠ "没还原"）。
+      const current = readFileSync(path, 'utf8');
+      if (current !== injected) {
+        touched.push({ file: c.file, name: c.name });
+        console.log(`  ⚠️ 用例「${c.name}」期间 ${c.file} 被改过 ⇒ 保留当前内容，不写回快照`);
+      } else {
+        writeFileSync(path, original, 'utf8');
+      }
     }
   }
 } catch (err) {
@@ -661,16 +680,29 @@ if (aborted) {
   );
   process.exit(1);
 }
-if (after.code !== 0) die('还原后检查器仍失败 —— 基线已被污染，请人工检查');
-
 /**
- * 收尾两道自查（2026-10-21 加）：
+ * **收尾三道自查**（2026-10-21 加两道 · 2026-10-22 T80 再加一道"期间被改"的独立归因）：
  * ① **被注入的每个文件必须逐字节回到原文** —— 「检查器恢复通过」不等于「文件没被留下别的形态」；
- * ② **HEAD 必须没变** —— 变了就说明**期间有人提交**，那一笔收进去的可能就是注入形态。
+ * ② **HEAD 必须没变** —— 变了就说明**期间有人提交**，那一笔收进去的可能就是注入形态；
+ * ③ **期间被改过的文件单独归因** —— 它与「没还原」是**两件事**（T80）：
+ *    旧写法在自检期间**无条件**写回快照 ⇒ 有人同时编辑该文件时，**他的改动被静默抹掉**；
+ *    而收尾那句"没有逐字节回到原文"又只是**假红**（两种情形长成同一句话）⇒ 混在一起就分不清了。
  */
+const touchedFiles = new Set(touched.map((t) => t.file));
 const notRestored = [...backups.entries()]
+  .filter(([p]) => !touchedFiles.has(p)) // 期间被改过的 ⇒ 归到「另一类」，不混进「没还原」
   .filter(([p, original]) => readFileSync(p, 'utf8') !== original)
   .map(([p]) => p);
+if (touched.length > 0) {
+  console.error(
+    `\n❌ 自检期间**这些文件被人改过**：${[...touchedFiles].join('、')}\n` +
+      '   ⇒ 这与"注入没还原"是**两件事**（T80）：旧写法会把人家的改动**静默抹掉**，现在**保留当前内容**、不写回快照。\n' +
+      '   ⇒ 本轮自检**对这几个文件的结论不可用**（注入的形态与他们的改动混在一起了）—— 请重跑一次自检。\n' +
+      '   **顺序纪律**：注入自检会临时改工作树 ⇒ 跑它的时候**不许提交，也不许编辑**。',
+  );
+  process.exit(1);
+}
+if (after.code !== 0) die('还原后检查器仍失败 —— 基线已被污染，请人工检查');
 if (notRestored.length > 0) {
   console.error(
     `\n❌ 自检跑完，但**这些文件没有逐字节回到原文**：${notRestored.join('、')}\n` +

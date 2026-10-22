@@ -860,7 +860,11 @@ summary:focus-visible {
 
 .jj-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  /* T84（2026-10-22）：列最小宽 180 → **160px** —— 窄窗口（内宽 ≤1025）下这一组 5 个字段
+     只排得下 4 列 ⇒ 最后一项（「显示时间戳」）**独占第二行**（top 差 69px）⇒ 像"被甩下去"。
+     160px 时 873px 宽装得下 5 列（5×160 + 4×12 = 848 ≤ 873）⇒ 五个同排。
+     改的是**共享类**，但现扫确认它**全仓只有 2 处、且都在外观页** ⇒ 不牵动别的面板。 */
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: var(--space-md);
 }
 

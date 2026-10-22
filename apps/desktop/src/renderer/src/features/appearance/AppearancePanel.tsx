@@ -45,6 +45,20 @@ export function AppearancePanel({ pack, onSave }: AppearancePanelProps): ReactEl
   const [importError, setImportError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  /**
+   * T81（2026-10-22）：**「毛玻璃」这个包在开了「减少透明」的系统上用不了** ——
+   * 系统偏好命中时，`styles/motion.css` 的降级块把整屏模糊换成不透明底
+   * （**这是尊重系统偏好，不是 bug**），但用户只看得到"毛玻璃没生效" ⇒ **界面必须说清是谁关掉的**。
+   * 实测：本机 Electron 44.4.2 的 `prefers-reduced-transparency: reduce` **默认命中**
+   * ⇒ 四个内置包里有一个**在这台机器上永远看不到玻璃**（R54/R55 两轮现扫都量到了）。
+   */
+  const reducedTransparency = useMemo(
+    () =>
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-transparency: reduce)').matches,
+    [],
+  );
 
   // 外部配置变化时同步（例如启动时从配置读出来的值）
   useEffect(() => {
@@ -220,6 +234,11 @@ export function AppearancePanel({ pack, onSave }: AppearancePanelProps): ReactEl
             </button>
           ))}
         </div>
+        {draft.background.kind === 'glass' && reducedTransparency && (
+          <p className="p0-subtitle" data-reduced-transparency="true">
+            你的系统开着「减少透明」⇒ **毛玻璃这个包在这台机器上会用不透明底代替**（不是应用坏了，是系统的偏好；关掉那个偏好就能看到玻璃）。
+          </p>
+        )}
       </div>
 
       <div className="jj-grid">
