@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkContrast,
+  checkPrimaryUsable,
   mergePackOverrides,
   contrastRatio,
   BUILTIN_PACKS,
   DEFAULT_BACKGROUND,
+  pickPrimaryInk,
   relativeLuminance,
+  suggestUsablePrimary,
+  THEME_PACK_VAR_KEYS,
   themePackToCssVars,
   validateThemePack,
 } from './theme-pack';
@@ -182,6 +186,104 @@ describe('themePackToCssVars：只产出受控变量', () => {
     const pack = validateThemePack(valid()).pack;
     const keys = Object.keys(themePackToCssVars(pack!));
     expect(keys.every((k) => k.startsWith('--jj-'))).toBe(true);
+  });
+});
+
+/**
+ * R58 · T79：**主色接上线之后的那些判定**。
+ *
+ * 为什么这一组用例是承重的：主色一旦真的接到渲染层，它就同时管三件事 ——
+ * ① 按钮底色 ② 按钮上的字色 ③ 焦点环与边框。
+ * ⇒ "这个主色行不行"必须**逐条**答，而不是"看着挺好看"。
+ */
+describe('主色可用性（R58 · T79）', () => {
+  it('按钮字色跟着主色走：深主色用白字、浅主色用 #101010', () => {
+    /**
+     * 深主色 #1a2b3c：固定 #101010 时对比只有 **1.33:1** ⇒ 按钮看不见。
+     * 这正是 R54 撤回接线的那条理由（"字色固定 ⇒ 深主色下按钮消失"）⇒ 现在它有兜底了。
+     */
+    const dark = checkPrimaryUsable('#1a2b3c');
+    expect(dark.ink).toBe('#ffffff');
+    expect(dark.inkRatio).not.toBeNull();
+    expect(dark.inkRatio!).toBeGreaterThanOrEqual(4.5);
+
+    /** 浅主色 #f0f0f0：白字压上去只有 1.14:1 ⇒ 必须用深字 */
+    const light = checkPrimaryUsable('#f0f0f0');
+    expect(light.ink).toBe('#101010');
+    expect(light.inkRatio!).toBeGreaterThanOrEqual(4.5);
+
+    expect(pickPrimaryInk('#1a2b3c')).toBe('#ffffff');
+    expect(pickPrimaryInk('#f0f0f0')).toBe('#101010');
+  });
+
+  it('四个内置包的主色都可用（"内置包不会触发闸门"是证过的，不是假设）', () => {
+    for (const p of BUILTIN_PACKS) {
+      const v = checkPrimaryUsable(p.primary!);
+      expect(v.ok, `${p.id} 的主色 ${p.primary} 不可用：${v.advice ?? ''}`).toBe(true);
+    }
+  });
+
+  it('四个内置包的按钮字色都还是 #101010 ⇒ 渲染结果与接线前一致（e2e 那条 5.94:1 不变）', () => {
+    for (const p of BUILTIN_PACKS) {
+      expect(pickPrimaryInk(p.primary!), `${p.id} 的字色变了`).toBe('#101010');
+    }
+  });
+
+  it('闸门：太深的主色被拒（焦点环会消失在深色界面上）', () => {
+    const v = checkPrimaryUsable('#1a2b3c');
+    expect(v.ok).toBe(false);
+    expect(v.surfaceRatio).not.toBeNull();
+    expect(v.surfaceRatio!).toBeLessThan(3);
+    expect(v.advice).toContain('焦点环');
+  });
+
+  it('闸门：灰带主色被拒（#787878 —— 两种字色都到不了 4.5:1）', () => {
+    const v = checkPrimaryUsable('#787878');
+    expect(v.ok).toBe(false);
+    // 两种字色都不过 AA ⇒ 不是"选一个没那么差的"，是两个都不行
+    expect(contrastRatio('#101010', '#787878')!).toBeLessThan(4.5);
+    expect(contrastRatio('#ffffff', '#787878')!).toBeLessThan(4.5);
+    expect(v.inkRatio!).toBeLessThan(4.5);
+    // 焦点环这一项它是好的 ⇒ 错在字色，不在主色本身
+    expect(v.surfaceRatio!).toBeGreaterThanOrEqual(3);
+    expect(v.advice).toContain('4.5');
+  });
+
+  it('建议色：给得出、改完真的可用、且与原色不同', () => {
+    const s = suggestUsablePrimary('#787878');
+    expect(s).toBeDefined();
+    expect(s).not.toBe('#787878');
+    expect(checkPrimaryUsable(s!).ok).toBe(true);
+  });
+
+  it('没有主色的包不产出主色与字色（字色回落默认 ⇒ 渲染不变）', () => {
+    const raw = valid();
+    delete raw['primary'];
+    const pack = validateThemePack(raw).pack!;
+    const vars = themePackToCssVars(pack);
+    expect(vars['--jj-primary']).toBeUndefined();
+    expect(vars['--jj-primary-ink']).toBeUndefined();
+  });
+
+  it('产出变量表与「可能产出的全部变量」清单两向对齐', () => {
+    /**
+     * 为什么两向都查：
+     * - 只查"产出 ⊆ 清单" ⇒ 清单漏一个键 ⇒ 那个变量**永远清不掉**（换包后残值赖着不走）；
+     * - 只查"清单 ⊆ 产出" ⇒ 清单里可以有死项 ⇒ 清单在骗人（读的人以为它管着那个变量）。
+     */
+    const maximals = [
+      { ...valid(), background: { kind: 'solid', color: '#101820', opacity: 0.8, blurPx: 4 } },
+      { ...valid(), background: { kind: 'gradient', from: '#1b2440', to: '#0f1117' } },
+      { ...valid(), background: { kind: 'image', imageUrl: 'https://x.test/a.png' } },
+    ];
+    const produced = new Set<string>();
+    for (const raw of maximals) {
+      const pack = validateThemePack(raw).pack!;
+      for (const k of Object.keys(themePackToCssVars(pack))) produced.add(k);
+    }
+    const listed = THEME_PACK_VAR_KEYS as readonly string[];
+    expect([...produced].filter((k) => !listed.includes(k))).toEqual([]);
+    expect([...THEME_PACK_VAR_KEYS].filter((k) => !produced.has(k))).toEqual([]);
   });
 });
 

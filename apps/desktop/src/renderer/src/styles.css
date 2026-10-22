@@ -5,16 +5,17 @@
   --bg-container: var(--c-bg-container);
   --text: var(--c-text);
   --text-secondary: var(--c-text-secondary);
-  /* R54：`--jj-primary`（主题包写出的主色）**本轮刻意不接**，规格见 `docs/TRACK-PLANS.md` 的 T79。
-     理由（现扫后复核的结论，勿擅自接上）：
-       ① 现扫把它列为「产品决定」，本轮只做量过的、看得见的 UI 修正；
-       ② 它现在是**惰性**字段（无人读 ⇒ 导入的深色主色不会生效），
-          一接上就变成**活的**：用户导入一个深主色 ⇒ 主按钮底色变深，而按钮字色固定 #101010
-          ⇒ 对比度可低到 1:1（看不见）；
-       ③ 要补这道闸门就得动 `validateThemePack` —— 而它**管着启动时加载已保存的样式包**，
-          在那里加硬拒绝会把用户**已存**的包静默退回默认包。
-     ⇒ 接线 + 闸门一起做，且单独成轮（T79），不在本轮顺手带上。 */
-  --primary: var(--c-primary);
+  /* R58（T79）：`--jj-primary`（主题包写出的主色）**接上了** —— 规格与改法见 `docs/TRACK-ROADMAP.md` §4.1 的 T79。
+     ⚠️ 之前那两处把规格指到了 `docs/TRACK-PLANS.md`（**那份是轨道分类法，里面并没有这一条**）—— **指错了文件**，本轮已改指。
+     接线为什么是安全的（接线**单独**做会出事，闸门与它同轮才成立）：
+       ① 字色不再写死 —— 按钮字色取 `--jj-primary-ink`（令牌层按主色算出：#101010 / #ffffff 里对比度高的那个），
+          所以深主色不会把按钮变成"看不见"（固定 #101010 时对比度可低到 1:1）；
+       ② 闸门在**导入侧**（外观页导入样式包处给出可读报错）—— **不动** `validateThemePack` 的加载语义
+          （它管着启动时加载已保存的样式包，在那里硬拒绝会把用户已存的包静默退回默认包）；
+       ③ 换包时会**清掉上一次的残值**（`--jj-*` 只写不清 ⇒ 不清就会"换包后主色还是上一个包的"）。 */
+  --primary: var(--jj-primary, var(--c-primary));
+  /* 按钮字色跟随主色（没有 `--jj-primary-ink` 时回落默认字色 —— 没主色的包不受影响） */
+  --primary-ink: var(--jj-primary-ink, var(--c-bg-input));
   --success: var(--c-success);
   --warning: var(--c-warning);
   --danger: var(--c-danger);
@@ -257,8 +258,10 @@ button.w2-btn-primary {
   border-color: var(--primary);
   /* R54：按基线 `DESIGN-BASELINE.md` 的 textColor（bg-input）——
      原来是 `c-text-strong`（白字压蓝底 = 3.2:1，**没过 AA**；基线那档是 5.94:1）。
-     全站 14 个主操作按钮一起回到基线。 */
-  color: var(--c-bg-input);
+     全站 14 个主操作按钮一起回到基线。
+     R58（T79）：字色**跟着主色走** —— `--primary-ink` 由令牌层按主色算出（#101010 / #ffffff 取对比度高的那个），
+     没有主色的包时它回落成基线那档 #101010 ⇒ **渲染结果不变**（逐值相等，见单测）。 */
+  color: var(--primary-ink);
 }
 
 button.w2-btn-danger {

@@ -8,6 +8,7 @@ import type { AppInfo, ConfigSnapshot, ConnectionView } from '@jujia/shared-ipc'
  */
 import type { ThemePack } from '@jujia/ui-tokens';
 import { WorkspaceCard } from './features/workspace/WorkspaceCard';
+import { applyThemeVars } from './features/appearance/theme-vars';
 import { LogCard } from './features/logs/LogCard';
 import { UpdateCard } from './features/update/UpdateCard';
 import { PermissionDialog } from './features/permission/PermissionDialog';
@@ -190,14 +191,15 @@ export function App(): ReactElement {
     const saved = state.loaded.config.config.appearance;
     let cancelled = false;
     void (async () => {
-      const { BUILTIN_PACKS, validateThemePack, themePackToCssVars } = await import(
-        '@jujia/ui-tokens'
-      );
+      const { BUILTIN_PACKS, validateThemePack, themePackToCssVars, THEME_PACK_VAR_KEYS } =
+        await import('@jujia/ui-tokens');
       if (cancelled) return;
       const check = validateThemePack(saved.pack ?? null);
       const pack = (check.ok && check.pack ? check.pack : BUILTIN_PACKS[0]) as ThemePack;
       const root = document.documentElement;
-      for (const [k, v] of Object.entries(themePackToCssVars(pack))) root.style.setProperty(k, v);
+      // R58（T79）：走 `applyThemeVars`（**先清残值再写**）—— `setProperty` 只写不清，
+      // 不清就会把上一个包的 `--jj-primary` 留在 `:root` 上 ⇒ "换包后主色还是上一个包的"。
+      applyThemeVars(root, themePackToCssVars(pack), THEME_PACK_VAR_KEYS);
       root.dataset['jjBgKind'] = pack.background.kind;
       setThemePack(pack);
     })();

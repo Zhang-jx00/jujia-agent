@@ -344,6 +344,31 @@ export function contrastRatio(fg: string, bg: string): number | null {
 export const CONTRAST_AA_NORMAL = 4.5;
 export const CONTRAST_AA_LARGE = 3;
 
+/**
+ * **非文本对比度下限**（WCAG 1.4.11 / 2.4.11：焦点环、边框这类"看得见"的图形用 3:1）。
+ *
+ * 为什么主色要按这条判：主色不只做按钮底色，还做**焦点环**（`input:focus` 的 outline）
+ * 与**边框**（选中页签、chip 悬停）。⇒ 主色太深 ⇒ 焦点环在深色界面上等于没有。
+ */
+export const CONTRAST_NON_TEXT = 3;
+
+/**
+ * 主色上候选的按钮字色。
+ *
+ * 为什么是这两个：`#101010` = 渲染层的 `--c-bg-input`（现有主按钮的字色，基线实测 5.94:1），
+ * `#ffffff` = 白字。⇒ 两者里取**对比度更高**的那个（见 `pickPrimaryInk`）。
+ */
+export const PRIMARY_INK_CANDIDATES = ['#101010', '#ffffff'] as const;
+
+/**
+ * 主色要跟哪个底色比"看得见"——**界面容器底**（`--c-bg-container` = #1f1f1f）。
+ *
+ * 为什么不用页面底（`--c-bg-layout` = #141414）：控件（输入框、chip、页签）都住在容器底那一档上，
+ * 而容器底**比页面底亮**（L 0.0137 vs 0.0070）⇒ 同一个主色对容器底的对比**更低** ⇒
+ * 拿更严的那一档判，才不会出现"按页面底算过了、放到控件上却看不见"。
+ */
+export const PRIMARY_SURFACE = '#1f1f1f';
+
 export interface ContrastAdvice {
   ok: boolean;
   ratio: number | null;
@@ -381,6 +406,194 @@ export function checkContrast(background: BackgroundSpec, foreground = '#f5f5f5'
   };
 }
 
+/* ------------------------------------------------------------------ *
+ * 四、主色可用性（接线与闸门的口径本体 · T79）
+ *
+ * 为什么需要这一段：主色一旦**真的接到渲染层**（`--primary` 读它），
+ * 它就同时管三件事 —— ① 按钮底色 ② 按钮上的字色 ③ 焦点环与边框的颜色。
+ * ⇒ "主色好不好"不能只看它好不好看，要看**它在这三处分别够不够看得见**。
+ *
+ * 两条判定（缺一不可）：
+ *   A. **按钮字色**：主色上的字取 `#101010` / `#ffffff` 里对比度更高的那个，
+ *      它对主色的对比必须 ≥ **4.5:1**（AA 正文）。
+ *      ⚠️ 存在一段**灰带**：主色亮度落在 (0.1833, 0.1969) 时，**两种字色都到不了 4.5:1**
+ *      （约等于 #777777–#7a7a7a 这一小段）⇒ 这不是"选一个没那么差的"，是**两个都不行**。
+ *   B. **焦点环/边框**：主色对界面容器底的对比必须 ≥ **3:1**（非文本）。
+ *      ⇒ 主色太深时按钮字色可能很够看（白字 14:1），但**焦点环直接消失在深色界面上**。
+ * ------------------------------------------------------------------ */
+
+export interface PrimaryUsability {
+  /** 这个主色能不能用（按钮看得见 **且** 焦点环看得见） */
+  ok: boolean;
+  /** 按钮字色该用哪个（`#101010` / `#ffffff` 里对比度更高的那个） */
+  ink: string;
+  /** 按钮文字与主色的对比度 */
+  inkRatio: number | null;
+  /** 主色与界面容器底的对比度（焦点环/边框看得见吗） */
+  surfaceRatio: number | null;
+  /** 不达标时给用户看的一句（带实测数字，不是"请检查你的颜色"） */
+  advice?: string;
+  /** 不达标时建议改成的颜色（能算出来就给得出） */
+  suggestedPrimary?: string;
+}
+
+/** 主色上的按钮字色：两个候选里取对比度更高的那个 */
+export function pickPrimaryInk(primary: string): string {
+  let best = PRIMARY_INK_CANDIDATES[0] as string;
+  let bestRatio = -1;
+  for (const ink of PRIMARY_INK_CANDIDATES) {
+    const r = contrastRatio(ink, primary) ?? -1;
+    if (r > bestRatio) {
+      bestRatio = r;
+      best = ink;
+    }
+  }
+  return best;
+}
+
+/** 判定本体（**不产建议色** —— 建议色要靠二分缩放去试，算建议色时不能再回头调建议色） */
+function primaryVerdict(primary: string): {
+  ink: string;
+  inkRatio: number | null;
+  surfaceRatio: number | null;
+  inkOk: boolean;
+  surfaceOk: boolean;
+} {
+  const ink = pickPrimaryInk(primary);
+  const inkRatio = contrastRatio(ink, primary);
+  const surfaceRatio = contrastRatio(primary, PRIMARY_SURFACE);
+  return {
+    ink,
+    inkRatio,
+    surfaceRatio,
+    inkOk: inkRatio !== null && inkRatio >= CONTRAST_AA_NORMAL,
+    surfaceOk: surfaceRatio !== null && surfaceRatio >= CONTRAST_NON_TEXT,
+  };
+}
+
+/**
+ * 判一个主色能不能用，并给出**可读的**理由与建议色。
+ *
+ * 为什么这道闸门放在**导入侧**而不是 `validateThemePack` 里：
+ * `validateThemePack` 管着**启动时加载已保存的样式包**（`App.tsx` 启动时拿它校验已存包），
+ * 在那里硬拒绝会把用户**已经存下来**的包静默退回默认包 ⇒ 那是"替用户做决定"。
+ * ⇒ 这道闸门只管**新进来的**包（导入 / 选择），已存的老包照旧加载，但界面上要说清它不达标。
+ */
+export function checkPrimaryUsable(primary: string): PrimaryUsability {
+  const v = primaryVerdict(primary);
+  if (v.inkOk && v.surfaceOk) {
+    return { ok: true, ink: v.ink, inkRatio: v.inkRatio, surfaceRatio: v.surfaceRatio };
+  }
+  const parts: string[] = [];
+  if (!v.surfaceOk) {
+    parts.push(
+      `主色与界面底色的对比只有 ${v.surfaceRatio === null ? '?' : v.surfaceRatio.toFixed(2)}:1` +
+        `（焦点环与边框需要 ${String(CONTRAST_NON_TEXT)}:1）⇒ 这个主色在深色界面上会看不见`,
+    );
+  }
+  if (!v.inkOk) {
+    parts.push(
+      `主色上的按钮文字对比只有 ${v.inkRatio === null ? '?' : v.inkRatio.toFixed(2)}:1` +
+        `（AA 需要 ${String(CONTRAST_AA_NORMAL)}:1）⇒ 这个主色做按钮底色看不清`,
+    );
+  }
+  const suggestedPrimary = suggestUsablePrimary(primary);
+  const base = `这个主色用不了：${parts.join('；')}。`;
+  return {
+    ok: false,
+    ink: v.ink,
+    inkRatio: v.inkRatio,
+    surfaceRatio: v.surfaceRatio,
+    advice:
+      base +
+      (suggestedPrimary === undefined
+        ? '请换一个更亮或更暗的主色。'
+        : `建议改成 ${suggestedPrimary}（保留原色相的最近可用色）。`),
+    ...(suggestedPrimary === undefined ? {} : { suggestedPrimary }),
+  };
+}
+
+function hexToRgb(hex: string): [number, number, number] | null {
+  const full = expandHex(hex);
+  if (!full) return null;
+  return [
+    parseInt(full.slice(0, 2), 16),
+    parseInt(full.slice(2, 4), 16),
+    parseInt(full.slice(4, 6), 16),
+  ];
+}
+
+function rgbToHex(rgb: readonly [number, number, number]): string {
+  return (
+    '#' +
+    rgb
+      .map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0'))
+      .join('')
+  );
+}
+
+/**
+ * 给一个**最近可用**的主色（保留原色相：往白或往黑的方向缩放，取改动最小的那一档）。
+ *
+ * 为什么用"缩放"而不是"直接给默认色"：直接退回默认主色等于替用户改了他的配色；
+ * 缩放只动明暗 ⇒ 改完还是他挑的那个色相。
+ */
+export function suggestUsablePrimary(primary: string): string | undefined {
+  const rgb = hexToRgb(primary);
+  if (rgb === null) return undefined;
+  let best: { t: number; hex: string } | undefined;
+  for (const target of [
+    [255, 255, 255],
+    [0, 0, 0],
+  ] as const) {
+    for (let step = 1; step <= 100; step += 1) {
+      const t = step / 100;
+      const mixed: [number, number, number] = [
+        rgb[0] + (target[0] - rgb[0]) * t,
+        rgb[1] + (target[1] - rgb[1]) * t,
+        rgb[2] + (target[2] - rgb[2]) * t,
+      ];
+      const hex = rgbToHex(mixed);
+      const v = primaryVerdict(hex);
+      if (v.inkOk && v.surfaceOk) {
+        if (best === undefined || t < best.t) best = { t, hex };
+        break;
+      }
+    }
+  }
+  return best?.hex;
+}
+
+/* ------------------------------------------------------------------ *
+ * 五、样式包产出的全部受控变量（换包时清残值要用）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 样式包**可能**产出的全部 `--jj-*` 变量名。
+ *
+ * 为什么要有这张清单：把变量写到 `:root` 用的是 `setProperty` —— 它**只写不清**。
+ * ⇒ 换包时，上一个包留下的变量会**留在 `:root` 上**（今天 `--jj-primary` 是惰性字段，
+ * 残留看不出来；一接线，"换包后主色还是上一个包的"立刻变成真的）。
+ * ⇒ 换包时必须按这张清单把**这次没定义**的那些**清掉**。
+ *
+ * ⚠️ 这张清单与 `themePackToCssVars` 的产出**必须对齐**（单测守着：两向都查）。
+ */
+export const THEME_PACK_VAR_KEYS = [
+  '--jj-bubble-radius',
+  '--jj-bubble-border-width',
+  '--jj-bubble-max-width',
+  '--jj-density-gap',
+  '--jj-bg-kind',
+  '--jj-bg-color',
+  '--jj-bg-from',
+  '--jj-bg-to',
+  '--jj-bg-opacity',
+  '--jj-bg-blur',
+  '--jj-bg-image',
+  '--jj-primary',
+  '--jj-primary-ink',
+] as const;
+
 /** 把样式包渲染为 CSS 变量（**只产出受控变量，不产出任意 CSS 文本**） */
 export function themePackToCssVars(pack: ThemePack): Record<string, string> {
   const vars: Record<string, string> = {
@@ -397,7 +610,12 @@ export function themePackToCssVars(pack: ThemePack): Record<string, string> {
   if (pack.background.blurPx !== undefined) vars['--jj-bg-blur'] = `${pack.background.blurPx}px`;
   // 图片路径经 SAFE_IMAGE 校验，且**用 url() 的唯一位置**（不允许用户自行拼 url()）
   if (pack.background.imageUrl) vars['--jj-bg-image'] = `url("${pack.background.imageUrl}")`;
-  if (pack.primary) vars['--jj-primary'] = pack.primary;
+  if (pack.primary) {
+    vars['--jj-primary'] = pack.primary;
+    // **按钮字色跟着主色走**（T79）：固定字色（#101010）碰上深主色时对比度可低到 1:1（按钮看不见）。
+    // ⇒ 这里给的是"两个候选里更好的那个"，能不能用由 `checkPrimaryUsable` 判（导入侧闸门）。
+    vars['--jj-primary-ink'] = pickPrimaryInk(pack.primary);
+  }
   return vars;
 }
 

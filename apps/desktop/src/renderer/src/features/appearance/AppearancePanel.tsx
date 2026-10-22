@@ -4,8 +4,10 @@ import {
   BACKGROUND_KINDS,
   BUILTIN_PACKS,
   checkContrast,
+  checkPrimaryUsable,
   mergePackOverrides,
   themePackToCssVars,
+  THEME_PACK_VAR_KEYS,
   validateThemePack,
   type BackgroundKind,
   type BackgroundSpec,
@@ -13,6 +15,7 @@ import {
   type ThemePack,
 } from '@jujia/ui-tokens';
 import { IconTriangleAlert } from '../../ui/icons';
+import { applyThemeVars } from './theme-vars';
 
 /**
  * 外观设置页（W23 第二部分）。
@@ -37,6 +40,24 @@ interface AppearancePanelProps {
   pack: ThemePack;
   /** 保存回调（写入配置） */
   onSave: (pack: ThemePack) => void | Promise<void>;
+}
+
+/** R58（T79）：主色那一格的界面状态（**实测数字**，不是"大概行不行"） */
+interface PrimaryState {
+  /** 这个包带不带主色（不带 ⇒ 主按钮沿用默认主色） */
+  present: boolean;
+  /** 能不能用（按钮字看得见 **且** 焦点环看得见） */
+  ok: boolean;
+  /** 按钮字色该用哪个 */
+  ink: string;
+  /** 按钮文字与主色的对比度 */
+  inkRatio: number | null;
+  /** 主色与界面容器底的对比度 */
+  surfaceRatio: number | null;
+  /** 不达标时给用户看的一句 */
+  advice: string | undefined;
+  /** 不达标时建议改成的颜色 */
+  suggested: string | undefined;
 }
 
 export function AppearancePanel({ pack, onSave }: AppearancePanelProps): ReactElement {
@@ -67,16 +88,48 @@ export function AppearancePanel({ pack, onSave }: AppearancePanelProps): ReactEl
 
   // 实时预览：把受控 CSS 变量写到 :root
   useEffect(() => {
-    const vars = themePackToCssVars(draft);
-    const root = document.documentElement;
-    for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
-    root.dataset['jjBgKind'] = draft.background.kind;
+    // R58（T79）：走 `applyThemeVars` —— **先清残值再写**。
+    // `setProperty` 只写不清 ⇒ 从「柔和渐变」切回「默认暗色」时，上一个包的 `--jj-primary`
+    // 会赖在 `:root` 上 ⇒ "换包后主色还是上一个包的"（把"主色不变"修成"主色变成上一个的"，一样是坏的）。
+    applyThemeVars(document.documentElement, themePackToCssVars(draft), THEME_PACK_VAR_KEYS);
+    document.documentElement.dataset['jjBgKind'] = draft.background.kind;
     return () => {
       // 离开页面时保留样式（用户可能切去对话页看效果），因此这里不清理
     };
   }, [draft]);
 
   const contrast = useMemo(() => checkContrast(draft.background), [draft.background]);
+
+  /**
+   * R58（T79）：**当前主色能不能用**（按钮上的字看得见吗？焦点环看得见吗？）。
+   *
+   * 为什么要在界面上说清：主色是**用户自己带来的**（JSON 导入），
+   * 而"按钮看不清"这种事用户只会看到"应用配色怪"⇒ **要告诉他是谁带来的、差多少**。
+   * 达标时也显示实测数字（不达标时才说的话 = 一句"平时永远不出现"的解释 ⇒ 反而没人知道主色能配）。
+   */
+  const primaryState = useMemo<PrimaryState>(() => {
+    if (draft.primary === undefined) {
+      return {
+        present: false,
+        ok: true,
+        ink: '#101010',
+        inkRatio: null,
+        surfaceRatio: null,
+        advice: undefined,
+        suggested: undefined,
+      };
+    }
+    const v = checkPrimaryUsable(draft.primary);
+    return {
+      present: true,
+      ok: v.ok,
+      ink: v.ink,
+      inkRatio: v.inkRatio,
+      surfaceRatio: v.surfaceRatio,
+      advice: v.advice,
+      suggested: v.suggestedPrimary,
+    };
+  }, [draft.primary]);
 
   function updateDialog(patch: Partial<DialogStyle>): void {
     setDraft((d) => ({ ...d, dialog: { ...d.dialog, ...patch } }));
@@ -107,6 +160,22 @@ export function AppearancePanel({ pack, onSave }: AppearancePanelProps): ReactEl
     if (!result.ok || !result.pack) {
       setImportError(`样式包被拒绝：${result.errors.join('；')}`);
       return;
+    }
+    /**
+     * R58（T79）：**主色可用性闸门放在导入侧**。
+     *
+     * ① 为什么**不动** `validateThemePack`：它管着**启动时加载已保存的样式包**，
+     *    在那里硬拒绝会把用户**已经存下来**的包静默退回默认包 ⇒ 那是替用户做决定；
+     * ② 这里是**新包进来的唯一入口**（面板没有主色选择器）⇒ 闸门在这里最有效；
+     * ③ 已经存下来的坏主色怎么办：照旧加载（**不动加载语义**），
+     *    字色取"更好的那个"（`--jj-primary-ink`），并在外观页显示那句提醒（见下面的主色说明块）。
+     */
+    if (result.pack.primary !== undefined) {
+      const usable = checkPrimaryUsable(result.pack.primary);
+      if (!usable.ok) {
+        setImportError(`样式包被拒绝：${usable.advice ?? '这个主色用不了'}`);
+        return;
+      }
     }
     setDraft(result.pack);
     setImportText('');
@@ -345,6 +414,44 @@ export function AppearancePanel({ pack, onSave }: AppearancePanelProps): ReactEl
           </>
         )}
       </div>
+
+      {/* ---------------- 主色（R58 · T79） ---------------- */}
+      {primaryState.present && (
+        <div
+          className={primaryState.ok ? 'jj-note' : 'jj-note jj-note-warn'}
+          role="status"
+          data-primary-note="true"
+          data-primary-ok={primaryState.ok ? 'true' : 'false'}
+        >
+          {primaryState.ok ? (
+            <>
+              <strong>主色 {draft.primary ?? ''}</strong>
+              按钮上的文字对比 {primaryState.inkRatio === null ? '?' : primaryState.inkRatio.toFixed(2)}:1
+              （AA 4.5）· 与界面底色对比{' '}
+              {primaryState.surfaceRatio === null ? '?' : primaryState.surfaceRatio.toFixed(2)}:1（焦点环 3）
+              · 按钮字色用 {primaryState.ink}
+            </>
+          ) : (
+            <>
+              <strong>
+                <IconTriangleAlert /> 这个主色用不了：
+              </strong>
+              {primaryState.advice}
+              {primaryState.suggested !== undefined && (
+                <button
+                  type="button"
+                  className="jj-btn jj-transition"
+                  onClick={() =>
+                    setDraft((d) => (d.primary === undefined ? d : { ...d, primary: primaryState.suggested }))
+                  }
+                >
+                  改用建议色 {primaryState.suggested}（推荐）
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* ---------------- 导入 / 保存 ---------------- */}
       <details className="jj-import">

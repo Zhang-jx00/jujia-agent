@@ -3880,6 +3880,49 @@ try {
       JSON.stringify(jjBtns.slice(0, 8)),
     );
   }
+  /**
+   * R58（T79）：**换包之后主按钮底色要真的变**（接线的验收口径）。
+   *
+   * 为什么量在这一步：主题包的主色 `--jj-primary` 以前**渲染层无人读** ⇒ 换包后主色不变。
+   * 接线之后这条必须成立，而且要**三个点都成立**：
+   *   ① 换包后底色**真的变**（不是"看起来没变"）；
+   *   ② 变完之后按钮文字与底**仍然看得见**（≥4.5，AA）—— 主色是用户自己带的，不能只管"变了"；
+   *   ③ **切回来也要变回去** —— 这一条才是残值清理那条的靶子：
+   *      `setProperty` 只写不清 ⇒ 不清就会把上一个包的 `--jj-primary` 赖在 `:root` 上
+   *      ⇒ "换包后主色还是上一个包的"（把"主色不变"修成"主色变成上一个的"，一样是坏的）。
+   */
+  const measurePrimary = async () =>
+    win3.evaluate(() => {
+      const lum = (rgb) => {
+        const m = /rgba?\(([^)]+)\)/.exec(rgb);
+        if (m === null) return null;
+        const p = m[1].split(',').map((x) => Number.parseFloat(x));
+        const c = p.slice(0, 3).map((v) => {
+          const s = v / 255;
+          return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+      };
+      const ratio = (a, b) => {
+        if (a === null || b === null) return null;
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      };
+      const btn = document.querySelector('button.w2-btn-primary:not([disabled])');
+      if (btn === null) return { found: false, bg: 'none', fg: 'none', ratio: null };
+      const cs = getComputedStyle(btn);
+      return {
+        found: true,
+        bg: cs.backgroundColor,
+        fg: cs.color,
+        ratio: ratio(lum(cs.color), lum(cs.backgroundColor)),
+      };
+    });
+  const primaryBefore = await measurePrimary();
+  if (!primaryBefore.found) {
+    fail(
+      '渲染契约：外观页量不到主操作按钮（`button.w2-btn-primary`）—— 锁失焦了，量不到东西的锁会一直绿',
+    );
+  }
   await win3.locator('button', { hasText: '柔和渐变' }).first().click();
   let gradient = { kind: null, image: 'none' };
   for (let i = 0; i < 20; i += 1) {
@@ -3893,6 +3936,31 @@ try {
   if (!String(gradient.image).includes('linear-gradient')) {
     fail(
       `选了「柔和渐变」，根容器上却没有渐变（kind=${String(gradient.kind)}，image=${String(gradient.image).slice(0, 80)}）—— 又是"选了不生效"`,
+    );
+  }
+  /**
+   * R58（T79）续：主按钮底色**真的变了吗**？
+   *
+   * 等法：轮询到底色与换包前不同为止（换包走 React 渲染 + 写 `:root`，不是同步的）。
+   * 判据不是"变了就行"—— 还要**看得见**（字与底 ≥ 4.5）。
+   */
+  let primaryAfter = { found: false, bg: 'none', fg: 'none', ratio: null };
+  for (let i = 0; i < 30; i += 1) {
+    primaryAfter = await measurePrimary();
+    if (primaryAfter.found && primaryAfter.bg !== primaryBefore.bg) break;
+    await win3.waitForTimeout(100);
+  }
+  if (!primaryAfter.found || primaryAfter.bg === primaryBefore.bg) {
+    fail(
+      `渲染契约：换成「柔和渐变」之后主按钮底色**没变**（换包前 ${primaryBefore.bg} / 换包后 ${primaryAfter.bg}）` +
+        '—— 主题包主色没接到渲染层（T79）',
+    );
+  }
+  if (primaryAfter.ratio === null || primaryAfter.ratio < 4.5) {
+    fail(
+      `渲染契约：换成「柔和渐变」之后主按钮的字与底对比只有 ${
+        primaryAfter.ratio === null ? '?' : primaryAfter.ratio.toFixed(2)
+      }:1（AA 4.5；底 ${primaryAfter.bg} / 字 ${primaryAfter.fg}）`,
     );
   }
   await win3.locator('button', { hasText: '毛玻璃' }).first().click();
@@ -3947,11 +4015,32 @@ try {
   }
   // 还原默认样式包，免得后面的步骤读到"被改过的主题"（体验诚实：改过的东西要改回去）
   await win3.locator('button', { hasText: '默认暗色' }).first().click();
+  /**
+   * R58（T79）续：**切回来也要变回去** —— 这一条才是"换包清残值"那条的靶子。
+   *
+   * 写 CSS 变量用 `setProperty`，它**只写不清** ⇒ 不清就会把上一个包的 `--jj-primary`
+   * 赖在 `:root` 上 ⇒ 用户看到的是"切回来了，主色还是刚才那个"。
+   */
+  let primaryBack = { found: false, bg: 'none', fg: 'none', ratio: null };
+  for (let i = 0; i < 30; i += 1) {
+    primaryBack = await measurePrimary();
+    if (primaryBack.found && primaryBack.bg === primaryBefore.bg) break;
+    await win3.waitForTimeout(100);
+  }
+  if (!primaryBack.found || primaryBack.bg !== primaryBefore.bg) {
+    fail(
+      `渲染契约：切回「默认暗色」之后主按钮底色**没变回来**（换包前 ${primaryBefore.bg} / 现在 ${primaryBack.bg}）` +
+        '—— 换包时没有清掉上一个包的残值（`setProperty` 只写不清）',
+    );
+  }
   ok(
     `渐变与毛玻璃两种背景都真的作用在根容器上（毛玻璃这一档走的分支：${
       String(backdrop.blur).includes('blur') ? '真毛玻璃' : '系统关了透明效果 → 降级为不透明底'
     }）—— 此前规则指向一个不存在的类名，静默失效；现在由属性门控锁 + 本步一起看着；` +
-      `本屏 \`.jj-btn\` 那一族 ${String(jjBtns.length)} 个、最小 ${String(jjMin.w)}×${String(jjMin.h)}（下限 32×32）`,
+      `本屏 \`.jj-btn\` 那一族 ${String(jjBtns.length)} 个、最小 ${String(jjMin.w)}×${String(jjMin.h)}（下限 32×32）；` +
+      `**R58**：换包后主按钮底色真的变（${primaryBefore.bg} → ${primaryAfter.bg}，字与底 ${
+        primaryAfter.ratio === null ? '?' : primaryAfter.ratio.toFixed(2)
+      }:1 ≥ 4.5），切回来也真的变回来（${primaryBack.bg}）`,
   );
 
   step('运行日志：概览页看得见今天的记录，磁盘上真有那一本（数据没出隔离目录）');
