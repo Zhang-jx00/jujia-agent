@@ -216,6 +216,50 @@ const allScripts = new Set([
     statedSteps !== undefined && Number(statedSteps) === e2eSteps,
     `脚本 ${e2eSteps} 步；PROGRESS「当前规模」行写 ${statedSteps ?? '(未写)'} 步`,
   );
+
+  /**
+   * T82（2026-10-22）：「当前规模」行里**渲染层组件测试**的例数与文件数也要机器盯。
+   *
+   * 为什么补它：那一行里**只有两格**被盯（测试文件数 · e2e 步数）⇒ **其余数字静默漂**。
+   * 本轮实测：真值 **109 例 / 14 个组件文件**，而文档里还写着 **94 例 / 13 个**（差 15 例、一个文件）
+   * ⇒ 照抄的下一个接手方会按错数字核。
+   *
+   * 怎么数：**现扫**渲染层 `.test.tsx`（例数 = 顶层 `it(` 的条数 · 文件数 = 文件个数）——
+   * 不引 vitest（快、且不需要跑测试），与上面"测试文件数"那条同口径。
+   */
+  const rendererRoot = join(repoRoot, 'apps/desktop/src/renderer/src');
+  let rendererCases = 0;
+  let rendererFiles = 0;
+  const walkRenderer = (p) => {
+    let entries;
+    try {
+      entries = readdirSync(p, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name === '.tmp' || e.name === '.trash') continue;
+      const full = join(p, e.name);
+      if (e.isDirectory()) walkRenderer(full);
+      else if (e.name.endsWith('.test.tsx')) {
+        rendererFiles += 1;
+        rendererCases += (read(relative(repoRoot, full)).match(/^\s*it\(/gm) ?? []).length;
+      }
+    }
+  };
+  walkRenderer(rendererRoot);
+  const scaleRow = progress.split('**当前规模**')[1] ?? '';
+  const statedCases = /渲染层组件测试\s*(\d+)\s*例/.exec(scaleRow)?.[1];
+  const statedRendererFiles = /渲染层组件测试\s*\d+\s*例（jsdom，\s*(\d+)\s*个组件文件）/.exec(scaleRow)?.[1];
+  report(
+    'PROGRESS「当前规模」里的渲染层组件测试数与实际一致（T82：其余数字不许静默漂）',
+    statedCases !== undefined &&
+      Number(statedCases) === rendererCases &&
+      statedRendererFiles !== undefined &&
+      Number(statedRendererFiles) === rendererFiles,
+    `实际 ${String(rendererCases)} 例 / ${String(rendererFiles)} 个组件文件（.test.tsx）；` +
+      `PROGRESS 写 ${statedCases ?? '(未写)'} 例 / ${statedRendererFiles ?? '(未写)'} 个`,
+  );
 }
 
 /* ------------------------------------------------------------------ *
