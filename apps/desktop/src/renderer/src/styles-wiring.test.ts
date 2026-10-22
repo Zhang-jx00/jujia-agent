@@ -79,6 +79,56 @@ function collect(globDir: string): { sources: string[]; css: string } {
   return { sources, css: cssParts.join('\n') };
 }
 
+/**
+ * **样式接线锁（R54 · UI 现扫补的两条）**。
+ *
+ * 为什么单列：现扫（真窗口量）查出的洞里，这两条是**"声明没写对"**而不是"画错了"：
+ *   ⑪ 全仓 `::placeholder` 规则 **0 条** ⇒ 占位符用的是 **Chromium 出厂默认的 #757575**（3.58:1）；
+ *   ⑫ `input[type='color']` 写了 `width: 100%` ⇒ 那个控件被拉成 **1178×32** 的一根空长条。
+ * ⇒ 这两条用**声明层**的锁最省事、也最不容易被"合法增长"带偏；**渲染层**的结果由 e2e 渲染契约量
+ * （⑧ 所有 button 命中区 ≥32×32 · ⑨ 主操作按钮对比 ≥4.5 · ⑩ 占位符色 = 令牌色）。
+ *
+ * **为什么这里没有第三条（主题包主色 `--jj-primary`）**：
+ * 现扫确实查出「`--jj-primary` 渲染层无人读」，第一版实现也真的接上了 —— 但**复核后撤回了**：
+ *   ① 现扫自己把它列为「**产品决定**」，不该在 UI 打磨轮顺手定；
+ *   ② 它现在是**惰性**字段，接上就变"活的"：用户导入一个深主色 ⇒ 按钮底色变深、字色固定 #101010
+ *      ⇒ 对比度可低到 1:1（按钮看不见）；4 个内置包实测主色是 #4c8dff / #4c8dff / #6ba0ff / #8ab4ff
+ *      （**不是**"全是 #4c8dff"），但面板**没有**主色选择器，只有 JSON 导入能带任意主色；
+ *   ③ 补闸门要动 `validateThemePack` —— 它**管着启动时加载已保存的样式包**，在那里硬拒绝
+ *      会把用户**已存**的包静默退回默认包。
+ * ⇒ 完整规格与改法见 `docs/TRACK-PLANS.md` 的 **T79**，接线与闸门一起做、单独成轮。
+ */
+describe('样式接线锁（R54 · UI 现扫补的两条）', () => {
+  const { css: cssRaw } = collect(fileURLToPath(new URL('.', import.meta.url)));
+  /**
+   * **匹配前必须剥注释** —— 这一条是被自己的注释喂饱过的（§11 假锁清单第 5 条：
+   * 「锁读原文被注释喂饱」）：⑫ 的第一版把「原来是 `width: 100%`」**写在 CSS 注释里**，
+   * 锁去匹配那段说明 ⇒ **第一版就假红**。⇒ 判据只看**真正的声明**。
+   */
+  const css = cssRaw.replace(/\/\*[\s\S]*?\*\//g, '');
+
+  it('⑪ 必须有 ::placeholder 规则，且用令牌色（Chromium 出厂默认只有 3.58:1）', () => {
+    const rule = /::placeholder\s*\{([^}]*)\}/.exec(css);
+    expect(rule, '样式表里没有 ::placeholder 规则 ⇒ 占位符会用浏览器出厂默认色').not.toBeNull();
+    expect(rule?.[1] ?? '', '::placeholder 规则没有用令牌色').toContain('var(--c-text-secondary)');
+  });
+
+  it('⑫ 颜色控件必须被收窄成一个色块的大小（不许写成整行宽）', () => {
+    const block = /input\[type='color'\]\s*\{([^}]*)\}/.exec(css);
+    expect(block, '样式表里找不到颜色控件的规则').not.toBeNull();
+    const body = block?.[1] ?? '';
+    // **判据给区间，不给"不许出现某个字面量"** —— 只禁 `width: 100%` 的话，
+    // 改成 `width: 1000px` 这类照样绿，而它同样是那根空长条（现扫实测 1178×32）。
+    const w = /width:\s*(\d+(?:\.\d+)?)px/.exec(body);
+    expect(w, '颜色控件的 width 没有写成 px（看不出它被收窄过）').not.toBeNull();
+    const px = Number(w?.[1] ?? '0');
+    expect(px, `颜色控件的宽度是 ${String(px)}px（整行宽 ⇒ 一根看不见色块的空长条）`).toBeLessThanOrEqual(
+      120,
+    );
+    expect(px, '颜色控件的宽度太小（连色块都看不见）').toBeGreaterThanOrEqual(32);
+  });
+});
+
 describe('样式接线锁：className 上引用的类名必须在渲染层样式表里有规则', () => {
   const { sources, css } = collect(fileURLToPath(new URL('.', import.meta.url)));
   const tokens = new Set<string>();

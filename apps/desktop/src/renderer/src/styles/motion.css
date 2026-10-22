@@ -137,7 +137,9 @@
 
 /* 交互反馈：按压缩小（微交互 100ms） */
 .jj-pressable {
-  transition: transform var(--motion-duration-instant) var(--motion-ease-in);
+  /* R54：原来用 `--motion-ease-in`（慢进）⇒ 实测按压 63ms 内只走完 **2.9% 行程**（目标 3%）
+     ⇒ **动效在跑，但用户看不见**。⇒ 改 ease-out（与本仓「入场 ease-out」的口径一致）。 */
+  transition: transform var(--motion-duration-instant) var(--motion-ease-out);
 }
 .jj-pressable:active:not(:disabled) {
   transform: scale(0.97);
@@ -214,7 +216,8 @@ button.w2-btn-danger,
 summary,
 .jj-tool-l0 {
   transition:
-    transform var(--motion-duration-instant) var(--motion-ease-in),
+    /* R54：同上 —— transform 用 ease-in 时按压反馈"慢进"、用户看不见（实测 63ms 只走 2.9% 行程） */
+    transform var(--motion-duration-instant) var(--motion-ease-out),
     color var(--motion-duration-fast) var(--motion-ease-out),
     background-color var(--motion-duration-fast) var(--motion-ease-out),
     border-color var(--motion-duration-fast) var(--motion-ease-out);

@@ -97,6 +97,47 @@ const step = (text) => {
 };
 
 /**
+ * **钩子编辑器：填值必须先等「挂载期的恢复写入」落地**（R54 · T73 同族第 2 处）。
+ *
+ * 现场（R54 第一次整跑红在 [63]「第二次改钩子配置没有再弹确认」）：`HooksPanel` 挂载时
+ * `useEffect → reload() → setText(旧配置)` 是一次**异步写回受控 textarea**；而 Playwright 的
+ * `fill()` 是「聚焦 → 全选 → 插入」三步 —— 恢复那一轮 React 重渲染正好落在「全选」与「插入」之间
+ * ⇒ 值被拼成**旧 + 新两段** ⇒ JSON 不合法 ⇒ 界面如实说「JSON 不合法，请修正后再保存（不会写入任何内容）」
+ * ⇒ **没有写入 ⇒ 自然没有确认弹窗**。
+ * ⇒ 症状长得很像「产品不问了」，真因在脚本这一侧（与 R48 的 T73 **同一族**）。
+ *
+ * 修法（**改脚本不改产品**，与 R48 那处同法）：
+ * ① 填值**之前**等「那次恢复写入」落地（textarea 从空变非空 = 恢复已落地；一直为空 = 没有可撞的对象）；
+ * ② 填完**核对**字段值；不一致就**再填一次**（那时恢复早已落地，第二次是干净的）；
+ * ③ 两次都不一致就**当场红**（那就不是竞态，是产品行为变了，不能靠重试盖过去）。
+ */
+const fillHooksEditor = async (page, text) => {
+  const editor = page.locator('textarea.jj-hooks-editor');
+  try {
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('textarea.jj-hooks-editor');
+        return el instanceof HTMLTextAreaElement && el.value !== '';
+      },
+      null,
+      { timeout: 5_000 },
+    );
+  } catch {
+    // 一直没有可恢复的内容（编辑器一直是空的）⇒ 没有可撞的对象，继续
+  }
+  await editor.fill(text);
+  if ((await editor.inputValue()) !== text) {
+    await editor.fill(text);
+    if ((await editor.inputValue()) !== text) {
+      fail(
+        '钩子编辑器里不是要写的那份 JSON（挂载期恢复写入与填值撞车，值被拼成了两段）',
+        (await editor.inputValue()).slice(0, 400),
+      );
+    }
+  }
+};
+
+/**
  * 悬挂的 Promise 不许把进程打死在收尾之前（T66 同族 · R34 第三次跑当场撞出）。
  *
  * 那一轮红在第 24 步："读敏感文件没弹确认"。`fail()` 话说完了，Node 却在随后那条**没 await 的
@@ -1952,7 +1993,7 @@ try {
   const hooksFile = join(dataDir, 'hooks.json');
   const saveHooksFromEditor = async (text) => {
     await win2.locator('nav.app-tabs button', { hasText: '钩子' }).first().click();
-    await win2.locator('textarea.jj-hooks-editor').fill(text);
+    await fillHooksEditor(win2, text);
     await win2.locator('button', { hasText: '保存并校验' }).first().click();
   };
 
@@ -3775,6 +3816,41 @@ try {
   step('主题包的背景类型真的落在画面上：选「柔和渐变」根容器上出现渐变、选「毛玻璃」出现模糊（R20 修的静默失效）');
   await win3.locator('nav.app-tabs button', { hasText: '外观' }).first().click();
   if ((await waitText3('样式包', 8_000)) !== true) fail('外观页没有样式包区块', await body3());
+  /**
+   * **⑧② `.jj-btn` 那一族的命中区**（R54 · **变异当场照出来的失焦**，补在这一步）。
+   *
+   * 为什么补在这里：渲染契约那一步量的是**画布页**上的按钮，而 `.jj-btn` 那一族
+   * （浏览器 ←/→ · 对话 · 文档 · Git · 终端 · 外观…）**在画布页上一个都没有**
+   * ⇒ 第一版锁⑧ 量的是「当前页签」，**根本看不到本轮改的那一族**
+   * ⇒ 变异把 `.jj-btn` 的内边距改回令牌档（26.7px），e2e 照样绿（实测那条变异 exit 0）
+   * ⇒ **失焦的锁比没有锁更坏**：它给人"全站按钮都有人看"的错觉，而实际上一族都没看。
+   *
+   * 这一步为什么合适：**外观页的「背景类型」那排按钮就是 `.jj-btn`**（实测至少 4 个），
+   * 且本步本来就在这一屏点它们 ⇒ 顺带量，不多花一次切页签。
+   * **量不到（族里一个都没渲染出来）⇒ 当场红**：宁肯红，也不许"锁看不见东西"却照样绿。
+   */
+  const jjBtns = await win3.evaluate(() => {
+    const out = [];
+    for (const el of document.querySelectorAll('button.jj-btn')) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      out.push({ w: Math.round(r.width * 100) / 100, h: Math.round(r.height * 100) / 100 });
+    }
+    return out;
+  });
+  if (jjBtns.length === 0) {
+    fail('渲染契约：这一屏一个 `.jj-btn` 都没量到（锁失焦了 —— 量不到东西的锁会一直绿）', JSON.stringify(jjBtns));
+  }
+  const jjMin = jjBtns.reduce(
+    (acc, b) => ({ w: Math.min(acc.w, b.w), h: Math.min(acc.h, b.h) }),
+    { w: Infinity, h: Infinity },
+  );
+  if (jjMin.w < 32 || jjMin.h < 32) {
+    fail(
+      `渲染契约：.jj-btn 那一族的命中区只有 ${String(jjMin.w)}×${String(jjMin.h)}（下限 32×32；本轮就是把它从 26.7px 拉上来的）`,
+      JSON.stringify(jjBtns.slice(0, 8)),
+    );
+  }
   await win3.locator('button', { hasText: '柔和渐变' }).first().click();
   let gradient = { kind: null, image: 'none' };
   for (let i = 0; i < 20; i += 1) {
@@ -3819,7 +3895,8 @@ try {
   ok(
     `渐变与毛玻璃两种背景都真的作用在根容器上（毛玻璃这一档走的分支：${
       String(backdrop.blur).includes('blur') ? '真毛玻璃' : '系统关了透明效果 → 降级为不透明底'
-    }）—— 此前规则指向一个不存在的类名，静默失效；现在由属性门控锁 + 本步一起看着`,
+    }）—— 此前规则指向一个不存在的类名，静默失效；现在由属性门控锁 + 本步一起看着；` +
+      `本屏 \`.jj-btn\` 那一族 ${String(jjBtns.length)} 个、最小 ${String(jjMin.w)}×${String(jjMin.h)}（下限 32×32）`,
   );
 
   step('运行日志：概览页看得见今天的记录，磁盘上真有那一本（数据没出隔离目录）');
@@ -4285,7 +4362,7 @@ try {
    */
   const saveHooks4 = async (text) => {
     await win4.locator('nav.app-tabs button', { hasText: '钩子' }).first().click();
-    await win4.locator('textarea.jj-hooks-editor').fill(text);
+    await fillHooksEditor(win4, text);
     await win4.locator('button', { hasText: '保存并校验' }).first().click();
   };
   const clickDialog4 = async (label) => {
@@ -4639,11 +4716,106 @@ try {
       JSON.stringify(narrow),
     );
   }
+  /**
+   * ⑧ R54 · UI 现扫补的三条（每条都有**下限**，不是"看起来对"）。
+   *
+   * ⑧ **本屏（当前页签）上 `button` 的命中区 ≥ 32×32** —— 现扫（真窗口，16 页签 × 4 档宽度）量到：
+   *    `.jj-btn` 一族只有 **26.7px**（比同族的 `.w2-btn` 32.7px 矮 6px），
+   *    全站 **40 个** <32×32 的可点元素里大多数是这一族。
+   *    ⇒ 原来那条「命中区 ≥24×24」**只查了页签**（`.app-tab`），其余按钮**一直没人看**。
+   *    ⚠️ **口径只覆盖本屏**：本步在**画布页**上量，而 `.jj-btn` 那一族在画布页上一个都没有
+   *    ⇒ 这一族由**外观页那一步的 ⑧②** 量（`e2e-ui.mjs` 里「主题包的背景类型」那一步）
+   *    ⇒ 变异把 `.jj-btn` 的内边距改坏、这一步是**不会**红的（实测过）——别拿它当"全站"的证据。
+   * ⑨ **主操作按钮的文字与底对比 ≥ 4.5（AA）** —— 现扫量到白字压蓝底 **3.2:1**（没过 AA），
+   *    而基线 `docs/DESIGN-BASELINE.md` 写的那一档是 **5.94:1** ⇒ **代码偏离了基线，基线是对的**（全站 14 个同款按钮）。
+   * ⑩ **占位符色取自令牌** —— 现扫量到的是 **Chromium 出厂默认的 #757575**（3.58–4.13:1），
+   *    **不是本仓任何令牌色**（`--c-text-secondary` 是 #a6a6a6 = 6.77:1），而全仓 `::placeholder` 规则 **0 条**。
+   */
+  const r54 = await live.evaluate(() => {
+    const lum = (rgb) => {
+      const m = /rgba?\(([^)]+)\)/.exec(rgb);
+      if (m === null) return null;
+      const p = m[1].split(',').map((x) => Number.parseFloat(x));
+      const c = p.slice(0, 3).map((v) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    };
+    const ratio = (a, b) => {
+      if (a === null || b === null) return null;
+      const hi = Math.max(a, b);
+      const lo = Math.min(a, b);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    // ⑧ 所有 button 的最小命中区（隐藏的、尺寸为 0 的不算）
+    let minW = Infinity;
+    let minH = Infinity;
+    let count = 0;
+    let worst = '';
+    // **只查「按钮族」**：图标按钮（37.3×23.3）· chip（26.7）· 原生 input（13×13）· summary（19.2）
+    // 各自的形状问题**另立条目**（T78）—— 混进来这条锁就会恒红，**恒绿的锁比没锁更坏**。
+    for (const el of document.querySelectorAll(
+      'button.w2-btn, button.w2-btn-primary, button.w2-btn-danger, button.jj-btn, nav.app-tabs button',
+    )) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      count += 1;
+      if (r.height < minH) {
+        minH = r.height;
+        worst = String(el.className || el.tagName);
+      }
+      if (r.width < minW) minW = r.width;
+    }
+    // ⑨ 主操作按钮的对比度（取**启用态**的那一个）
+    const primary = document.querySelector('button.w2-btn-primary:not([disabled])');
+    const ps = primary === null ? null : getComputedStyle(primary);
+    const primaryRatio = ps === null ? null : ratio(lum(ps.color), lum(ps.backgroundColor));
+    // ⑩ 占位符色 vs 令牌色（现场造一个探针输入框量，**不靠猜**）
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--c-text-secondary)';
+    document.body.appendChild(probe);
+    const tokenColor = getComputedStyle(probe).color;
+    probe.remove();
+    const ph = document.createElement('input');
+    ph.setAttribute('placeholder', 'x');
+    document.body.appendChild(ph);
+    const phColor = getComputedStyle(ph, '::placeholder').color;
+    ph.remove();
+    return { minW, minH, count, worst, primaryRatio, tokenColor, phColor };
+  });
+  if (r54.count === 0) {
+    fail('渲染契约：一个 button 都没找到（选择器或结构变了 —— 契约要跟着改）', JSON.stringify(r54));
+  }
+  if (r54.minW < 32 || r54.minH < 32) {
+    fail(
+      `渲染契约：本屏的 button 命中区只有 ${String(r54.minW)}×${String(r54.minH)}（下限 32×32；最差的是 .${r54.worst}）`,
+      JSON.stringify(r54),
+    );
+  }
+  if (r54.primaryRatio === null) {
+    fail('渲染契约：量不到主操作按钮的对比度（选择器或结构变了）', JSON.stringify(r54));
+  }
+  if (r54.primaryRatio < 4.5) {
+    fail(
+      `渲染契约：主操作按钮的文字与底对比只有 ${r54.primaryRatio.toFixed(2)}:1（AA 4.5）`,
+      JSON.stringify(r54),
+    );
+  }
+  if (r54.phColor !== r54.tokenColor) {
+    fail(
+      `渲染契约：占位符色不是令牌色（占位符 ${r54.phColor} / 令牌 ${r54.tokenColor}）—— Chromium 出厂默认漏进来了`,
+      JSON.stringify(r54),
+    );
+  }
   ok(
     `渲染契约：${String(contract.tabCount)} 个页签不溢出 · 命中区 ≥ ${String(contract.minW)}×${String(contract.minH)}` +
       ` · 字号走令牌（${contract.fontSize}）· 按压反馈在 · 焦点环 ${focusInfo.outlineWidth} · 动效降级 ${reducedMs}` +
       ` · 画布控件非白底（${canvasLook.btnBg}，命中区 ${String(canvasLook.btnW)}×${String(canvasLook.btnH)}）` +
-      ` · 940px 下页签不折行（最高 ${String(narrow.maxH)}px）`,
+      ` · 940px 下页签不折行（最高 ${String(narrow.maxH)}px）` +
+      ` · **R54**：本屏 ${String(r54.count)} 个 button 命中区 ≥ ${String(r54.minW)}×${String(r54.minH)}` +
+      ` · 主操作按钮对比 ${r54.primaryRatio === null ? '?' : r54.primaryRatio.toFixed(2)}:1` +
+      ` · 占位符色走令牌（${r54.phColor}）`,
   );
 
   /* ---------------- M11 剩余 · R51 · S1：文生图 ----------------

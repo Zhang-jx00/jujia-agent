@@ -5,6 +5,15 @@
   --bg-container: var(--c-bg-container);
   --text: var(--c-text);
   --text-secondary: var(--c-text-secondary);
+  /* R54：`--jj-primary`（主题包写出的主色）**本轮刻意不接**，规格见 `docs/TRACK-PLANS.md` 的 T79。
+     理由（现扫后复核的结论，勿擅自接上）：
+       ① 现扫把它列为「产品决定」，本轮只做量过的、看得见的 UI 修正；
+       ② 它现在是**惰性**字段（无人读 ⇒ 导入的深色主色不会生效），
+          一接上就变成**活的**：用户导入一个深主色 ⇒ 主按钮底色变深，而按钮字色固定 #101010
+          ⇒ 对比度可低到 1:1（看不见）；
+       ③ 要补这道闸门就得动 `validateThemePack` —— 而它**管着启动时加载已保存的样式包**，
+          在那里加硬拒绝会把用户**已存**的包静默退回默认包。
+     ⇒ 接线 + 闸门一起做，且单独成轮（T79），不在本轮顺手带上。 */
   --primary: var(--c-primary);
   --success: var(--c-success);
   --warning: var(--c-warning);
@@ -244,7 +253,10 @@ button.w2-btn-danger {
 button.w2-btn-primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: var(--c-text-strong);
+  /* R54：按基线 `DESIGN-BASELINE.md` 的 textColor（bg-input）——
+     原来是 `c-text-strong`（白字压蓝底 = 3.2:1，**没过 AA**；基线那档是 5.94:1）。
+     全站 14 个主操作按钮一起回到基线。 */
+  color: var(--c-bg-input);
 }
 
 button.w2-btn-danger {
@@ -757,7 +769,13 @@ button:disabled {
 /* 按钮：统一交互反馈（按压 + 禁用态可见） */
 .jj-btn {
   border-radius: var(--radius-md);
-  padding: var(--space-xs) var(--space-md);
+  /* R54：实测高 **26.7px**（`space-xs`=4 + `space-md`=12），比同族的 `.w2-btn`（32.7px）矮 6px
+     ⇒ 全站 40 个 <32×32 的可点元素里大多数是这一族。
+     **为什么是 7px 而不是 6px**：`.w2-btn` 的 32.7px 是「14px 字号 + 6px 内边距」，
+     而 `.jj-btn` 的字号是 `--fs-small`（13px）⇒ 行盒矮 2px ⇒ 同样 6px 只有 **30.67px**（**仍不到 32**）。
+     ⇒ 补 1px 垂直内边距：**16.67 + 14 + 2 = 32.67px**，与 `.w2-btn` **完全同高**。
+     （这个数是 e2e 渲染契约量出来的，不是推算的 —— 第一版按 6px 写、实测 30.67px，被当场抓住。） */
+  padding: 7px 14px;
   font-size: var(--fs-small);
   cursor: pointer;
   border: 1px solid var(--c-border);
@@ -843,13 +861,23 @@ summary:focus-visible {
   accent-color: var(--c-primary);
 }
 
+/* 占位符（R54）：Chromium 出厂默认的 #757575 只有 3.58–4.13:1，而且**不是本仓任何令牌色**
+   （`--c-text-secondary` 是 #a6a6a6 = 6.77:1）⇒ 一条规则修好全站 20+ 个输入框。 */
+input::placeholder,
+textarea::placeholder {
+  color: var(--c-text-secondary);
+}
+
 .jj-field input[type='color'] {
-  width: 100%;
+  /* R54：原来是 `width: 100%` ⇒ 实测拉成 **1178×32** 的一根空长条
+     （逐行像素扫描只有上下两条 1px 线，**框里看不到色块**）。
+     ⇒ 收窄成色块该有的尺寸，并给一个看得见的底。 */
+  width: 56px;
   height: 32px;
   padding: 0;
   border: 1px solid var(--c-border);
   border-radius: var(--radius-md);
-  background: transparent;
+  background: var(--c-bg-input);
 }
 
 .jj-check {
