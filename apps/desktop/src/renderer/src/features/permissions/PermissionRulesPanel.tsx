@@ -391,6 +391,17 @@ export function PermissionRulesPanel(): ReactElement {
                         {r.executed ? '·已做' : '·未做'}]
                       </span>
                       {'answer' in r && r.answer !== undefined && <span className="p0-subtitle"> 答复 {r.answer}</span>}
+                      {/*
+                        T75（2026-10-22）：这一格是「**没有策略判定**、只有当面答复」的那一类
+                        （内置终端新起会话：不经过策略表，每次当面问一次）。
+                        **只标这一类** ⇒ 缺席即"策略表判的" ⇒ 每行不必都挂标签。
+                        这格以前在 IPC 契约里被 `z.object()` 剥掉了 ⇒ 盘上分得开、界面上分不开。
+                      */}
+                      {r.decidedBy === 'person' && (
+                        <span className="jj-audit-by" title="没有策略判定，只有当面答复">
+                          [当面答复]
+                        </span>
+                      )}
                       <span className="p0-subtitle"> {r.reason}</span>
                       {r.args.command !== undefined && <code> {r.args.command}</code>}
                       {r.rules !== undefined && r.rules.degraded && (
@@ -401,6 +412,10 @@ export function PermissionRulesPanel(): ReactElement {
                 ))}
               </ul>
             )}
+            <p className="p0-subtitle">
+              <strong>没有策略判定</strong>的那一类（内置终端新起会话：不经过策略表，每次都当面问一次）会单独标出来；
+              其余是策略表判的（规则命中与否就是它定的）。
+            </p>
             <p className="p0-subtitle">
               今天共 {String(audit.total)} 条，这里显示最近 {String(audit.records.length)} 条；账本在{' '}
               <code>{audit.file}</code>（本机）。

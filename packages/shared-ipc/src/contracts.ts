@@ -891,6 +891,17 @@ export const auditEntrySchema = z.object({
   answer: z.enum(['allow_once', 'allow_always', 'deny', 'timeout', 'expired', 'edit']).optional(),
   bypassable: z.boolean().optional(),
   durationMs: z.number().optional(),
+  /**
+   * 这一格的结论**来自哪里**（T75 · 2026-10-22 补上的一格）。
+   *
+   * `'person'` = **没有策略判定、只有当面答复**（内置终端新起会话那一类：不经过策略表，每次当面问一次）。
+   * 缺省 = **策略表判的**（旧账没有这一格 ⇒ 一律按策略那类读，**旧账的字节一字不改**）。
+   *
+   * 为什么之前界面上分不开：`z.object()` **默认剥掉未知键** ⇒ 这一格在
+   * `ipc/audit.ts` 的 `auditPageSchema.parse(...)` 那里被**结构性地丢掉** ⇒
+   * 盘上分得开、界面上分不开（e2e 判的是原始 JSONL，所以那条绿是绿的）。
+   */
+  decidedBy: z.enum(['policy', 'person']).optional(),
   rules: z
     .object({
       source: z.enum(['primary', 'backup', 'default']),

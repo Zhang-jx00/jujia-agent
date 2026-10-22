@@ -199,6 +199,8 @@ textarea {
   border-radius: 6px;
   color: var(--text);
   padding: 7px 10px;
+  /* R55：控件不许比它所在的容器还宽（长选项文本会把控件顶出去格） */
+  max-width: 100%;
   font-size: var(--fs-body);
   font-family: inherit;
 }
@@ -766,6 +768,22 @@ button:disabled {
   width: 60%;
 }
 
+/*
+ * 标签里裹着控件时，控件**落到下一行**（R55 · 2026-10-22 真窗口现扫）。
+ *
+ * 现场：绘图页「用哪条连接生成」那一行 —— `<label>` 是 **inline**（行盒只有 19px 高），
+ * 里面的 `<select>` 有 34px 高 ⇒ **控件的盒子压住了标签文字**
+ * （实测：文字右沿到 select 左沿 **0px 贴边**，select 上溢出 7px / 下溢出 8px，4 档宽度全中）。
+ * ⇒ 修法：**控件自己成块**（落到标签文字下一行）+ **留 4px 间距**。
+ * （只把 label 改成块级**不够**：控件仍会与文字并排、仍然 0px 贴边 —— 这是第一版的写法，
+ *   被现扫的"0px 贴边"量法照出来，改成现在这样。）
+ * （范围只限 `select` —— `input` 那一族多半是 checkbox 标签，动了会改别的版式。）
+ */
+label:has(> select) > select {
+  display: block;
+  margin-top: 4px;
+}
+
 /* 按钮：统一交互反馈（按压 + 禁用态可见） */
 .jj-btn {
   border-radius: var(--radius-md);
@@ -1066,6 +1084,18 @@ html[data-jj-bg-kind='glass'] .app-root {
 }
 
 /*
+ * R55：那个「打开方式」下拉**不吃弹性宽度**。
+ *
+ * 现场：窗口内宽 961 时，浏览器页头从 1 行变成 2 行（7+1），**孤儿是「读正文」**
+ * （前一行：地址栏 / 打开方式 / 打开 / ← / → / 关闭）⇒ 一个按钮被挤到第二行。
+ * 根因：下拉也吃了 `flex: 1 1 260px` ⇒ 它硬占 ≥200px，而它其实**内容宽就够**
+ * ⇒ 把它摘出弹性规则（`flex: 0 0 auto`）⇒ 省出 ≥60px ⇒ 「读正文」回到第一行。
+ */
+.jj-browser-head select.jj-field {
+  flex: 0 0 auto;
+}
+
+/*
  * 这块是**占位区**：真正的网页由主进程的 WebContentsView 浮在这里之上，
  * CSS 画不出它的内容 —— 它只需要把自己的位置与尺寸报上去。
  * 所以这里给的是一个明确的空区（含最小高度），别让页面看起来像坏了。
@@ -1307,6 +1337,21 @@ html[data-jj-bg-kind='glass'] .app-root {
 
 .jj-perm-action-allow {
   color: var(--success);
+}
+
+/*
+ * 审计行上的「当面答复」标记（T75 · 2026-10-22）。
+ *
+ * 这一格 = **没有策略判定**、只有当面答复（内置终端新起会话那一类：它不经过策略表）。
+ * **只标少数那一类** ⇒ 缺席即"策略表判的" ⇒ 每行不必都挂一个标签（噪音最小）。
+ */
+.jj-audit-by {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--c-border-muted);
+  border-radius: 4px;
+  font-size: var(--fs-small);
+  color: var(--text-secondary);
 }
 
 /* --------------------------- 定时任务（M7 · R9） --------------------------- */

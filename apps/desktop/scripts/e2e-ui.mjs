@@ -3523,12 +3523,41 @@ try {
   if (!auditBody.includes('已做')) fail('审计行没写"做没做成"（deny 与"做了但失败"就分不开）', auditBody.slice(0, 900));
   if (auditBody.includes(auditSentinel)) fail('界面上的审计把文件正文带出来了（不该只留长度与指纹）');
 
+  /**
+   * T75（2026-10-22）：「**这一格来自策略还是来自人**」必须**穿过了 IPC 契约**并在界面上标出来。
+   *
+   * 以前这一格在 `z.object()` 里被**默认剥掉** ⇒ 在 `ipc/audit.ts` 的 `auditPageSchema.parse(...)`
+   * 那里结构性地丢了 ⇒ **盘上分得开、界面上分不开**（e2e 判的是原始 JSONL，所以那条绿是绿的）。
+   *
+   * 锚点：内置终端新起会话那一类（`subject:'terminal_start'` · `decidedBy:'person'`）——
+   * 上一步（T23 终端页）刚起过会话 ⇒ 这一条必在"最近 20 条"里。
+   * **两侧都断言**：盘上要有这一格（落盘侧）· 界面上那一条要带标记（渲染侧）⇒ 缺一不可。
+   */
+  const terminalRowMarked = await win3.evaluate(() => {
+    const rows = [...document.querySelectorAll('.jj-audit-row')];
+    const row = rows.find((r) => (r.textContent ?? '').includes('terminal_start'));
+    return row !== undefined && row.querySelector('.jj-audit-by') !== null;
+  });
+  if (!terminalRowMarked) {
+    fail(
+      '内置终端那一条（terminal_start）没有「当面答复」标记 ⇒ 这一格没穿过 IPC 契约（界面分不出策略那类与当面答复那类）',
+      auditBody.slice(0, 900),
+    );
+  }
+
   const auditDir = join(dataDir, 'audit');
   const auditFiles = existsSync(auditDir) ? readdirSync(auditDir).filter((f) => f.endsWith('.jsonl')) : [];
   if (auditFiles.length === 0) fail(`审计文件没落盘（目录 ${auditDir} 里空的）`);
   const ledgerText = auditFiles.map((f) => readFileSync(join(auditDir, f), 'utf8')).join('\n');
   if (!ledgerText.includes('"subject":"write_file"')) {
     fail('账本里没有 write_file 那一条判定', ledgerText.slice(0, 500));
+  }
+  // 盘上那一侧：内置终端那条必须带着这一格（缺了它，界面上那个标记就是假的）
+  if (!ledgerText.includes('"subject":"terminal_start"') || !ledgerText.includes('"decidedBy":"person"')) {
+    fail(
+      '账本里那条内置终端记录没有 decidedBy:"person"（这一格没落盘 ⇒ 界面那个标记无从谈起）',
+      ledgerText.slice(0, 500),
+    );
   }
   if (ledgerText.includes(auditSentinel)) {
     fail('账本里有文件正文 —— 剔密没在落盘之前做完（这是本轮最重的一条）', ledgerText.slice(0, 500));
@@ -4812,7 +4841,8 @@ try {
     `渲染契约：${String(contract.tabCount)} 个页签不溢出 · 命中区 ≥ ${String(contract.minW)}×${String(contract.minH)}` +
       ` · 字号走令牌（${contract.fontSize}）· 按压反馈在 · 焦点环 ${focusInfo.outlineWidth} · 动效降级 ${reducedMs}` +
       ` · 画布控件非白底（${canvasLook.btnBg}，命中区 ${String(canvasLook.btnW)}×${String(canvasLook.btnH)}）` +
-      ` · 940px 下页签不折行（最高 ${String(narrow.maxH)}px）` +
+      ` · 940px 下**页签标签不被压成多行**（单条页签最高 ${String(narrow.maxH)}px；` +
+        `页签条整体换到第二行是 R45 明定的设计，见 styles.css 的 \`flex-wrap: wrap\`）` +
       ` · **R54**：本屏 ${String(r54.count)} 个 button 命中区 ≥ ${String(r54.minW)}×${String(r54.minH)}` +
       ` · 主操作按钮对比 ${r54.primaryRatio === null ? '?' : r54.primaryRatio.toFixed(2)}:1` +
       ` · 占位符色走令牌（${r54.phColor}）`,
@@ -4829,6 +4859,60 @@ try {
    */
   step('M11 剩余 · R51 S1 文生图：提示词真的发出去 · 图片字节真的落盘 · 界面说得清');
   await win4.locator('nav.app-tabs button', { hasText: '绘图' }).first().click();
+  /**
+   * **R55 · 渲染锁：标签里裹着的控件不许压住/贴住标签文字**（真窗口现扫抓到的"堆叠"）。
+   *
+   * 现场：绘图页「用哪条连接生成」那一行 —— `<label>` 是 inline（行盒 19px 高），
+   * 里面的 `<select>` 有 34px 高 ⇒ **控件的盒子压住标签文字**：
+   * 文字右沿到 select 左沿 **0px 贴边**、select 上溢出 7px / 下溢出 8px（4 档宽度全中）。
+   * ⇒ 修法在样式表（`label:has(> select) > select{display:block;margin-top:4px}` ⇒ 控件落到下一行）。
+   *
+   * 判据量的是**文字**的盒子（`Range` 取标签里的文字节点），**不是** label 的盒子 ——
+   * 标签一旦改成块级，label 的盒子本来就把控件**包**在里面了 ⇒ 量 label 会恒红。
+   * 判据也不止"不相交"：**并排且 0px 贴边**同样算坏（那正是第一版写法的样子）⇒ 量**间距**。
+   *
+   * ⚠️ **两条前置纪律**（第一版就栽在这两条上）：
+   *   ① **先等这一页真的挂上来**：切页签后 React 还没重渲染时，量到的是**上一页的元素** ——
+   *      而上一页的元素此刻**已被卸载** ⇒ `getBoundingClientRect()` 全是 0 ⇒ 间距恰好算成 **0**
+   *      ⇒ 第一版量出来的是「对话页」那两条（连接 / 历史会话），不是绘图页的。
+   *      ⇒ 等**这一页自己的元素**出现（不是固定等待 · T71）。
+   *   ② **脱离 DOM 的元素不许参与判据**：零面积 = 不可测 ⇒ 跳过（否则一律算成"间距 0"）。
+   */
+  await win4.waitForSelector('select[aria-label="用哪条连接生成"]', { state: 'visible', timeout: 10_000 });
+  const selCovers = await win4.evaluate(() => {
+    const out = [];
+    for (const sel of document.querySelectorAll('select')) {
+      if (!sel.isConnected) continue; // 脱离 DOM ⇒ 不可测，跳过（否则一律算成 0）
+      const label = sel.closest('label');
+      if (label === null) continue;
+      // 标签里的**第一个有内容的文字节点**
+      let textNode = null;
+      for (const child of label.childNodes) {
+        if (child.nodeType === 3 && (child.textContent ?? '').trim() !== '') {
+          textNode = child;
+          break;
+        }
+      }
+      if (textNode === null) continue;
+      const range = document.createRange();
+      range.selectNodeContents(textNode);
+      const t = range.getBoundingClientRect();
+      const s = sel.getBoundingClientRect();
+      if (t.width === 0 || t.height === 0 || s.width === 0 || s.height === 0) continue; // 不可测
+      // 控件的顶边要在文字的底边**之下**，且留出 ≥2px 间距（并排 = 负间距 = 压住/贴住）
+      const gap = Math.round((s.top - t.bottom) * 100) / 100;
+      if (gap < 2) {
+        out.push({ gap, text: (textNode.textContent ?? '').trim().slice(0, 20) });
+      }
+    }
+    return out;
+  });
+  if (selCovers.length > 0) {
+    fail(
+      '绘图页的控件压住/贴住自己的标签文字（控件必须在标签文字下方，间距 ≥2px）',
+      JSON.stringify(selCovers.slice(0, 5)),
+    );
+  }
   await win4.locator('select[aria-label="用哪条连接生成"]').selectOption(seededGenConnId);
 
   const genPrompt = win4.locator('textarea[aria-label="提示词"]');

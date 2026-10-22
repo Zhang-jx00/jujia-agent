@@ -240,6 +240,42 @@ describe('权限页 · 执行审计', () => {
     await screen.findByText(/规则表当时没读出来/);
   });
 
+  /**
+   * T75（2026-10-22）：**盘上分得开、界面上也要分得开**。
+   *
+   * 这一格（`decidedBy:'person'` = 没有策略判定、只有当面答复）以前在 IPC 契约里
+   * 被 `z.object()` 剥掉了 ⇒ 界面永远分不出这两类（e2e 判的是原始 JSONL，所以那条绿是绿的）。
+   *
+   * 两条都钉：① 标出来（**不是只查它存在**，那会被注释喂饱）；② 策略那类**不许**也挂这个标记
+   * （缺席即策略那类 ⇒ 每行都挂标签就是噪音）。
+   */
+  it('「没有策略判定、只有当面答复」那一类要单独标出来（T75）', async () => {
+    auditTail.mockResolvedValue(
+      page({
+        records: [
+          auditEntry({
+            decidedBy: 'person',
+            outcome: 'ask',
+            asked: true,
+            answer: 'allow_once',
+            executed: true,
+            reason: '内置终端新起会话：每次都当面问一次',
+          }),
+        ],
+      }),
+    );
+    mount([]);
+    await screen.findByText('[当面答复]');
+    expect(document.querySelectorAll('.jj-audit-by').length).toBe(1);
+  });
+
+  it('策略表判的那一类（没有这一格）不许挂那个标记（缺席即策略那类）', async () => {
+    auditTail.mockResolvedValue(page());
+    mount([]);
+    await screen.findByText('rm -rf build');
+    expect(document.querySelectorAll('.jj-audit-by').length).toBe(0);
+  });
+
   it('导出：成功 / 取消 / 失败三种结果说三种话（取消不是失败）', async () => {
     auditTail.mockResolvedValue(page());
     mount([]);
