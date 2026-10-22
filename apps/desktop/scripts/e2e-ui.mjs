@@ -4853,10 +4853,13 @@ try {
     const tabs = [...document.querySelectorAll('.app-tab')];
     const boxes = tabs.map((el) => el.getBoundingClientRect());
     const title = document.querySelector('.p0-title');
+    // R61（T83）：页签**排了几行**（按 top 分组）—— 窄窗下会换到第二行，那是 R45 明定的取舍
+    const tops = new Set(boxes.map((b) => Math.round(b.top)));
     return {
       tabCount: tabs.length,
       maxH: boxes.length ? Math.round(Math.max(...boxes.map((b) => b.height))) : 0,
       titleH: title ? Math.round(title.getBoundingClientRect().height) : 0,
+      rowCount: tops.size,
     };
   });
   /**
@@ -4895,6 +4898,46 @@ try {
       if (w) w.setSize(s.w, s.h);
     }, beforeSize);
     await live.waitForTimeout(400);
+  }
+  /**
+   * ⑨ R61（T83）：**页签换行这件事本身要钉住** —— 窄窗下换到第二行、宽窗下一行排完。
+   *
+   * 为什么锁**行数**而不锁"第二行是哪些页签"：加一个页签 / 改个名字都会动到成员名单
+   * ⇒ 那种锁会**假红**（而**恒红/恒绿的锁比没锁更坏**）⇒ 只锁"几行"这件**布局事实**。
+   *
+   * 为什么值得锁：R45 明定的取舍是「**放不下就换第二行，而不是把每个标签压扁**」
+   * ⇒ ① 窄窗下**必须**是 2 行（不许压扁）② 宽窗下**必须**是 1 行（不许白占一行）
+   * ⇒ 将来谁动了 `flex-wrap` / 页签数量，**当场红** ⇒ 逼他重新决策，而不是无声改变行为。
+   *
+   * 实测（2026-10-22 真窗口现扫）：**1180 还是 1 行**，**1100 起换行** ⇒ 换行阈值落在两者之间。
+   */
+  // 宽窗那一档**显式**设成 1280（不靠"恢复成之前那个大小" ⇒ 之前那个大小可能本身就是窄的 ⇒ 假红）
+  await app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows()[0];
+    if (w) w.setSize(1280, 840);
+  });
+  await live.waitForTimeout(500);
+  const wideRows = await live.evaluate(() => {
+    const boxes = [...document.querySelectorAll('.app-tab')].map((el) =>
+      Math.round(el.getBoundingClientRect().top),
+    );
+    return { rowCount: new Set(boxes).size, tabCount: boxes.length };
+  });
+  if (narrow.rowCount !== 2) {
+    fail(
+      '渲染契约：窄窗口（940px）下页签**没有**换到第二行（行数 ' +
+        String(narrow.rowCount) +
+        '）—— R45 明定的取舍是「放不下就换第二行，而不是把每个标签压扁」',
+      JSON.stringify(narrow),
+    );
+  }
+  if (wideRows.rowCount !== 1) {
+    fail(
+      '渲染契约：宽窗口下页签**没有**一行排完（行数 ' +
+        String(wideRows.rowCount) +
+        '）—— 宽窗下换行就是白占一行（页头 57→94px）',
+      JSON.stringify(wideRows),
+    );
   }
   if (narrow.tabCount === 0) {
     fail('渲染契约：窄窗口下一条页签都没找到（选择器或结构变了）', JSON.stringify(narrow));

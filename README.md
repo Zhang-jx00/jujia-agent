@@ -175,6 +175,7 @@ npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/
 | 窗口打开是黑屏 | 依赖版本不匹配导致的渲染层加载失败。本项目曾因 `@vitejs/plugin-react` 与 vite 版本错配出现此问题（已修）。可先跑 `node apps/desktop/scripts/verify-dev-transform.mjs` 定位是不是渲染管线的问题 |
 | 打包版窗口打不开 | 环境里可能设了 `ELECTRON_RUN_AS_NODE=1`（Electron 会退化成纯 Node）。启动前清掉它：`set ELECTRON_RUN_AS_NODE=`（cmd）或 `$env:ELECTRON_RUN_AS_NODE=$null`（PowerShell） |
 | 想用一份**独立的**数据目录试东西 | 设 `JUJIA_DATA_BASE_DIR` 指向一个目录，数据就落在那里（自动化测试就是靠它隔离的） |
+| 窗口不够宽时，页签**换到了第二行** | 这是**故意**的：页签放不下时宁可**换一整行**，也不把每个标签压扁（压扁会读起来像一排竖着的单字）⇒ 代价是页头从 57px 涨到 94px。**把窗口拉到 ≥1180 就回到一行**（实测 1180 还是一行，1100 起换行） |
 
 ## 当前能力
 
