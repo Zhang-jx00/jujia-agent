@@ -846,13 +846,36 @@ try {
   app = await electron.launch({
     executablePath: electronPath,
     // --user-data-dir 把 Electron 的配置/缓存也挪出 C 盘（默认它在 %APPDATA%）
-    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`],
+    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`, '--e2e'],
     env,
   });
   const win = await app.firstWindow();
   await win.waitForSelector('nav.app-tabs', { timeout: 20_000 });
   await watchWindow(win, 'w1');
   ok('窗口打开，标签栏已渲染');
+
+  /**
+   * R60：这一轮 e2e **不许在用户的桌面上弹窗**。
+   *
+   * 为什么要自己证一次：所有者的规矩是「**跑 GUI 自动化（预演 / E2E / 压测 / 截图取证）
+   * 绝不允许打扰桌面**」—— 违反它的后果不是"难看"，是**抢焦点把用户正在玩的游戏顶掉**。
+   * 而"窗口到底弹没弹"这件事**只有运行时问得到**（源码里 `win.show()` 被 `isHeadless` 挡着，
+   * 但那个开关**有没有真的传进来**，只有跑起来才知道）⇒ 这里**当场问主进程**。
+   *
+   * ⚠️ 这条判据是**双向**的：窗口不可见 ⇒ 通过；可见 ⇒ 立刻红（并说清是哪个开关没传）。
+   */
+  step('这一轮不打扰桌面：主进程窗口对用户不可见');
+  const winVisible = await app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows()[0];
+    return w === undefined ? null : w.isVisible();
+  });
+  if (winVisible !== false) {
+    fail(
+      `e2e 的窗口在用户桌面上是可见的（isVisible=${String(winVisible)}）` +
+        '—— 这一步绝不允许打扰桌面（启动参数少带了 --e2e？）',
+    );
+  }
+  ok('主进程窗口 isVisible() = false ⇒ 这一轮 e2e 没有在用户桌面上弹出窗口');
 
   const tabButton = (label) => win.locator('nav.app-tabs button', { hasText: label });
   /**
@@ -1835,7 +1858,7 @@ try {
   const envRestart = { ...env, JJ_PERMISSION_TIMEOUT_MS: '10000' };
   app = await electron.launch({
     executablePath: electronPath,
-    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`],
+    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`, '--e2e'],
     env: envRestart,
   });
   const win2 = await app.firstWindow();
@@ -2399,7 +2422,7 @@ try {
   app = undefined;
   app = await electron.launch({
     executablePath: electronPath,
-    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`],
+    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`, '--e2e'],
     env,
   });
   const win3 = await app.firstWindow();
@@ -4332,7 +4355,7 @@ try {
   // 重启（与 win3 那次同一套：同 profile、同数据目录）
   app = await electron.launch({
     executablePath: electronPath,
-    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`],
+    args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`, '--e2e'],
     env,
   });
   const win4 = await app.firstWindow();
@@ -5138,6 +5161,122 @@ try {
     `文生图：提示词真的到了当前连接的假远端（${String(genHits.length)} 次出站）· 回程字节逐字节落在数据目录` +
       `（${genFiles[0]}）· 界面回执给出类型与路径 · 成本上限与"本机保留副本"都写在明面上`,
   );
+
+  /**
+   * **T78 命中区：四族各自达标**（R60）。
+   *
+   * ## 为什么四族**分开判**
+   *
+   * T78 的原话是「其余混进去那条锁就会**恒红**（恒绿的锁比没锁更坏）」⇒ 那一族一个口径、
+   * 一条判据。⇒ 这里**四族四把尺子、四条独立断言**：
+   *   ① **图标按钮族**（浏览器页 ←/→/⟳）⇒ 跟**按钮族**同一把尺子：**≥32×32**（R54 立的标准）；
+   *   ② **原生 radio/checkbox 族**（权限页 5 + 外观页 1）⇒ 尺子不是控件自身的盒子，
+   *     而是「**用户实际能点到的那块**」—— 它们**全部被 `<label>` 包着** ⇒ 判 **关联 label 的高度 ≥24**，
+   *     并额外要求「**每个原生控件都必须被 label 包着**」（否则有效命中区就是那 13×13）；
+   *   ③ **chip 族**（连接页）⇒ 尺子是 **WCAG 2.5.8 的 24×24**（**实测 26.67，本来就达标 ⇒ 不改**，
+   *     但**锁住**，免得将来被谁改小）；
+   *   ④ **`<summary>` 族**（外观页）⇒ 同 ③ 的尺子（**实测 19.2 ⇒ 已修到 24**）。
+   *
+   * ## 为什么每族都要「**量不到就红**」
+   *
+   * 量不到 ⇒ 判据什么也没测 ⇒ 却照样绿 ⇒ **失焦的锁比没有锁更坏**（R54 的第 ⑧② 就是这么失焦的）。
+   */
+  step('T78 命中区：四族各自达标（每族单独判）');
+  {
+    const measureIn = async (tabText, sel) => {
+      await live.locator('nav.app-tabs button', { hasText: tabText }).first().click();
+      await live.waitForTimeout(400);
+      return live.evaluate((s) => {
+        const out = [];
+        for (const el of document.querySelectorAll(s)) {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) continue;
+          const lab = el.closest('label');
+          const lr = lab === null ? null : lab.getBoundingClientRect();
+          out.push({
+            w: Math.round(r.width * 100) / 100,
+            h: Math.round(r.height * 100) / 100,
+            label:
+              lr === null
+                ? null
+                : { w: Math.round(lr.width * 100) / 100, h: Math.round(lr.height * 100) / 100 },
+          });
+        }
+        return out;
+      }, sel);
+    };
+    const smallest = (list) =>
+      list.reduce(
+        (acc, x) => ({ w: Math.min(acc.w, x.w), h: Math.min(acc.h, x.h) }),
+        { w: Infinity, h: Infinity },
+      );
+
+    // ① 图标按钮族（浏览器页）—— 尺子：按钮族 ≥32×32
+    const iconBtns = await measureIn('浏览器', 'button.jj-icon-btn');
+    if (iconBtns.length === 0) {
+      fail('T78 ①：浏览器页一个 `.jj-icon-btn` 都没量到（锁失焦了 —— 量不到东西的锁会一直绿）');
+    }
+    const iconMin = smallest(iconBtns);
+    if (iconMin.w < 32 || iconMin.h < 32) {
+      fail(
+        `T78 ①：浏览器页的图标按钮命中区只有 ${String(iconMin.w)}×${String(iconMin.h)}` +
+          '（下限 32×32；本仓按钮族标准 —— R54 那条）',
+      );
+    }
+
+    // ② 原生 radio/checkbox 族（权限页）—— 尺子：关联 label ≥24 高，且**必须**有 label
+    const natives = await measureIn('权限', 'input[type="radio"], input[type="checkbox"]');
+    if (natives.length === 0) {
+      fail('T78 ②：权限页一个原生控件都没量到（锁失焦了 —— 量不到东西的锁会一直绿）');
+    }
+    const bare = natives.filter((n) => n.label === null);
+    if (bare.length > 0) {
+      fail(
+        `T78 ②：有 ${String(bare.length)} 个原生控件**没被 label 包住** ⇒ 用户实际能点到的只有那 13×13` +
+          '（原生控件族的口径：判「用户实际能点到的那块」，不是判控件自己的盒子）',
+      );
+    }
+    const labelled = natives.filter((n) => n.label !== null).map((n) => ({ w: n.label.w, h: n.label.h }));
+    if (labelled.length === 0) {
+      fail('T78 ②：一个带 label 的原生控件都没有（锁失焦了）');
+    }
+    const nativeShort = labelled.filter((n) => n.h < 24);
+    if (nativeShort.length > 0) {
+      fail(
+        `T78 ②：原生控件的关联 label 高度只有 ${String(nativeShort[0].h)}` +
+          '（下限 24；WCAG 2.5.8 —— 相邻两行中心距 24 以内 ⇒ 「间距豁免」不适用）',
+      );
+    }
+
+    // ③ chip 族（连接页）—— 尺子：WCAG 2.5.8 的 24×24（实测 26.67 ⇒ 达标，只锁住）
+    const chips = await measureIn('连接', '.w2-chip');
+    if (chips.length === 0) {
+      fail('T78 ③：连接页一个 `.w2-chip` 都没量到（锁失焦了 —— 量不到东西的锁会一直绿）');
+    }
+    const chipMin = smallest(chips);
+    if (chipMin.w < 24 || chipMin.h < 24) {
+      fail(
+        `T78 ③：chip 命中区只有 ${String(chipMin.w)}×${String(chipMin.h)}（下限 24×24；WCAG 2.5.8）`,
+      );
+    }
+
+    // ④ <summary> 族（外观页）—— 尺子：同 ③（实测 19.2 ⇒ 已修到 24）
+    const sums = await measureIn('外观', 'summary');
+    if (sums.length === 0) {
+      fail('T78 ④：外观页一个 summary 都没量到（锁失焦了 —— 量不到东西的锁会一直绿）');
+    }
+    const sumMin = smallest(sums);
+    if (sumMin.h < 24) {
+      fail(`T78 ④：summary 高度只有 ${String(sumMin.h)}（下限 24；WCAG 2.5.8）`);
+    }
+
+    ok(
+      `T78 四族命中区：图标按钮 ≥ ${String(iconMin.w)}×${String(iconMin.h)}（下限 32×32）· ` +
+        `原生控件的关联 label ≥ ${String(smallest(labelled).h)} 高` +
+        `（${String(natives.length)} 个，全部有 label）· chip ≥ ${String(chipMin.w)}×${String(chipMin.h)}` +
+        `（${String(chips.length)} 个）· summary ≥ ${String(sumMin.h)} 高（${String(sums.length)} 个）`,
+    );
+  }
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();

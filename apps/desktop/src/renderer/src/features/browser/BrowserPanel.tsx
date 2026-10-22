@@ -231,7 +231,7 @@ export function BrowserPanel(): ReactElement {
         </button>
         <button
           type="button"
-          className="jj-btn jj-btn-quiet jj-transition jj-pressable"
+          className="jj-btn jj-btn-quiet jj-icon-btn jj-transition jj-pressable"
           onClick={() => void act(window.jujia.browserBack)}
           disabled={!opened || state?.canGoBack !== true || busy}
           title="后退"
@@ -240,7 +240,7 @@ export function BrowserPanel(): ReactElement {
         </button>
         <button
           type="button"
-          className="jj-btn jj-btn-quiet jj-transition jj-pressable"
+          className="jj-btn jj-btn-quiet jj-icon-btn jj-transition jj-pressable"
           onClick={() => void act(window.jujia.browserForward)}
           disabled={!opened || state?.canGoForward !== true || busy}
           title="前进"
@@ -249,7 +249,7 @@ export function BrowserPanel(): ReactElement {
         </button>
         <button
           type="button"
-          className="jj-btn jj-btn-quiet jj-transition jj-pressable"
+          className="jj-btn jj-btn-quiet jj-icon-btn jj-transition jj-pressable"
           onClick={() => void act(window.jujia.browserReload)}
           disabled={!opened || busy}
           title="重新加载"

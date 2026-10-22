@@ -43,15 +43,33 @@ setPersistLogger(logger);
 
 const isSmoke = process.argv.includes('--smoke');
 /**
- * 无头 = smoke 或 shoot（R32 展示页截图）。
+ * **e2e / 预演模式（R60）**：窗口**不弹到用户脸上**，但**不需要像素**。
  *
- * 为什么要并进同一个开关而不是再写一条 `if`：这两件事的**后果完全一样** —— 窗口不弹到用户脸上，
+ * 为什么单列一个模式、而不是让 e2e 复用 `--shoot`：
+ * - `--shoot` 会开 `offscreen`（离屏渲染）⇒ 那是**截图**才需要的（要拿像素）；
+ *   e2e 全程**零截图/零像素**调用（只量 DOM 与坐标）⇒ 让它走离屏是**多花一台渲染机**，
+ *   而且离屏窗口在 Electron 里需要持续的 `paint` 消费者才会继续出帧 —— 用不上的开销。
+ * - 但 e2e **确实需要**一件事：**窗口别出现在用户的桌面上**。
+ *   所有者立过规矩：「**跑 GUI 自动化（预演 / E2E / 压测 / 截图取证）绝不允许打扰桌面**」
+ *   —— 违反它的后果不是"难看"，是**抢焦点把用户正在玩的游戏顶掉**。
+ *   ⇒ 本仓的 e2e 此前**每轮都在用户桌面上弹窗**（`win.show()` 只被 `isHeadless` 挡，
+ *   而 e2e 启动时没带任何无头开关）⇒ 本轮修掉，并给它加两条锁（源锁 + e2e 自己的运行期自证）。
+ *
+ * 为什么并进**同一个** `isHeadless` 而不是再写一条 `if`：
+ * 将来加第三种模式时只改一边 ⇒ "脚本把窗口弹出来"这种退化会在某一天悄悄发生
+ * （源锁 `headless-shoot-wiring` 就盯这个 —— 那条锁的注释里写着"将来加第三条模式要显式进来"）。
+ */
+const isE2e = process.argv.includes('--e2e');
+/**
+ * 无头 = smoke / shoot / e2e（R32 展示页截图 · R60 e2e 预演）。
+ *
+ * 为什么要并进同一个开关而不是再写一条 `if`：这几件事的**后果完全一样** —— 窗口不弹到用户脸上，
  * 但渲染层照常画（`show:false` + `ready-to-show` 之后 `capturePage` 拿得到内容）。
- * 分成两条 `if (!isSmoke) ... else if (isShoot) ...` 的结局是将来加第三种模式时只改一边，
+ * 分成多条 `if (!isSmoke) ... else if (isShoot) ...` 的结局是将来加第三种模式时只改一边，
  * 于是"截图脚本把窗口弹出来"这种退化会在某一天悄悄发生（源锁 `headless-shoot-wiring` 就盯这个）。
  */
 const isShoot = process.argv.includes('--shoot');
-const isHeadless = isSmoke || isShoot;
+const isHeadless = isSmoke || isShoot || isE2e;
 /** 启动性能实测模式（M18）：打印启动时间线后退出，用于建立可回归的性能预算 */
 const isPerf = process.argv.includes('--perf');
 

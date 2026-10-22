@@ -2471,8 +2471,8 @@
       "id": "M309",
       "desc": "无头开关丢掉 --shoot（R32）：截图模式退化成\"把窗口弹到用户脸上\"，而 smoke 那条照常绿 —— 只有并集开关能同时管住两种无头",
       "file": "apps/desktop/src/main/index.ts",
-      "find": "const isHeadless = isSmoke || isShoot;",
-      "replace": "const isHeadless = isSmoke;",
+      "find": "const isHeadless = isSmoke || isShoot || isE2e;",
+      "replace": "const isHeadless = isSmoke || isE2e;",
       "test": "apps/desktop/src/main/headless-shoot-wiring.test.ts"
     },
     {
@@ -2618,6 +2618,30 @@
       "find": "      if (!usable.ok) {",
       "replace": "      if (false) {",
       "test": "apps/desktop/src/renderer/src/features/appearance/appearance-panel.test.tsx"
+    },
+    {
+      "id": "M328",
+      "desc": "图标按钮的最小命中区掉到 24px（R60 · T78）：浏览器页 ←/→/⟳ 变回 29.33px 高 ⇒ 低于本仓按钮族标准的 32×32",
+      "file": "apps/desktop/src/renderer/src/styles.css",
+      "find": ".jj-icon-btn {\n  min-width: 32px;\n  min-height: 32px;",
+      "replace": ".jj-icon-btn {\n  min-width: 32px;\n  min-height: 24px;",
+      "test": "apps/desktop/src/renderer/src/styles-wiring.test.ts"
+    },
+    {
+      "id": "M329",
+      "desc": "原生控件的关联 label 高度掉到 16px（R60 · T78）：权限页那排 radio 实际能点到的高度低于 WCAG 2.5.8 的 24px",
+      "file": "apps/desktop/src/renderer/src/styles.css",
+      "find": "  min-height: 24px;\n}\n\n.jj-perm-form {",
+      "replace": "  min-height: 16px;\n}\n\n.jj-perm-form {",
+      "test": "apps/desktop/src/renderer/src/styles-wiring.test.ts"
+    },
+    {
+      "id": "M330",
+      "desc": "summary 的最小高度被摘掉（R60 · T78）：三个 <summary>（导入样式包 / 查看完整参数 / 全部诊断）退回 19.2px 高",
+      "file": "apps/desktop/src/renderer/src/styles.css",
+      "find": "summary {\n  min-height: 24px;\n}",
+      "replace": "summary {\n}",
+      "test": "apps/desktop/src/renderer/src/styles-wiring.test.ts"
     }
   ]
 }

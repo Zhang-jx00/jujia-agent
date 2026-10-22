@@ -818,6 +818,21 @@ label:has(> select) > select {
   color: var(--c-text-secondary);
 }
 
+/* R60（T78 · 图标按钮族）：浏览器页的 ←/→/⟳ 三个图标按钮
+   **真窗口现扫**实测 **41.33×29.33 / 43.33×31.17** ⇒ 高度不够
+   （**本仓按钮族标准 ≥32×32** —— R54 立的那条；`jj-pressable` 在按钮族里）。
+   ⇒ **只给图标按钮**补最小尺寸，**不动 `.jj-btn-quiet` 本身** ——
+   现扫里 `.jj-btn-quiet` 共 30+ 个，其中绝大多数本来就是 32.67 高（改了会连累一片）。
+   ⇒ 宽度已够（41–43），只补高度就够；`inline-flex` + 居中是为了让
+   **图标**（⟳ 是 svg）在 32×32 的盒子里**居中**，不偏上。 */
+.jj-icon-btn {
+  min-width: 32px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .jj-btn:focus-visible,
 button:focus-visible,
 textarea:focus-visible,
@@ -972,6 +987,15 @@ textarea::placeholder {
 
 .jj-note-warn {
   border-left-color: var(--c-warning);
+}
+
+/* R60（T78 · summary 那一族）：`<summary>` 真窗口现扫 **19.2px** 高（1179.33 宽）
+   ⇒ 低于 WCAG 2.5.8 的 **24×24** 底线。
+   ⇒ 全仓 `<summary>` 只有 **3 处**（外观页「导入样式包」· 权限弹窗「查看完整参数」· 插件页「全部诊断」）
+   ⇒ 改**一条全局规则**就够，**不改 `display`**（改 `display` 会让 Chromium 的**展开三角消失**）。
+   ⇒ `min-height` 落在 summary 自己的盒子上 ⇒ 点到那 4.8px 的空白也是展开/收起。 */
+summary {
+  min-height: 24px;
 }
 
 .jj-import summary {
@@ -1248,6 +1272,13 @@ html[data-jj-bg-kind='glass'] .app-root {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  /* R60（T78 · 原生 radio/checkbox 那一族）：原生控件本身只有 **13×13**（Chromium 默认，
+     全仓没有 `input[type=radio|checkbox]` 的样式）⇒ **裸看它会以为命中区只有 13×13**。
+     但实测**它们全部被 `<label>` 包着** ⇒ 用户实际点到的是**整块 label**（权限页 818.67×**22.4**）
+     ⇒ 口径按「**用户实际能点到的那块**」算，不是按控件自身的盒子算。
+     ⇒ 22.4 仍差一点点到 WCAG 2.5.8 的 **24×24** 底线（而且**间距豁免不适用**：
+     相邻两行中心距就是 22.4，24px 的圆会相交）⇒ 抬到 24。 */
+  min-height: 24px;
 }
 
 .jj-perm-form {

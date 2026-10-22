@@ -16,11 +16,31 @@ import { describe, expect, it } from 'vitest';
 const strip = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const src = strip(readFileSync(new URL('./index.ts', import.meta.url), 'utf8'));
 const secSrc = strip(readFileSync(new URL('./security.ts', import.meta.url), 'utf8'));
+/** R60：e2e 脚本本体（它**每一次**启动应用都得带 `--e2e`，否则窗口会弹到用户桌面上） */
+const e2eSrc = strip(readFileSync(new URL('../../scripts/e2e-ui.mjs', import.meta.url), 'utf8'));
 
 describe('离屏截图模式的主进程开关（R32）', () => {
-  it('无头 = smoke 或 shoot，二者共用同一个开关', () => {
+  it('无头 = smoke 或 shoot 或 e2e，三者共用同一个开关', () => {
     expect(src).toMatch(/const isShoot = process\.argv\.includes\('--shoot'\);/);
-    expect(src).toMatch(/const isHeadless = isSmoke \|\| isShoot;/);
+    expect(src).toMatch(/const isE2e = process\.argv\.includes\('--e2e'\);/);
+    expect(src).toMatch(/const isHeadless = isSmoke \|\| isShoot \|\| isE2e;/);
+  });
+
+  /**
+   * R60：e2e 的**每一次**启动都必须带 `--e2e`。
+   *
+   * 为什么这条要盯到**每一处**启动（而不是"脚本里有这么一处"）：
+   * 这个脚本会**重启应用**好几次（改配置后重启、权限门重启…）⇒ 漏掉任何一处，
+   * 那一处就会**把窗口弹到用户桌面上** ⇒ 而这条违反的后果是**抢焦点把用户正在玩的游戏顶掉**。
+   *
+   * 为什么要**源锁**（而不是只靠 e2e 自己的运行期自证）：运行期自证只管**第一次**启动；
+   * 后面几次重启要是漏了 flag，源锁才拦得住。⇒ 两侧都要。
+   */
+  it('e2e 脚本的每一次启动都带 --e2e（漏一处就会在用户桌面上弹一次窗）', () => {
+    const launches = [...e2eSrc.matchAll(/args:\s*\[MAIN_ENTRY[^\]]*\]/g)].map((m) => m[0]);
+    expect(launches.length, '一条启动都没扫到 —— 定位器可能失效（防失焦先红）').toBeGreaterThan(0);
+    const missing = launches.filter((l) => !l.includes("'--e2e'"));
+    expect(missing, `这些启动没带 --e2e ⇒ 窗口会弹到用户桌面上：\n${missing.join('\n')}`).toEqual([]);
   });
 
   it('show() 只有一个调用点，且被这个开关管着', () => {

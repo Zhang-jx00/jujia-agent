@@ -161,6 +161,54 @@ describe('样式接线锁（UI 现扫补的三条 · ⑪⑫ R54 · ⑬ R58）', 
       /color:\s*var\(--primary-ink\)/,
     );
   });
+
+  /**
+   * ⑭⑮⑯（R60 · T78 命中区三族的**声明层**锁）。
+   *
+   * ## 为什么要有这一层（e2e 已经量了渲染结果）
+   *
+   * e2e 那条量的是**渲染出来的样子**（慢、且只在真窗口里成立）⇒ 所以再配一层**声明层**：
+   * CSS 被改坏时**快档**就能红，不必等 25 分钟的 e2e。
+   *
+   * ## 为什么**三族分开**写三条
+   *
+   * T78 的原话：「**其余混进去那条锁就会恒红**（恒绿的锁比没锁更坏）」⇒ 一族一把尺子。
+   *   ⑭ **图标按钮族**（浏览器页 ←/→/⟳）⇒ **按钮族标准 ≥32×32**（R54 立的那条）；
+   *   ⑮ **原生 radio/checkbox 族**（权限页）⇒ 尺子不是控件自己的盒子，而是「**用户实际能点到的那块**」
+   *      （它们**全部被 `<label>` 包着**）⇒ 判**关联 label 的高度 ≥24**（WCAG 2.5.8）；
+   *   ⑯ **`<summary>` 族** ⇒ 同 ⑮ 的尺子（**实测 19.2 ⇒ 抬到 24**）。
+   *
+   * ⚠️ ⑮ 只锁**声明**（label 高度），**判不出"控件有没有被 label 包住"** ⇒ 那是 e2e 的活。
+   */
+  it('⑭ 图标按钮族：`.jj-icon-btn` 必须有 ≥32 的最小命中区（按钮族标准）', () => {
+    const rule = /\.jj-icon-btn\s*\{([^}]*)\}/.exec(css);
+    expect(rule, '样式表里没有 .jj-icon-btn 规则（浏览器页那三个图标按钮没有最小命中区）').not.toBeNull();
+    const body = rule?.[1] ?? '';
+    const minH = /min-height:\s*(\d+(?:\.\d+)?)px/.exec(body);
+    const minW = /min-width:\s*(\d+(?:\.\d+)?)px/.exec(body);
+    expect(minH, '.jj-icon-btn 没有 min-height（命中区高度无从保证）').not.toBeNull();
+    expect(minW, '.jj-icon-btn 没有 min-width').not.toBeNull();
+    expect(Number(minH?.[1]), '图标按钮的最小高度不到 32px（本仓按钮族标准）').toBeGreaterThanOrEqual(32);
+    expect(Number(minW?.[1]), '图标按钮的最小宽度不到 32px').toBeGreaterThanOrEqual(32);
+  });
+
+  it('⑮ 原生控件族：`.jj-perm-mode` 的关联 label 必须有 ≥24 的高度（WCAG 2.5.8）', () => {
+    const rule = /\.jj-perm-mode\s*\{([^}]*)\}/.exec(css);
+    expect(rule, '样式表里没有 .jj-perm-mode 规则').not.toBeNull();
+    const minH = /min-height:\s*(\d+(?:\.\d+)?)px/.exec(rule?.[1] ?? '');
+    expect(minH, '.jj-perm-mode 没有 min-height（原生控件的有效命中区无从保证）').not.toBeNull();
+    expect(Number(minH?.[1]), '原生控件的关联 label 高度不到 24px').toBeGreaterThanOrEqual(24);
+  });
+
+  it('⑯ summary 族：必须有 ≥24 的最小高度（改 display 会让展开三角消失 ⇒ 只认 min-height）', () => {
+    const rule = /(^|\})\s*summary\s*\{([^}]*)\}/m.exec(css);
+    expect(rule, '样式表里没有全局 summary 规则（三个 <summary> 命中区都是 19.2px）').not.toBeNull();
+    const minH = /min-height:\s*(\d+(?:\.\d+)?)px/.exec(rule?.[2] ?? '');
+    expect(minH, 'summary 规则里没有 min-height').not.toBeNull();
+    expect(Number(minH?.[1]), 'summary 的最小高度不到 24px').toBeGreaterThanOrEqual(24);
+    // **不许改 display**：Chromium 的展开三角是 `display: list-item` 的产物
+    expect(rule?.[2] ?? '', 'summary 规则里不许改 display（会让展开三角消失）').not.toMatch(/display\s*:/);
+  });
 });
 
 describe('样式接线锁：className 上引用的类名必须在渲染层样式表里有规则', () => {
