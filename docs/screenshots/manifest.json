@@ -1,8 +1,8 @@
 {
-  "version": "1.22.0",
-  "commit": "11756df",
-  "dirtyAtCapture": true,
-  "capturedAt": "2026-10-22T15:26:37.902Z",
+  "version": "1.26.0",
+  "commit": "f078e77",
+  "dirtyAtCapture": false,
+  "capturedAt": "2026-10-23T19:11:51.079Z",
   "howToReshoot": "npm run screenshots（离屏，不弹窗口；演示工作区拍完清场）",
   "demoWorkspace": "D:\\JujiaAgentDemo",
   "viewport": {
@@ -14,28 +14,28 @@
       "tab": "概览",
       "w": 1280,
       "h": 842,
-      "bytes": 54355
+      "bytes": 59355
     },
     {
       "file": "chat.png",
       "tab": "对话（一次真流式回答之后）",
       "w": 1280,
       "h": 842,
-      "bytes": 51367
+      "bytes": 58432
     },
     {
       "file": "canvas.png",
       "tab": "画布（两节点链跑完之后）",
       "w": 1280,
       "h": 842,
-      "bytes": 73836
+      "bytes": 79176
     },
     {
       "file": "files.png",
       "tab": "文件（工作区树展开）",
       "w": 1280,
       "h": 842,
-      "bytes": 39161
+      "bytes": 44275
     }
   ]
 }

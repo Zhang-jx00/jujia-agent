@@ -20,7 +20,8 @@
 `apps/desktop/scripts/e2e-ui.mjs`（渲染契约改成左栏形态）· `apps/desktop/src/main/schedule-wiring.test.ts`（页签标签锁跟着真源走）·
 `review/mutations.json`（+M333 / M334）· `docs/PROGRESS.md`（排查35 行 + 当前规模）· `docs/TRACK-ROADMAP.md`（§6.3 加 R66 行）·
 `docs/DESIGN-BASELINE.md`（R66 小节）· `俱佳Agent交接文档.md`（§2 · §13）· `review/REVIEW-LOG.md`（复核 135）·
-`docs/CHANGELOG-ARCHIVE.md`（最老一条搬入）· `apps/desktop/package.json`（版本 1.25.0 → 1.26.0）。
+`docs/CHANGELOG-ARCHIVE.md`（最老一条搬入）· `docs/screenshots/*`（**展示页 4 张图重拍** ⇒ 清单 = **v1.26.0 @ `f078e77`**）·
+`apps/desktop/package.json`（版本 1.25.0 → 1.26.0）。
 **零新依赖、零新通道；判定语义与权限映射一字未改（改的是外壳布局与渲染层样式）。**
 
 1. **先看图再动手** —— 按所有者给的 10 张同类桌面工具界面截图（5 款主界面 + 5 款设置页）**逐张读完**，
