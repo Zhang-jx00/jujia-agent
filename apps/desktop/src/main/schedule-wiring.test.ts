@@ -22,6 +22,11 @@ const scheduleIpc = strip(read('ipc', 'schedule.ts'));
 const preload = strip(read('..', 'preload', 'index.ts'));
 const panel = strip(read('..', 'renderer', 'src', 'features', 'schedule', 'SchedulePanel.tsx'));
 const app = strip(read('..', 'renderer', 'src', 'App.tsx'));
+/**
+ * 页签标签的**唯一出处**是 `renderer/src/nav.ts`（R66 · 主界面两栏化把它从 App.tsx 抽了出来）。
+ * ⇒ 这条锁跟着真源走：标签去 nav.ts 查，渲染接线仍去 App.tsx 查（两处各查各的，不合成一份）。
+ */
+const nav = strip(read('..', 'renderer', 'src', 'nav.ts'));
 const context = strip(read('ipc', 'context.ts'));
 const service = strip(read('schedule-service.ts'));
 
@@ -47,7 +52,7 @@ describe('通道三层都接齐（缺一层就是界面上永远读不出东西�
   }
 
   it('页签挂上了，名字就叫「定时」（e2e 按文字点它）', () => {
-    expect(app).toContain("schedule: '定时',");
+    expect(nav).toContain("schedule: '定时',");
     expect(app).toContain("tab === 'schedule' && <SchedulePanel />");
   });
 });

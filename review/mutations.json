@@ -2658,6 +2658,38 @@
       "find": "    ...(opts.rulesUntrusted ? { rulesUntrusted: true } : {}),",
       "replace": "    // 变异：这一行被摘掉（M332）",
       "test": "apps/desktop/src/main/gate-wiring.test.ts"
+    },
+    {
+      "id": "M333",
+      "desc": "左栏分组里漏收一个入口（R66 · 主界面两栏化）：「外观」页在左栏里消失 ⇒ 界面上只表现为少一个按钮，没有任何门禁会红",
+      "file": "apps/desktop/src/renderer/src/nav.ts",
+      "find": "  { title: '扩展与规则', tabs: ['mcp', 'plugins', 'hooks', 'permissions', 'appearance'] },",
+      "replace": "  { title: '扩展与规则', tabs: ['mcp', 'plugins', 'hooks', 'permissions'] },",
+      "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
+    },
+    {
+      "id": "M334",
+      "desc": "左栏选中态退化成透明底（R66 · 主界面两栏化）：深色调色板里淡底与常态底只有 1.1–1.3:1 ⇒ 界面上看不出选中了哪一项",
+      "file": "apps/desktop/src/renderer/src/styles.css",
+      "find": ".app-tab-active {\n  background: var(--primary);",
+      "replace": ".app-tab-active {\n  background: transparent;",
+      "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
+    },
+    {
+      "id": "M335",
+      "desc": "左栏导航不再显式钉住 `flex: 0 0 auto`（R66 · 主界面两栏化）：弹性项一旦被压缩，16 个入口就会变形（形变那道形态锁兜住）",
+      "file": "apps/desktop/src/renderer/src/styles.css",
+      "find": "  flex: 0 0 auto;\n}\n\n.app-tab {",
+      "replace": "}\n\n.app-tab {",
+      "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
+    },
+    {
+      "id": "M336",
+      "desc": "左栏入口不再显式给 `line-height`（R66 · 主界面两栏化）：Chromium 给表单控件的 `line-height: normal` 按字体度量算行盒 ⇒ 纯拉丁标签（Git / MCP）比中文标签矮 4px（28.67px < 32px 下限）",
+      "file": "apps/desktop/src/renderer/src/styles.css",
+      "find": "  line-height: 1.5;\n  text-align: left;",
+      "replace": "  text-align: left;",
+      "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
     }
   ]
 }

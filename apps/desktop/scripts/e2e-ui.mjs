@@ -4830,16 +4830,20 @@ try {
   }
 
   /**
-   * ⑧ 窄窗口（应用允许的最小宽度 940px）：页签标签**不许被压成竖排单字**（R45 · 视觉现扫）。
+   * ⑧ 窄窗口（应用允许的最小宽度 940px）：**左栏不许塌、主区不许被挤没、导航项不许折行**（R66 · 主界面两栏化）。
    *
-   * 实测（改之前）：940px 下 **15 个页签全部被逐字换行**（"概/览"两行），
-   * 页签高从 33px 涨到 52px、标题「俱佳Agent」被压成两行（29→58px）——
-   * 读起来像一排竖着的单字，而不是 15 个页签。
-   * 修法：`.app-tab { white-space: nowrap }` + `.app-tabs { flex-wrap: wrap }`。
+   * 为什么换了判据（**不是"改判据让它绿"**）：R45 那条量的是**顶栏横排页签**的排版事实
+   * （940px 下 15 个页签被逐字换行 ⇒ 修法是 nowrap + 放不下就换第二行）。
+   * R66 把这 16 个入口**搬进了左栏**（竖排）⇒ "横排会不会换行"这件事**已经不存在**，
+   * 而 `rowCount` 在竖排里恒等于 1 ⇒ **恒绿的锁比没锁更坏** ⇒ 必须换成新形态的判据。
    *
-   * 判据：**页签最高高度 ≤ 40px**（单行）且**标题高度 ≤ 40px**（不许折行）。
-   * 用"高度"而不是查 `white-space` 的计算值：高度是**渲染结果**，
-   * 查计算值等于把判据架在"我写的那行 CSS 上"，而不是"用户看到的样子"。
+   * 换成的是**同一类排版事实**（仍然是渲染结果，不是 CSS 里的数字）：
+   *   ① 左栏宽度**不许塌**（窄窗下仍 ≥140px）；
+   *   ② 主区宽度**不许被挤没**（窄窗下仍 ≥600px）；
+   *   ③ 导航项**不许折行**（最高 ≤40px —— R45 那条的同一把尺子）；
+   *   ④ 左栏**必须能纵向滚**（入口 16 个 + 窗口只有 620px 高 ⇒ 装不下是必然的，
+   *      那就必须能滚，而且**不许出现横向滚动条**）；
+   *   ⑤ 标题**不许折行**（同一把尺子）。
    */
   const beforeSize = await app.evaluate(({ BrowserWindow }) => {
     const w = BrowserWindow.getAllWindows()[0];
@@ -4853,13 +4857,25 @@ try {
     const tabs = [...document.querySelectorAll('.app-tab')];
     const boxes = tabs.map((el) => el.getBoundingClientRect());
     const title = document.querySelector('.p0-title');
-    // R61（T83）：页签**排了几行**（按 top 分组）—— 窄窗下会换到第二行，那是 R45 明定的取舍
-    const tops = new Set(boxes.map((b) => Math.round(b.top)));
+    const rail = document.querySelector('.app-rail');
+    const main = document.querySelector('.app-main');
+    const railBox = rail ? rail.getBoundingClientRect() : null;
+    const r1 = (v) => Math.round(v * 10) / 10;
     return {
       tabCount: tabs.length,
       maxH: boxes.length ? Math.round(Math.max(...boxes.map((b) => b.height))) : 0,
+      minH: boxes.length ? Math.round(Math.min(...boxes.map((b) => b.height)) * 10) / 10 : 0,
+      minW: boxes.length ? r1(Math.min(...boxes.map((b) => b.width))) : 0,
       titleH: title ? Math.round(title.getBoundingClientRect().height) : 0,
-      rowCount: tops.size,
+      railW: railBox ? r1(railBox.width) : 0,
+      mainW: main ? r1(main.getBoundingClientRect().width) : 0,
+      railScrollH: rail ? rail.scrollHeight : 0,
+      railClientH: rail ? rail.clientHeight : 0,
+      railScrollW: rail ? rail.scrollWidth : 0,
+      railClientW: rail ? rail.clientWidth : 0,
+      railOverflowY: rail ? getComputedStyle(rail).overflowY : '',
+      railFound: rail !== null,
+      mainFound: main !== null,
     };
   });
   /**
@@ -4900,16 +4916,16 @@ try {
     await live.waitForTimeout(400);
   }
   /**
-   * ⑨ R61（T83）：**页签换行这件事本身要钉住** —— 窄窗下换到第二行、宽窗下一行排完。
+   * ⑨ 左栏的**布局事实**要钉住（R66 接手 R61/T83 原来那条"行数"判据的位置）。
    *
-   * 为什么锁**行数**而不锁"第二行是哪些页签"：加一个页签 / 改个名字都会动到成员名单
-   * ⇒ 那种锁会**假红**（而**恒红/恒绿的锁比没锁更坏**）⇒ 只锁"几行"这件**布局事实**。
+   * 原来锁的是"横排页签排了几行"（窄窗 2 行 / 宽窗 1 行）⇒ R66 把入口搬进左栏（竖排）后，
+   * 换成**竖排的同一类事实**：
+   *   ① 导航**必须只有一列**（宽窗窄窗都是）—— 两列就意味着入口被摊平成两栏；
+   *   ② 左栏宽度**不许随窗口抖**（窄窗 = 宽窗）—— 抖一下就说明某处宽度没定死；
+   *   ③ 窄窗下左栏不许塌（≥140px）、主区不许被挤没（≥600px）；
+   *   ④ 窄窗下左栏**必须能纵向滚**，且**不许出横向滚动条**（横向溢出 = 入口被裁、点不到）。
    *
-   * 为什么值得锁：R45 明定的取舍是「**放不下就换第二行，而不是把每个标签压扁**」
-   * ⇒ ① 窄窗下**必须**是 2 行（不许压扁）② 宽窗下**必须**是 1 行（不许白占一行）
-   * ⇒ 将来谁动了 `flex-wrap` / 页签数量，**当场红** ⇒ 逼他重新决策，而不是无声改变行为。
-   *
-   * 实测（2026-10-22 真窗口现扫）：**1180 还是 1 行**，**1100 起换行** ⇒ 换行阈值落在两者之间。
+   * 同样只锁"布局事实"不锁"成员名单"：加一个入口 / 改个名字都不该让这条判据假红。
    */
   // 宽窗那一档**显式**设成 1280（不靠"恢复成之前那个大小" ⇒ 之前那个大小可能本身就是窄的 ⇒ 假红）
   await app.evaluate(({ BrowserWindow }) => {
@@ -4917,36 +4933,48 @@ try {
     if (w) w.setSize(1280, 840);
   });
   await live.waitForTimeout(500);
-  const wideRows = await live.evaluate(() => {
-    const boxes = [...document.querySelectorAll('.app-tab')].map((el) =>
-      Math.round(el.getBoundingClientRect().top),
-    );
-    return { rowCount: new Set(boxes).size, tabCount: boxes.length };
+  const wide = await live.evaluate(() => {
+    const tabs = [...document.querySelectorAll('.app-tab')];
+    const boxes = tabs.map((el) => el.getBoundingClientRect());
+    const rail = document.querySelector('.app-rail');
+    const main = document.querySelector('.app-main');
+    const r1 = (v) => Math.round(v * 10) / 10;
+    return {
+      tabCount: boxes.length,
+      // **列数**：竖排导航里所有入口的 left 相同 ⇒ 一列
+      colCount: new Set(boxes.map((b) => Math.round(b.left))).size,
+      railW: rail ? r1(rail.getBoundingClientRect().width) : 0,
+      mainW: main ? r1(main.getBoundingClientRect().width) : 0,
+    };
   });
-  if (narrow.rowCount !== 2) {
-    fail(
-      '渲染契约：窄窗口（940px）下页签**没有**换到第二行（行数 ' +
-        String(narrow.rowCount) +
-        '）—— R45 明定的取舍是「放不下就换第二行，而不是把每个标签压扁」',
-      JSON.stringify(narrow),
-    );
-  }
-  if (wideRows.rowCount !== 1) {
-    fail(
-      '渲染契约：宽窗口下页签**没有**一行排完（行数 ' +
-        String(wideRows.rowCount) +
-        '）—— 宽窗下换行就是白占一行（页头 57→94px）',
-      JSON.stringify(wideRows),
-    );
-  }
   if (narrow.tabCount === 0) {
-    fail('渲染契约：窄窗口下一条页签都没找到（选择器或结构变了）', JSON.stringify(narrow));
+    fail('渲染契约：窄窗口下一条导航都没找到（选择器或结构变了）', JSON.stringify(narrow));
   }
   if (narrow.maxH > 40) {
     fail(
-      '渲染契约：窄窗口（940px）下页签被压成多行（最高 ' +
+      '渲染契约：窄窗口（940px）下导航项被压成多行（最高 ' +
         String(narrow.maxH) +
         'px —— 标签不许折行）',
+      JSON.stringify(narrow),
+    );
+  }
+  /**
+   * ⑧ 之二：**入口的高度不许比按钮族标准矮**（R66 第一版被这条当场抓住）。
+   *
+   * 实测（真窗口，940×620）：`.app-tab` 的高度有**两种** —— 中文标签 **32.67px**、
+   * **纯拉丁标签（Git / MCP）只有 28.67px** ⇒ 跌破按钮族标准的 32×32。
+   * 根因：**Chromium 的表单控件不继承 `body` 的 `line-height`**（UA 样式表给 `button`
+   * 写死 `line-height: normal`）⇒ 行盒高度随**字体度量**变 ⇒ 拉丁字形比中文字形矮 4px。
+   * ⇒ 修法：给 `.app-tab` **显式** `line-height` ⇒ 所有入口一样高，**与标签是中文还是拉丁无关**。
+   *
+   * 为什么单立一条：⑧ 只查"最高高度 ≤ 40"（不许折行），**查不出"有两个高度"** ——
+   * 折行是往下长（变大），这一条是**某几个入口天生更矮**（变小）⇒ 两个方向都要有下限与上限。
+   */
+  if (narrow.minH < 32) {
+    fail(
+      '渲染契约：窄窗口（940px）下有入口比按钮族标准矮（最低 ' +
+        String(narrow.minH) +
+        'px —— 下限 32px；**高度不许随标签是中文还是拉丁而变**，否则那几个入口点不准）',
       JSON.stringify(narrow),
     );
   }
@@ -4954,6 +4982,96 @@ try {
     fail(
       '渲染契约：窄窗口（940px）下标题被压成多行（' + String(narrow.titleH) + 'px）',
       JSON.stringify(narrow),
+    );
+  }
+  if (!narrow.railFound || !narrow.mainFound) {
+    fail('渲染契约：左栏或主区没找到（结构变了 —— 契约要跟着改）', JSON.stringify(narrow));
+  }
+  if (narrow.railW < 140) {
+    fail(
+      '渲染契约：窄窗口（940px）下左栏塌到 ' + String(narrow.railW) + 'px（下限 140px）',
+      JSON.stringify(narrow),
+    );
+  }
+  if (narrow.mainW < 600) {
+    fail(
+      '渲染契约：窄窗口（940px）下主区只剩 ' + String(narrow.mainW) + 'px（下限 600px —— 被左栏挤没了）',
+      JSON.stringify(narrow),
+    );
+  }
+  if (narrow.railScrollH > narrow.railClientH && narrow.railOverflowY !== 'auto' && narrow.railOverflowY !== 'scroll') {
+    fail(
+      '渲染契约：窄窗口（940px）下左栏装不下（' +
+        String(narrow.railScrollH) +
+        ' > ' +
+        String(narrow.railClientH) +
+        '）却不能纵向滚（overflow-y=' +
+        narrow.railOverflowY +
+        '）—— 入口会被裁掉',
+      JSON.stringify(narrow),
+    );
+  }
+  if (narrow.railScrollW > narrow.railClientW + 1) {
+    fail(
+      '渲染契约：窄窗口（940px）下左栏出现横向滚动条（' +
+        String(narrow.railScrollW) +
+        ' > ' +
+        String(narrow.railClientW) +
+        '）—— 内容不该横向溢出',
+      JSON.stringify(narrow),
+    );
+  }
+  if (wide.colCount !== 1) {
+    fail(
+      '渲染契约：宽窗口下左栏排成了 ' + String(wide.colCount) + ' 列（导航必须只有一列）',
+      JSON.stringify(wide),
+    );
+  }
+  if (Math.abs(wide.railW - narrow.railW) > 1) {
+    fail(
+      '渲染契约：左栏宽度随窗口抖了（窄窗 ' +
+        String(narrow.railW) +
+        'px → 宽窗 ' +
+        String(wide.railW) +
+        'px）—— 宽度必须定死',
+      JSON.stringify({ narrow: narrow.railW, wide: wide.railW }),
+    );
+  }
+  /**
+   * ⑩ **左栏选中态的对比度**（R66）：选中项与栏底 ≥ 3:1（WCAG 1.4.11 非文本对比度），
+   * 选中项的字与底 ≥ 4.5:1（AA 1.4.3）。
+   *
+   * 为什么必须量：**代码里"有高亮"不等于"看得见高亮"** —— 深色调色板里两个相邻的浅底
+   * 对比度只有 1.1–1.3:1，界面上那条"高亮"与常态**看起来一模一样**（R144 的教训）。
+   * ⇒ 这里量真窗口里的计算色。
+   */
+  const activeLook = await live.evaluate(() => {
+    const on = document.querySelector('.app-tab-active');
+    const rail = document.querySelector('.app-rail');
+    if (!on || !rail) return { none: true };
+    const s = getComputedStyle(on);
+    const r = getComputedStyle(rail);
+    return { bg: s.backgroundColor, color: s.color, railBg: r.backgroundColor, none: false };
+  });
+  if (activeLook.none === true) {
+    fail('渲染契约：左栏里找不到选中项（`.app-tab-active`）—— 量不到东西的锁会一直绿', JSON.stringify(wide));
+  }
+  const onVsRail = lumRatio(activeLook.bg, activeLook.railBg);
+  if (onVsRail !== null && onVsRail < 3) {
+    fail(
+      '渲染契约：左栏选中项与栏底的对比只有 ' +
+        String(onVsRail) +
+        ':1（非文本对比度下限 3:1 ⇒ 等于没高亮）',
+      JSON.stringify(activeLook),
+    );
+  }
+  const textOn = lumRatio(activeLook.color, activeLook.bg);
+  if (textOn !== null && textOn < 4.5) {
+    fail(
+      '渲染契约：左栏选中项的字与底对比只有 ' +
+        String(textOn) +
+        ':1（AA 4.5）',
+      JSON.stringify(activeLook),
     );
   }
   /**

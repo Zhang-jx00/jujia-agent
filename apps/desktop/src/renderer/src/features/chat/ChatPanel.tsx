@@ -17,7 +17,7 @@ import { ToolCard } from './ToolCard';
 import { useAttachments } from './use-attachments';
 import { useCompact } from './use-compact';
 import { useTaskCard } from './use-task-card';
-import { IconPencil, IconTriangleAlert, IconX } from '../../ui/icons';
+import { IconTriangleAlert, IconX } from '../../ui/icons';
 
 interface Bubble {
   id: string;
@@ -64,6 +64,34 @@ interface Props {
    */
   active?: boolean;
 }
+
+/**
+ * 落地屏的快捷入口（R66 · 主界面两栏化）。
+ *
+ * 为什么有这一组：落地屏只放一行"选好连接，在下面输入第一句"的话，等于**把用户推到一张白纸前** ——
+ * "能做什么"全靠他自己想。给出四个**能点的下一步**，第一次进来就知道从哪儿下手。
+ *
+ * 注意：**点了只填进输入框，不自动发送** —— 自动发送等于替用户按下"开始改文件"的按钮。
+ * （这四个提示词是可改的草稿，用户能在发送前改掉。）
+ */
+const WELCOME_SHORTCUTS: readonly { readonly label: string; readonly prompt: string }[] = [
+  {
+    label: '读懂这个项目',
+    prompt: '帮我读懂这个项目的结构，并说明它是怎么跑起来的。',
+  },
+  {
+    label: '找出最该修的问题',
+    prompt: '帮我找出这个项目里最值得修的三个问题，并说明理由。',
+  },
+  {
+    label: '补一组单元测试',
+    prompt: '为当前模块补一组单元测试，覆盖主要分支。',
+  },
+  {
+    label: '解释这段代码',
+    prompt: '解释这段代码在做什么，以及谁在调用它。',
+  },
+];
 
 /**
  * 对话面板（W2）。
@@ -861,12 +889,28 @@ export function ChatPanel({ connections, active = true }: Props): ReactElement {
 
       <div className="w2-chat-scroll" ref={scrollerRef}>
         {viewState === 'empty' && (
-          <div className="jj-state jj-enter">
-            <span className="jj-state-icon" aria-hidden="true">
-              <IconPencil size={22} />
-            </span>
-            <p>还没有对话。选好连接，在下面输入第一句。</p>
-            <p className="p0-subtitle">提示：Agent 在改动文件前会弹出确认，你可以拒绝或改参数。</p>
+          /*
+           * 落地屏（R66）：标题 + 一句话 + 四个**能点的下一步**。
+           * 为什么不复用 `.jj-state`（空态）：空态回答"怎么用"，落地屏回答"现在能做什么" ——
+           * 后者需要一个大标题和一组可点的入口，空态那两行文字给不了。
+           */
+          <div className="jj-welcome jj-enter">
+            <h2 className="jj-welcome-title">要做什么？</h2>
+            <p className="jj-welcome-sub">
+              选好连接，在下面说出第一句。Agent 改动文件前会先问你，你可以拒绝或改参数。
+            </p>
+            <div className="jj-welcome-actions">
+              {WELCOME_SHORTCUTS.map((s) => (
+                <button
+                  key={s.label}
+                  type="button"
+                  className="jj-welcome-chip jj-transition"
+                  onClick={() => setInput(s.prompt)}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {viewState === 'loading' && (

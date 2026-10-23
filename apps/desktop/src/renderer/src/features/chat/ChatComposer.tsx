@@ -59,6 +59,14 @@ export function ChatComposer(props: Props): ReactElement {
         props.onFiles(Array.from(e.dataTransfer.files));
       }}
     >
+      {/*
+        输入框顶部那一行（R66）：**当前连的是谁**。
+        为什么放在这里而不是只留在工具条上：工具条离输入框远、而且会被别的元信息挤成两行；
+        而"这句话会发给谁"是**发出去之前**最该确认的一件事，必须离发送键近。
+      */}
+      <div className="w2-chat-input-head">
+        <span className="w2-chat-input-conn">{`连接 · ${connectionName}`}</span>
+      </div>
       {attached.length > 0 && (
         <div className="w2-attach-row">
           {attached.map((img, i) => (
@@ -125,26 +133,30 @@ export function ChatComposer(props: Props): ReactElement {
           }
         }}
       />
-      <div className="w2-actions">
-        <button
-          type="button"
-          className="w2-btn"
-          disabled={attachBusy || !hasConnection || attached.length >= CHAT_IMAGE_MAX_PER_MESSAGE}
-          onClick={() => props.onPickImages()}
-        >
-          {attachBusy ? '正在读取图片…' : '添加图片'}
-        </button>
-        <button
-          type="button"
-          className="w2-btn-primary"
-          disabled={!hasConnection || (input.trim() === '' && attached.length === 0) || sending}
-          onClick={() => props.onSend()}
-        >
-          发送
-        </button>
-        <button type="button" className="w2-btn" disabled={!sending} onClick={() => props.onStop()}>
-          停止
-        </button>
+      <div className="w2-actions w2-chat-actions">
+        <div className="w2-actions-left">
+          <button
+            type="button"
+            className="w2-btn"
+            disabled={attachBusy || !hasConnection || attached.length >= CHAT_IMAGE_MAX_PER_MESSAGE}
+            onClick={() => props.onPickImages()}
+          >
+            {attachBusy ? '正在读取图片…' : '添加图片'}
+          </button>
+        </div>
+        <div className="w2-actions-right">
+          <button type="button" className="w2-btn" disabled={!sending} onClick={() => props.onStop()}>
+            停止
+          </button>
+          <button
+            type="button"
+            className="w2-btn-primary"
+            disabled={!hasConnection || (input.trim() === '' && attached.length === 0) || sending}
+            onClick={() => props.onSend()}
+          >
+            发送
+          </button>
+        </div>
       </div>
     </div>
   );
