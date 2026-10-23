@@ -13,7 +13,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -653,6 +653,49 @@ const cases = [
     to: '规格与改法见 `docs/TRACK-PLANS.md` 的 ' + 'T' + '79',
     expect: '指向队列条目（T 号）的引用必须指到真正住着它的那份文件',
   },
+  {
+    // 第 53 条（R63 · 队列计数不许再漂）：把交接文档 §2「队列」格里的那个数改错一位。
+    //
+    // 为什么挑这个形状：**它就是本轮现扫发现的原样** —— 旧账写「✅ 77 · ⬜ 5（T74 / T83 / T85 / T86）」，
+    // 而那一版的 ⬜ 名单**只有 4 个却写 5**，还把**已于 R61 关闭的 T83** 算成待排 ⇒
+    // 注入回去 = **把历史那处陈账原样复原**。
+    //
+    // 为什么这类漂移必须机器盯：**它不报错、不红**，只是让下一个接手方按错数字核
+    // （本仓这一份计数已经被手抄漂过两轮）⇒ 治法是让判据现算现出，而不是"记得重测"。
+    name: '队列计数被手抄漂了（§2 那一句与现扫对不上）',
+    file: '俱佳Agent交接文档.md',
+    from: '✅ 已交付 78 条 · ⬜ 待排 3 条',
+    to: '✅ 已交付 77 条 · ⬜ 待排 3 条',
+    expect: '队列计数与交接文档',
+  },
+  {
+    // 第 52 条（R63 · T86）：**造出**「变异正在跑」的标记 ⇒ 判据必须红。
+    //
+    // 为什么必须是"造文件"型用例：那个标记**平时根本不存在**（跑完即删）⇒
+    // 文本替换型用例表达不了它 ⇒ 框架因此多了一种用法（见上面的 `create` 分支）。
+    //
+    // 为什么这条值得有注入用例：**没有它，这道门禁就是"永远绿"** ——
+    // 而它守的正是「上一次变异有没有跑完」这种**平时看不出来**的状态。
+    name: '变异的「正在跑」标记还在（上次没跑完 ⇒ 必须红）',
+    create: {
+      path: '.git/mutation-running.json',
+      content: JSON.stringify({ pid: 999999, startedAt: '2026-10-23T00:00:00.000Z', backups: {} }) + '\n',
+    },
+    expect: '变异「正在跑」的标记还在',
+  },
+  {
+    // 第 19 条状态句回归锁（R63 新增的一条）：把"仓库现在是私有的"这句**已经证伪**的断言放回去。
+    //
+    // 为什么值得有注入用例：**没有它，这条锁就是"永远绿"** —— 而它守的正是
+    // 「2026-09-24 的旧事实被当成现况抄了十几轮」这一类漂移。
+    // ⚠️ 被禁的那句**必须拼出来**，不能写成字面量 —— 写成字面量的话，
+    //   **本脚本自己**就成了违例（它虽然不是 .md，但将来范围一变就会自咬）。
+    name: '活文档里又出现"仓库现在是私有的"这句证伪断言',
+    file: 'README.md',
+    from: '## 核心理念与独特之处',
+    to: '## 核心理念与独特之处（本仓库' + '当前私有' + '）',
+    expect: '状态句回归锁',
+  },
 ];
 
 /**
@@ -675,6 +718,29 @@ const touched = [];
 const headAtStart = await gitHead();
 try {
   for (const c of cases) {
+    // **「造一个文件」型用例**（R63 新增）：有些判据盯的是"某个文件在不在"，
+    // 而不是"某个文件里的话对不对" —— 第 52 条判据（变异「正在跑」的标记还在 ⇒ 红）就是这一类。
+    // 文本替换型用例表达不了它（那个文件平时根本不存在）⇒ 这里补一种用法。
+    if (c.create) {
+      const p = resolve(repoRoot, c.create.path);
+      const existedBefore = existsSync(p);
+      const beforeContent = existedBefore ? readFileSync(p, 'utf8') : null;
+      try {
+        writeFileSync(p, c.create.content, 'utf8');
+        const r = await runCheck();
+        if (r.code !== 1) {
+          fail(`用例「${c.name}」没有被拦住（检查器退出码 ${String(r.code)}，应为 1）`);
+        }
+        if (!r.out.includes(c.expect)) {
+          fail(`用例「${c.name}」虽然失败，但不是期望的那条检查（期望包含「${c.expect}」）`);
+        }
+        console.log(`  ✅ 被拦住：${c.name}`);
+      } finally {
+        if (existedBefore) writeFileSync(p, beforeContent, 'utf8');
+        else rmSync(p, { force: true });
+      }
+      continue;
+    }
     const path = join(repoRoot, c.file);
     const original = readFileSync(path, 'utf8'); // 内存备份，不落盘
     backups.set(path, original);

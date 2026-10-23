@@ -32,13 +32,108 @@
  * }
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 
 const repoRoot = process.cwd();
 const specPath = resolve(repoRoot, process.argv[2] ?? 'review/mutations.json');
 const vitestEntry = resolve(repoRoot, 'node_modules/vitest/vitest.mjs');
+
+/* ------------------------------------------------------------------ *
+ * 「正在跑」的标记 + 「被杀也能还原」的备份（T86 · R63）
+ * ------------------------------------------------------------------ *
+ * 根因：**门禁被杀掉 ≠ 门禁跑完了**。此前还原只有 `finally` 一条路 ⇒ 进程被中止时
+ * 注入形态**留在工作树里**，而没有任何门禁知道"上一次变异跑没跑完"
+ * （R62 实测撞上：工作树里留着 M64 的注入形态，直接提交就会把坏代码带进仓）。
+ *
+ * 三件东西：
+ *   ① `<git-dir>/mutation-running.json` —— 「正在跑」的标记（跑完即删）；
+ *   ② `<git-dir>/mutation-backup/` —— 每个靶子文件**注入前**的原文（还原后即删）；
+ *   ③ 下一轮启动时若发现标记、且**持有它的进程已经不在** ⇒ **自动按备份还原**。
+ *
+ * 为什么放 `<git-dir>`（本仓即 `.git/`）而不是 `.tmp/`：
+ * `cleanup.py` 的跳过名单含 `.git`，而 `.tmp` 会被**整只**搬进回收站 ——
+ * 标记被搬走 ⇒ 判据看不见 ⇒ 门禁又变回"以为跑完了"。`.git/` 天然按 checkout 隔离。
+ */
+const gitDir = (() => {
+  const dot = resolve(repoRoot, '.git');
+  try {
+    if (existsSync(dot) && statSync(dot).isDirectory()) return dot;
+    if (existsSync(dot)) {
+      const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(dot, 'utf8'));
+      if (m?.[1]) return resolve(repoRoot, m[1].trim());
+    }
+  } catch {
+    /* 读不到就按目录处理，下面写文件时会报错 */
+  }
+  return dot;
+})();
+const MARKER_PATH = resolve(gitDir, 'mutation-running.json');
+const BACKUP_DIR = resolve(gitDir, 'mutation-backup');
+
+/** 进程还在不在（ESRCH = 不在；EPERM = 在但没权限 ⇒ 算"还在"） */
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === 'EPERM';
+  }
+}
+
+function readMarker() {
+  if (!existsSync(MARKER_PATH)) return null;
+  try {
+    return JSON.parse(readFileSync(MARKER_PATH, 'utf8'));
+  } catch {
+    return { unreadable: true };
+  }
+}
+
+/**
+ * 上一轮没跑完 ⇒ 按备份还原（**被杀也能还原**）。
+ * @returns {{ restored: number, note: string } | null}
+ */
+function recoverStaleRun() {
+  const marker = readMarker();
+  if (!marker) return null;
+  if (marker.unreadable) {
+    return { restored: 0, note: `发现标记文件但读不出来（${MARKER_PATH}）⇒ 请人工核对工作树` };
+  }
+  if (pidAlive(marker.pid) && marker.pid !== process.pid) {
+    return {
+      restored: 0,
+      note: `另有一轮变异正在跑（pid ${String(marker.pid)}）⇒ 本轮不启动，避免两边互相踩`,
+    };
+  }
+  let restored = 0;
+  for (const [rel, backup] of Object.entries(marker.backups ?? {})) {
+    const target = resolve(repoRoot, rel);
+    const src = resolve(BACKUP_DIR, backup);
+    if (!existsSync(src)) continue;
+    try {
+      writeFileSync(target, readFileSync(src));
+      restored += 1;
+    } catch {
+      /* 还原不了就留给人看，标记会留着 */
+    }
+  }
+  rmSync(MARKER_PATH, { force: true });
+  rmSync(BACKUP_DIR, { recursive: true, force: true });
+  return {
+    restored,
+    note:
+      `上一轮变异**没跑完**（pid ${String(marker.pid)} 已不在）⇒ 已按备份还原 ${String(restored)} 个文件` +
+      '（若仍有残留，请 `git diff` 逐处核对）',
+  };
+}
+
+function writeMarker(marker) {
+  mkdirSync(gitDir, { recursive: true });
+  writeFileSync(MARKER_PATH, `${JSON.stringify(marker, null, 2)}\n`, 'utf8');
+}
 
 const stripAnsi = (text) => text.replace(/\u001b\[[0-9;]*m/g, '');
 
@@ -135,6 +230,29 @@ async function main() {
   }
   console.log(`锚点预检通过：${mutations.length} 条靶文本在各自文件里都恰好命中 1 次\n`);
 
+  /**
+   * **开工前的自愈**：上一轮被中止 ⇒ 标记还在 ⇒ 先按备份还原，再开跑（T86）。
+   * 放在锚点预检**之后**：预检不过时本轮一条都不注入，也不该动工作树。
+   */
+  const recovered = recoverStaleRun();
+  if (recovered) {
+    if (recovered.restored === 0 && recovered.note.includes('正在跑')) {
+      console.error(`❌ ${recovered.note}`);
+      process.exit(2);
+    }
+    console.log(`ℹ️ ${recovered.note}`);
+  }
+
+  /** 「正在跑」的标记（跑完即删；被中止时留在原地 ⇒ 判据看得见） */
+  const marker = {
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    spec: specPath,
+    total: mutations.length,
+    backups: {},
+  };
+  writeMarker(marker);
+
   const results = [];
 
   for (const m of mutations) {
@@ -159,6 +277,17 @@ async function main() {
       continue;
     }
 
+    // **落盘备份**（T86 · 在内存备份之外加的第三道）：
+    //   内存那份负责正常路径的还原；这份在 `<git-dir>/mutation-backup/`（**不是** `.tmp/` ——
+    //   `.tmp` 会被 cleanup 整只搬走，标记与备份一起消失 ⇒ 门禁又变回"以为跑完了"）。
+    //   作用只有一个：**进程被中止时也能还原**（那时内存那份已经随进程一起没了）。
+    //   还原成功后立刻删掉，不留垃圾。
+    const backupName = `${String(results.length).padStart(3, '0')}-${m.id}.bak`;
+    mkdirSync(BACKUP_DIR, { recursive: true });
+    writeFileSync(resolve(BACKUP_DIR, backupName), original, 'utf8');
+    marker.backups[m.file] = backupName;
+    writeMarker(marker);
+
     try {
       writeFileSync(file, original.replace(m.find, m.replace), 'utf8');
 
@@ -175,6 +304,9 @@ async function main() {
     } finally {
       // 无论测试怎么崩都要把原文写回去（包括 vitest 自身抛错的情况）
       writeFileSync(file, original, 'utf8');
+      rmSync(resolve(BACKUP_DIR, backupName), { force: true });
+      delete marker.backups[m.file];
+      writeMarker(marker);
     }
     results.push(row);
   }
@@ -231,6 +363,13 @@ async function main() {
         '这类失败**不算"被拦住"**。请修好环境后重跑，别让假的绿色混进台账。',
     );
   }
+
+  /**
+   * **跑完了 ⇒ 标记与备份一并撤掉**（T86）。
+   * 撤不掉也要说：标记留着 ⇒ 下一轮的判据会红 ⇒ 那正是"没跑完"该有的样子。
+   */
+  rmSync(MARKER_PATH, { force: true });
+  rmSync(BACKUP_DIR, { recursive: true, force: true });
 
   process.exit(missed === 0 && broken === 0 && unrunnable === 0 && restoreOk ? 0 : 1);
 }

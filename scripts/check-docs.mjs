@@ -38,6 +38,38 @@ const report = (name, ok, detail) => {
 const read = (rel) => readFileSync(join(repoRoot, rel), 'utf8');
 const exists = (rel) => existsSync(join(repoRoot, rel));
 
+/**
+ * 按 **GFM 的真实切分规则**切一行的格子：只认**未转义**的竖线（`\|` 不切格）；首尾竖线是分隔符不是格子。
+ *
+ * 为什么放在模块级（原先它是第 29 条判据里的块级常量）：**同一个切分规则只能有一份实现** ——
+ * R63 加"队列计数现扫"那条判据时自己写了一份"代码块里的竖线不算分隔符"的切法，
+ * 结果它与 GFM 的真实行为不一致（真值：GFM **根本不看代码块**）⇒ 把 T58 / T61 两行切错、
+ * 于是同一份队列被数出两个不同的数。**两份切法 ⇒ 两份数 ⇒ 假账。**
+ */
+const gfmCells = (line) => {
+  const out = [];
+  let cur = '';
+  let i = 0;
+  if (line.startsWith('|')) i = 1;
+  for (; i < line.length; i += 1) {
+    if (line[i] === '\\') {
+      cur += line[i] + (line[i + 1] ?? '');
+      i += 1;
+      continue;
+    }
+    if (line[i] === '|') {
+      out.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += line[i];
+  }
+  // 行尾竖线后面若还有内容，那是**多出来的一格**（不能丢）——
+  // 所以只有"什么都没有"时才不算一格。
+  if (cur !== '' || out.length === 0) out.push(cur);
+  return out;
+};
+
 const readme = read('README.md');
 const progress = read('docs/PROGRESS.md');
 
@@ -1365,11 +1397,16 @@ const walkLiveFiles = (exts) => {
     ['PDF / Markdown 应用内查看（选型待拍板', '两者都已交付（`v0.36.0-扩容3` / `v0.46.0-M19a`·`v0.47.0-M19b`）'],
     ['（argv/process）**零测试**', '`argv.test.ts` 自 `v0.57.0-加固4` 就在；`process.ts` 无专测另记在 R-13'],
     ['渲染层**零单测**', '渲染层现有 23 个测试文件'],
+    // R63：仓库**早已是公开的**（2026-10-23 两法实测：API `visibility: public` + 匿名请求 200），
+    // 而账上四处一直写着"当前私有"（2026-09-24 的旧事实被当成了现况，17 轮没人复看）⇒ 钉死。
+    ['当前私有', '仓库 2026-10-23 实测**已公开**（`GET /repos/…` → `visibility: public`；匿名同一 URL → **200**）'],
   ];
   const hits = [];
   let scanned = 0;
   for (const rel of walkLiveFiles(['.md'])) {
-    if (rel !== 'README.md' && !rel.startsWith('docs/')) continue;
+    // 范围：README + docs/ 下的活文档 + **根目录那份基准交接文档**（R63 补进来 ——
+    // 根交接文档此前整份在这条判据的视野之外，"当前私有"那句陈话正是在那儿藏了 17 轮）。
+    if (rel !== 'README.md' && rel !== '俱佳Agent交接文档.md' && !rel.startsWith('docs/')) continue;
     if (rel === 'CHANGELOG.md') continue; // 历史条目原文不回改，也不当违例
     scanned += 1;
     const lines = read(rel).split('\n');
@@ -1932,30 +1969,8 @@ const walkLiveFiles = (exts) => {
  * 防失焦：一条数据行都没扫到 ⇒ 直接红（"定位器失效"的老账，见第 12/13 条）。
  * ------------------------------------------------------------------ */
 {
-  /** 按 GFM 规则切一行的格子：只认未转义的竖线；首尾竖线是分隔符不是格子。 */
-  const gfmCells = (line) => {
-    const out = [];
-    let cur = '';
-    let i = 0;
-    if (line.startsWith('|')) i = 1;
-    for (; i < line.length; i += 1) {
-      if (line[i] === '\\') {
-        cur += line[i] + (line[i + 1] ?? '');
-        i += 1;
-        continue;
-      }
-      if (line[i] === '|') {
-        out.push(cur);
-        cur = '';
-        continue;
-      }
-      cur += line[i];
-    }
-    // 行尾竖线后面若还有内容，那是**多出来的一格**（不能丢）——
-    // 所以只有"什么都没有"时才不算一格。
-    if (cur !== '' || out.length === 0) out.push(cur);
-    return out;
-  };
+  // 切格规则用**模块级**的 `gfmCells`（GFM 真实切分：只认未转义竖线）——
+  // 原先这里是块级的一份副本；R63 加"队列计数现扫"那条判据时才发现：两份实现会长出两份数。
   const isSepRow = (l) => /^\s*\|[\s:|-]*-[\s:|-]*\|?\s*$/.test(l) && l.includes('-');
 
   const bad = [];
@@ -2618,6 +2633,143 @@ const walkLiveFiles = (exts) => {
       .join('\n     '),
   );
 }
+/* ------------------------------------------------------------------ *
+ * 52. 变异「正在跑」的标记还在 ⇒ 上一次没跑完 ⇒ 红（T86 · R63）
+ *
+ * 根因：**门禁被杀掉 ≠ 门禁跑完了**。此前 `mutation-check.mjs` 的还原只有 `finally` 一条路 ⇒
+ * 进程被中止时**注入形态留在工作树里**，而**没有任何门禁知道上一次变异跑没跑完**
+ * （R62 实测撞上：工作树里留着 M64 的注入形态 —— 直接提交就会把坏代码带进仓）。
+ *
+ * 判据：`<git-dir>/mutation-running.json` 在 ⇒ 红。
+ * 为什么标记放 `<git-dir>` 而不是 `.tmp/`：`cleanup.py` 的跳过名单含 `.git`，
+ * 而 `.tmp` 会被**整只**搬进回收站 —— 标记被搬走 ⇒ 这条判据看不见 ⇒ 门禁又变回"以为跑完了"。
+ *
+ * 口径（如实写明）：本判据看的是**标记还在不在**，不判断"上一次是不是真被中止" ——
+ * 标记在就意味着"那一轮没走到收尾"，两种成因（被中止 / 被强杀）后果一样：工作树可能不干净。
+ * ------------------------------------------------------------------ */
+{
+  // `.git` 在 worktree 里可能是一个**文件**（内容是 `gitdir: …`）⇒ 两种都要认
+  const dotGit = resolve(repoRoot, '.git');
+  let gitDirPath = dotGit;
+  try {
+    if (!readdirSync(dotGit)) gitDirPath = dotGit;
+  } catch {
+    try {
+      const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'));
+      if (m?.[1]) gitDirPath = resolve(repoRoot, m[1].trim());
+    } catch {
+      /* 读不出来就按目录处理，下面判"标记在不在"照样成立 */
+    }
+  }
+  const markerPath = resolve(gitDirPath, 'mutation-running.json');
+  const markerThere = existsSync(markerPath);
+  let detail = '';
+  if (markerThere) {
+    let info = null;
+    try {
+      info = JSON.parse(readFileSync(markerPath, 'utf8'));
+    } catch {
+      info = null;
+    }
+    /** 标记里那个 pid 还活着吗（活着 = 有一轮变异**正在跑**；不在 = 上一轮没走到收尾） */
+    const alivePid = (pid) => {
+      if (!Number.isInteger(pid) || pid <= 0) return false;
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (err) {
+        return err?.code === 'EPERM'; // 在但没权限 ⇒ 也算"还在"
+      }
+    };
+    const backups = Object.keys(info?.backups ?? {});
+    const running = alivePid(info?.pid);
+    detail = running
+      ? `标记还在：${relative(repoRoot, markerPath)}（pid ${String(info.pid)} · 起于 ${String(info.startedAt ?? '?')}）` +
+        ' ⇒ **有一轮变异正在跑**：工作树此刻**可能带着注入形态** ⇒ **别在这个状态下提交**；' +
+        '跑完标记即删（若它被杀 ⇒ 标记会留下并要求逐处核对）'
+      : `标记还在：${relative(repoRoot, markerPath)}` +
+        (info?.pid ? `（pid ${String(info.pid)} · 起于 ${String(info.startedAt ?? '?')}）` : '（内容读不出来）') +
+        ' ⇒ **上一次变异没有走到收尾**：工作树可能留着注入形态 ⇒ **提交前必须逐处核对**' +
+        `（备份清单 ${String(backups.length)} 个 ⇒ 跑一次 \`npm run mut\` 会自动按备份还原；确认干净后删掉这个标记文件即可）`;
+  }
+  report(
+    '变异「正在跑」的标记还在 ⇒ 上一次没跑完 ⇒ 红（T86：门禁的「跑完」也要有凭据）',
+    !markerThere,
+    detail,
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 53. 队列计数不许再漂：现扫 ROADMAP 四张表 ⇒ 与交接文档 §2 的「队列」格逐字对账（R63）
+ *
+ * 为什么立它：**同一份计数已经被手抄漂过两轮**（R57 写「86 行 · ✅76 · ⬜5」，
+ * R59–R62 一路抄到「87 行 · ✅77 · ⬜5」，而 R63 现扫的真值是「87 物理行 / 86 个唯一编号 ·
+ * ✅78 · ⬜3 · 🔶1 · 🟡4」）—— 更糟的是那一版的 ⬜ 名单只有 4 个却写 5，
+ * 且把**已于 R61 关闭的 T83** 仍算成待排。
+ * 根因与 R59 记的一样：**靠人抄的数必然漂** ⇒ 治法不是"记得重测"，而是**让那个计数现算现出**。
+ *
+ * 判据形状：现扫 `docs/TRACK-ROADMAP.md` 里**四张表**的 T 行（状态列首标记分桶），
+ * 拼成**一句口径串**，要求交接文档 §2 的「队列」格**逐字包含**它 ⇒ 对不上就红。
+ * 为什么是"逐字包含"而不是"解析出数字再比"：数字比法要求文档按某种句式写，
+ * 一旦句式变了就"解析不出来"（而解析不出来也该红）⇒ 两边都靠同一句口径串，反而没有第二种口径。
+ *
+ * 分桶口径：状态列**首个标记**（✅ 已交付 / ⬜ 待排 / 🔶 等人拍板 / 🟡 部分交付或根因未定）。
+ * 切格子时**竖线在代码块里不算分隔符**（`\|` 是转义、`\`` 是转义的反引号）——
+ * 否则 T52 那一行（`SHELL_METACHAR = /\|&;…/`）会被劈开，状态列读错。
+ * ------------------------------------------------------------------ */
+{
+  const roadmap = read('docs/TRACK-ROADMAP.md');
+  const rows = [];
+  const unmarked = [];
+  for (const line of roadmap.split('\n')) {
+    const t = line.trim();
+    if (!t.startsWith('|')) continue;
+    // 切格用**模块级**的 `gfmCells`（GFM 真实切分：只认未转义竖线）——
+    // 自己写一份"代码块里的竖线不算分隔符"的切法会与真值分叉（R63 实测：T58 / T61 两行被切错，
+    // 同一份队列被数出两个不同的数 ⇒ 两份切法 = 两份数 = 假账）。
+    const cells = gfmCells(t).map((c) => c.trim());
+    if (cells.length < 2) continue;
+    if (!/^T\d+$/.test(cells[0])) continue;
+    const head = cells[cells.length - 1].replace(/^[\s*]+/, '');
+    let bucket = 'other';
+    if (head.startsWith('✅')) bucket = 'done';
+    else if (head.startsWith('⬜')) bucket = 'todo';
+    else if (head.startsWith('🔶')) bucket = 'pending';
+    else if (head.startsWith('🟡')) bucket = 'partial';
+    if (bucket === 'other') unmarked.push(`${cells[0]}（状态列开头是「${head.slice(0, 20)}」）`);
+    rows.push({ id: cells[0], bucket });
+  }
+  const idsIn = (bucket) =>
+    [...new Set(rows.filter((r) => r.bucket === bucket).map((r) => r.id))].sort(
+      (a, b) => Number(a.slice(1)) - Number(b.slice(1)),
+    );
+  const uniqueAll = new Set(rows.map((r) => r.id)).size;
+  const canonical =
+    `${String(rows.length)} 物理行 / ${String(uniqueAll)} 个唯一编号` +
+    ` · ✅ 已交付 ${String(idsIn('done').length)} 条` +
+    ` · ⬜ 待排 ${String(idsIn('todo').length)} 条（${idsIn('todo').join(' / ')}）` +
+    ` · 🔶 等人拍板 ${String(idsIn('pending').length)} 条（${idsIn('pending').join(' / ')}）` +
+    ` · 🟡 部分交付或根因未定 ${String(idsIn('partial').length)} 条（${idsIn('partial').join(' / ')}）`;
+
+  const handover = read('俱佳Agent交接文档.md');
+  const queueCell = handover.split('\n').find((l) => l.startsWith('| 队列 |')) ?? '';
+  const matched = queueCell.includes(canonical);
+  report(
+    '队列计数与交接文档 §2 的「队列」格逐字对账（现扫 ROADMAP 四张表，不许手抄）',
+    matched && rows.length > 0 && unmarked.length === 0,
+    [
+      rows.length === 0 ? '一条 T 行都没扫到 —— 定位器失效（防失焦先红）' : '',
+      unmarked.length > 0
+        ? `有 ${String(unmarked.length)} 行的状态列**没有可识别的首标记** ⇒ 队列表自己就不可机读：${unmarked.join('、')}`
+        : '',
+      `现扫出来的口径是：${canonical}`,
+      matched ? '' : '而交接文档 §2 的「队列」格里没有这一句 ⇒ 要么抄错了，要么改了队列忘了改交接文档。',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
