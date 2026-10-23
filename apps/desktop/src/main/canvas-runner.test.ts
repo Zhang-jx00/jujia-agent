@@ -65,6 +65,8 @@ function makeDeps(baseUrl: string, events: CanvasEventPayload[]): CanvasRunnerDe
       rules: [],
       alwaysAsk: [],
       rulesHealth: { source: 'primary', count: 0, recovered: false },
+      // T74：规则表这次**可信** ⇒ 判定行为与从前一字不差
+      rulesUntrusted: false,
     }),
     // 提示词节点不碰权限 / 注册表 / 钩子（那三样只挂在工具节点上）——
     // 不假返回：真被碰到就抛错，把"不该被调用"变成可执行的断言

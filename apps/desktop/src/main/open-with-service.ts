@@ -30,6 +30,8 @@ export interface OpenWithPolicy {
   mode: PermissionMode;
   rules: ReadonlyArray<PermissionRule>;
   alwaysAsk: ReadonlyArray<string>;
+  /** **规则表这次读不出来**（T74）⇒ 非只读一律硬 ask；不传 = 可信 */
+  rulesUntrusted?: boolean;
 }
 
 export type OpenWithResult =
@@ -215,6 +217,8 @@ export function createOpenWithService(deps: OpenWithDeps): OpenWithService {
       mode: policy.mode,
       rules: policy.rules,
       alwaysAsk: policy.alwaysAsk,
+      // T74：规则表读不出来 ⇒ 非只读一律硬 ask（exactOptionalPropertyTypes ⇒ 只在真的降级时传）
+      ...(policy.rulesUntrusted ? { rulesUntrusted: true } : {}),
     });
     const gateArgs: Record<string, unknown> = {
       target,

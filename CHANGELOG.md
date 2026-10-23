@@ -10,6 +10,54 @@
 > 轨道分类见 `docs/TRACK-PLANS.md`；排期与修复队列见 `docs/TRACK-ROADMAP.md`。
 ---
 
+## [v1.24.0-排查33 · T74 落地：规则表读不出来 ⇒ 非只读一律硬 ask（R64）] — 2026-10-23 16:05
+
+**范围**：`packages/agent-core/src/permissions/policy.ts`（判定核心加一步 ＋ 新增口径函数 `rulesAreUntrusted`）·
+`packages/agent-core/src/tools/executor.ts` · `packages/agent-core/src/loop/agent-loop.ts`（往下传）·
+`apps/desktop/src/main/chat-service.ts` · `ipc/context.ts`（`IpcPolicy.rulesUntrusted`）· `ipc/turn-trigger.ts` ·
+`ipc/tools.ts`（TOOL_RUN）· `ipc/extensions.ts`（钩子改配置）· `git-gate.ts` / `git-service.ts` ·
+`hooks-gate.ts` · `open-with-gate.ts` / `open-with-service.ts` · `canvas-runner.ts`（**接线面 14 处**）·
+`apps/desktop/src/main/gate-wiring.test.ts`（**新：接线锁 + 真缝测试**）· `packages/agent-core/src/permissions/policy.test.ts`（判定单测 +8 例）·
+`scripts/verify-docs-check.mjs`（**队列计数那条用例的锚点改成从现树现取** ⇒ 队列数字再变也不会失效）·
+`apps/desktop/package.json`（版本 1.23.0 → 1.24.0）· `review/mutations.json`（**M331 / M332**）·
+`俱佳Agent交接文档.md`（§2 队列格 · §9 · §13）· `docs/TRACK-ROADMAP.md`（§4.1 T74/T69 行 · §6.3 加 R64 行）·
+`docs/PROGRESS.md`（排查33 行）· `review/REVIEW-LOG.md`（复核 133）· `docs/CHANGELOG-ARCHIVE.md`（最老一条搬入）。
+**零新依赖、零新通道；收紧方向（只增加当面确认，**不扩大任何权限**）；判定语义与权限映射的其余部分一字未改。**
+
+1. **问题原文（登记时）**：规则文件读坏时 `list()` 返回空表 ⇒ **用户自己写过的 `deny` 静默不生效**，
+   而当时只有权限页那一行红字告知 ⇒ **没打开权限页的人永远不知道自己的 deny 没生效**。
+   ⇒ R63 逐条重判把它判成**可自裁**（收紧方向：把「用户不知道」变成「用户被问一句」，不扩大任何权限）⇒ 本轮就做。
+2. **判定核心加一步**：`rulesUntrusted` 且 `kind !== 'read'` ⇒ **硬 ask**（`bypassable: false` ⇒
+   「本次会话总是允许」压不掉它）。**位置有讲究**：排在 bypassPermissions / plan-dontAsk / 敏感目标**之后**，
+   **只读放行与 acceptEdits 放行之前** —— 那两处正是"deny 静默不生效"会变成"动作真的被做了"的地方。
+   ⇒ **bypassPermissions 仍然放行**（那是用户显式写下的决定，不在这里偷偷推翻）；**只读不受影响**（读有自己的敏感路径判定兜底）。
+3. **口径只写一份**：`rulesAreUntrusted(health)` —— **只有 `recovered: true` 才算「读不出来」**
+   （`source === 'default' && !recovered` 是**「从来没有规则文件」** ⇒ 正常首装**不多问一句**）。
+   ⇒ 判定侧 / 审计侧 / 界面横幅共用这一个函数，**不各写各的**（R50 的队列体检就是这么抓出三套数字的）。
+4. **接线面 14 处**：`IpcPolicy.rulesUntrusted` → 执行器 / git / 钩子 / 打开方式 / TOOL_RUN / 画布 / 对话链路。
+   ⇒ `exactOptionalPropertyTypes` ⇒ **只在真的降级时传**（缺省即"可信" ⇒ 行为与从前一字不差）。
+5. **新接线锁**（`gate-wiring.test.ts`）：现扫全仓**非测试** .ts ⇒ **每个 `decideGate(` 调用点都必须传** ⇒ **漏一处即红**。
+   ⇒ **不写死文件清单**（新加一个调用点，锁会自动把它算进来）⇒ **剥注释后再匹配**
+   （立锁当场就撞到：注释里提到 `decideGate(` 被当成调用点 · 函数定义本身也被当成调用点）。
+6. **真缝测试**：**真文件实现**（不是内存替身）放一只坏 JSON ⇒ health 报「读坏了」⇒ **硬 ask**；
+   **从来没有规则文件** ⇒ 仍是**软 ask** ⇒ 行为与从前一字不差。
+7. **变异 M331**（判定分支被摘）/ **M332**（执行器不再往下传）⇒ **2/2 被拦**。
+   ⇒ **M332 只有接线锁能抓住**（判定单测照常绿）⇒ 这正是那道锁存在的理由。
+8. **界面那层不用改**：`summarizeRequest` 本来就把 `gate.reason` 带进弹窗摘要 ⇒ 用户看得到「权限规则表这次读不出来…」。
+9. **自检的锚点也跟着现树走**：R64 关掉 T74 ⇒ 队列计数变了 ⇒ R63 写死那条锚点的注入用例**当场失效并中止**
+   （"锚点未命中"）⇒ **这正是它该做的**（锚点该跟着现树走）⇒ 改成**从现树现取** + 注入时把「已交付 N 条」改成 N-1
+   ⇒ **队列数字以后再变，也不用动这个脚本**。
+
+**验证方式**：typecheck 0 · lint 0 · 单测 **2221 通过 / 1 跳过（151 个测试文件）**（+14 例 / +1 文件）·
+`check:docs` **53 条** 0 · 注入自检 **51 处**全拦 0（本轮未新增）· 全量变异 **332/332**（本轮 +2，M331/M332 逐条证红）·
+**e2e 69 步整跑 0**（本轮实跑 —— **判定核心动过 ⇒ 必须实跑**）。
+
+**边界（如实记）**：**运行期端到端**（规则文件真的读坏 ⇒ 弹窗里出现那句话）**本轮未演练**（e2e 未加这一步）
+⇒ 接线由**源锁 + 判定单测 + 真缝测试**三层盯住。
+
+**回退点**：`v1.23.0-排查32`；上一版 `v1.22.0-排查31`。
+
+---
 ## [v1.23.0-排查32 · 查清「仓库早已公开」+ §9 逐条重判 + 门禁的「跑完」也要有凭据（R63）] — 2026-10-23 13:05
 
 **范围**：`scripts/mutation-check.mjs`（**新增**「正在跑」标记 ＋ 注入前原文落盘备份 ⇒ 被中止也能还原）·
@@ -593,39 +641,3 @@
 `check:docs` **47 条** 0 · 注入自检 **44 处**全拦 0 · e2e 67 步**未重跑**（**零产品代码改动 ⇒ 标注而非默认**）。
 
 **回退点**：`v1.12.0-排查21`；上一版 `v1.11.0-排查20`。
-
----
-
-## [v1.12.0-排查21 · T31 自动重连（选项 B）：白名单默认关、重连仍要重新批准、上限与退避、授权可随时收回（R52）] — 2026-10-21 23:29
-
-**范围**：`apps/desktop/src/main/mcp/mcp-service.ts`（重连调度：触发 / 上限 / 退避 / 取消）·
-`apps/desktop/src/main/mcp/mcp-store.ts`（白名单那一格，**默认关**）·
-`packages/shared-ipc/src/contracts.ts`（`mcpServerInputSchema` / `mcpServerViewSchema` 加一格）·
-`apps/desktop/src/main/ipc/mcp.ts`（`MCP_SERVER_SAVE` 的形状）·
-`apps/desktop/src/renderer/src/features/mcp/McpPanel.tsx`（勾选框 + 说明 + 重连情况可见）·
-`docs/DESIGN-T31-PROBE-RECONNECT.md`（选项 B 的落地状态）· 台账四件 +
-`apps/desktop/package.json`（1.11.0 → 1.12.0）。
-**判定语义一字未改；零新依赖；零新审批弹窗。**
-
-1. **口径就在 `docs/DESIGN-T31-PROBE-RECONNECT.md` §三.2（选项 B 的五条边界）** ——
-   本轮**不重新拟口径，只把它落成代码**。**白名单默认关**（默认关写死在**落盘那一侧**，不靠调用方传）·
-   **上限与退避**：最多 **3 次**、退避 **2s → 8s → 30s**（第三次后放弃并留在 `error`，
-   界面说清「已试 N 次、最后一次因为什么失败」）· **不跨应用重启**（落盘的只是「允许」这个**偏好**，
-   **不是待重连的任务** ⇒ 启动时**不自动重连**）· **授权可随时收回**（取消勾选 ⇒ 排队中的重连取消）·
-   **看得见**（状态标签 + 「自动重连」开关现状 + 重连次数与最后一次失败原因）。
-2. **「重连仍要重新批准」今天已经是既成行为 —— 本轮做的是「锁住现状」，不是重写一遍批准逻辑**：
-   `connect()` 握手后必落 `pendingPlan` + `state='awaiting_approval'`，只有 `approve()` 才写
-   `session.enabledQualified` ⇒ 重连走 `connect()` ⇒ **新会话的已启用工具天然为空**。
-   ⇒ **真正的风险不是「忘了加重新批准」，而是将来有人给重连加一条「复用上次批准」的捷径**
-   ⇒ 本轮加**源锁 + 测试**：重连后的会话必须停在 `awaiting_approval`、未批准前 `enabledTools` 为空。
-3. **在途调用不重放、回合继续跑、重连必须换 generation**（沿用 `mcp-service.ts` 现成的 `generationSeq` 守卫）。
-4. **⚠️ 一处最容易埋雷的**：`connect()` 开头会 `await this.disconnect(id)` ⇒ 重连路径复用 `connect()` 时，
-   必须核清「断开旧会话」这一步在**自动场景**下**不会静默杀掉用户正在用的连接**（在途调用按口径不重放）。
-   **本轮的处置与结论见复核与台账** —— 这条**核不清就不许开自动重连**。
-5. **不做**（R37 §二已定，**不重复讨论**）：后台探活定时器 / 独立掉线阈值 ——
-   「掉线是**被「用」出来的**，不是被「测」出来的」。
-
-**验证方式**：typecheck 0 · lint 0 · 单测 **2173 通过 / 1 跳过（146 个测试文件）** ·
-`check:docs` **47 条** 0 · 注入自检 **44 处**全拦 0 · **e2e 67 步整跑 0**（**改了产品代码 ⇒ 真跑**）。
-
-**回退点**：`v1.11.0-排查20`；上一版 `v1.10.0-排查19`。

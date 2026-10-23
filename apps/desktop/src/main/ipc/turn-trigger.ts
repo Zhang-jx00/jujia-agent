@@ -108,6 +108,8 @@ export function createTurnTrigger(source: TurnTriggerSource): TurnTrigger {
         mode: policy.mode,
         rules: policy.rules,
         alwaysAsk: policy.alwaysAsk,
+        // T74：规则表这次读不出来 ⇒ 判定侧按"非只读一律硬 ask"处理（**单一真源**在这条 policy 上）
+        rulesUntrusted: policy.rulesUntrusted,
         hooks: hookRunner,
         skillCatalogText: skills.catalogText(),
       },

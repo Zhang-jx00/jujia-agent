@@ -440,3 +440,63 @@ describe('命令前缀规则（M4 收尾 · 其一：按命令收紧）', () => 
     expectHardAsk(d, '带尾巴的 rm 仍要过人手');
   });
 });
+
+/**
+ * T74（2026-10-23）：**规则表这次读不出来** ⇒ 非只读一律**硬 ask**。
+ *
+ * 问题原文：规则文件读坏时 `list()` 返回空表 ⇒ **用户自己写过的 `deny` 静默不生效**，
+ * 而当时只有权限页那一行红字告知 ⇒ 没打开权限页的人**永远不知道自己的 deny 没生效**。
+ *
+ * 口径（逐条对着 decideGate 的决策顺序写的，位置也有讲究）：
+ * - **只读不受影响**（读有自己的敏感路径判定兜底）；
+ * - **用户写下的 deny/ask 规则照样绝对生效**（那是第 0 步，不受这条影响）；
+ * - **bypassPermissions 仍然放行**（看得见、写下来的决定，不在这里偷偷推翻）；
+ * - **plan/dontAsk 仍然按模式拒绝**（那里走不到放行）；
+ * - **敏感目标的理由仍然是敏感路径那条**（不被这条盖掉）；
+ * - 剩下唯一被改变的是：**acceptEdits 的"不问就放行"** —— 那正是"deny 静默不生效"
+ *   会变成"动作真的被做了"的地方。
+ */
+describe('T74：规则表这次读不出来 ⇒ 非只读一律硬 ask', () => {
+  const rule = { id: 'r1', pattern: 'write_file', action: 'deny' as const, enabled: true, createdAt: '', updatedAt: '' };
+
+  it('写操作 → 硬 ask（不可被「本次会话总是允许」压掉）', () => {
+    const d = decideGate(ctx({ rulesUntrusted: true }));
+    expectHardAsk(d, '规则表读不出来时的写操作');
+    expect(d.reason).toContain('规则表');
+  });
+
+  it('acceptEdits 的"不问就放行"在这里失效 ⇒ 这一条是 T74 的要害', () => {
+    expectHardAsk(
+      decideGate(ctx({ mode: 'acceptEdits', rulesUntrusted: true })),
+      'acceptEdits + 规则表读不出来',
+    );
+  });
+
+  it('只读不受影响（读有自己的敏感路径判定兜底）', () => {
+    const d = decideGate(ctx({ kind: 'read', toolName: 'read_file', args: { path: 'src/a.ts' }, rulesUntrusted: true }));
+    expect(d.action).toBe('allow');
+  });
+
+  it('用户自己写的 deny 规则照样绝对生效（理由是规则那条，不是这条）', () => {
+    const d = decideGate(ctx({ rulesUntrusted: true, rules: [rule] }));
+    expect(d.action).toBe('deny');
+  });
+
+  it('bypassPermissions 仍然放行（那是"看得见、写下来"的决定）', () => {
+    expect(decideGate(ctx({ mode: 'bypassPermissions', rulesUntrusted: true })).action).toBe('allow');
+  });
+
+  it('plan / dontAsk 仍然按模式拒绝（那里根本走不到放行）', () => {
+    expect(decideGate(ctx({ mode: 'dontAsk', rulesUntrusted: true })).action).toBe('deny');
+  });
+
+  it('敏感目标的理由仍然是敏感路径那条（不被这条盖掉）', () => {
+    const d = decideGate(ctx({ args: { path: '.env' }, rulesUntrusted: true }));
+    expectHardAsk(d, '敏感路径 + 规则表读不出来');
+    expect(d.reason).toContain('敏感路径');
+  });
+
+  it('不传这个标志时行为与从前一字不差（acceptEdits 仍然自动放行）', () => {
+    expect(decideGate(ctx({ mode: 'acceptEdits' })).action).toBe('allow');
+  });
+});

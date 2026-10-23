@@ -68,6 +68,8 @@ export function decideGitAction(input: {
   mode: PermissionMode;
   rules?: ReadonlyArray<PermissionRule>;
   alwaysAsk?: ReadonlyArray<string>;
+  /** **规则表这次读不出来**（T74）⇒ 非只读一律硬 ask；不传 = 可信 */
+  rulesUntrusted?: boolean;
 }): GateDecision {
   const gate = decideGate({
     mode: modeForAction(input.action, input.mode),
@@ -80,6 +82,8 @@ export function decideGitAction(input: {
     args: {},
     // 项目开了 exactOptionalPropertyTypes：没传就别把 undefined 塞进可选属性
     ...(input.rules ? { rules: input.rules } : {}),
+    // T74：规则表读不出来 ⇒ 非只读一律硬 ask（**只传 true** ⇒ 缺省即"可信"）
+    ...(input.rulesUntrusted ? { rulesUntrusted: true } : {}),
     ...(input.alwaysAsk ? { alwaysAsk: input.alwaysAsk } : {}),
   });
   // **硬 ask 的落地点**：引擎对 'write' 给的是软 ask（可被"总是允许"压掉），

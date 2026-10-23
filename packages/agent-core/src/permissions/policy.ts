@@ -57,6 +57,25 @@ export type GateDecision =
   | { action: 'ask'; reason: string; risk: RiskLevel; bypassable: boolean }
   | { action: 'deny'; reason: string; risk: RiskLevel };
 
+/**
+ * **规则表这次能不能信**（T74 · 2026-10-23）—— 单一真源。
+ *
+ * 口径（R49 定的 health 三态）：
+ * - `recovered: true` ⇒ **真的发生过降级/失败**（主文件损坏 / 被截断 ⇒ 落到了备份档或空表）
+ *   ⇒ 用户写过的 `deny` 可能根本没进这次判定 ⇒ **非只读一律硬 ask**；
+ * - `source: 'default'` 且 `recovered: false` ⇒ **「从来没有规则文件」**（正常首装）
+ *   ⇒ **不是「读坏了」**，不该因此多问一句。
+ *
+ * 为什么提成函数而不是各写各的：判定侧、审计侧、界面横幅三处都要用同一个口径
+ * ⇒ 抄三份就等于三个答案（R50 的队列体检就是这么抓出三套数字的）。
+ */
+export function rulesAreUntrusted(health: {
+  source: 'primary' | 'backup' | 'default';
+  recovered: boolean;
+}): boolean {
+  return health.recovered;
+}
+
 export interface GateContext {
   mode: PermissionMode;
   toolName: string;
@@ -87,6 +106,17 @@ export interface GateContext {
    * 缺省时保持全串扫描（旧行为），不知道根是谁的门不受影响。
    */
   workspaceRoot?: string;
+  /**
+   * **规则表这次读不出来**（T74 · 2026-10-23）。
+   *
+   * 什么时候为 true：规则文件**存在但读坏了**（主文件损坏 / 被截断）⇒ 落到了备份档或空表
+   * ⇒ **用户自己写的 `deny` 规则可能根本没进这一次判定**。
+   * 那时若按"空表"算，就等于"用户禁止过的事被静默放行"—— 登记时的问题原文。
+   *
+   * 缺省（不传）= 规则表可信 ⇒ 行为与从前一字不差。
+   * 口径：**只读不受影响**（读有自己的敏感路径判定兜底；T74 的口径是"非只读"）。
+   */
+  rulesUntrusted?: boolean;
 }
 
 /** 即使处于 acceptEdits，也不自动放行的敏感路径特征（按参数分级的关键） */
@@ -279,6 +309,27 @@ export function decideGate(ctx: GateContext): GateDecision {
         bypassable: false,
       };
     }
+  }
+
+  // 4b) **规则表这次读不出来** ⇒ 非只读一律**硬 ask**（T74 · 2026-10-23）
+  //
+  // 为什么排在这个位置（每一步都有理由，不是随手放的）：
+  //   ① 第 0 步的 deny/ask 规则已经绝对生效 ⇒ 用户写下的"禁止"照样拦得住，不受这里影响；
+  //   ② 第 2 步的 bypassPermissions 是**看得见、写下来**的决定 ⇒ 不在这里偷偷推翻它；
+  //   ③ 第 3 步的 plan/dontAsk 已经把写与执行拒了 ⇒ 那里根本走不到放行；
+  //   ④ 第 4 步的敏感目标是硬 ask，理由更具体 ⇒ 不该被这条盖掉。
+  //   ⇒ 于是排在这四步之后、**"不问就放行"的两处之前**（第 5 步只读放行 · 第 6 步 acceptEdits 放行）
+  //   —— 那两处正是"用户写过的 deny 静默不生效"会变成"动作真的被做了"的地方。
+  //
+  // 为什么是**硬 ask**（不可被「本次会话总是允许」压掉）：压掉它就等于回到"静默按空表放行"，
+  // 那正是这条要堵的洞。**bypassPermissions 仍然放行**（见上面 ②）。
+  if (ctx.rulesUntrusted === true && ctx.kind !== 'read') {
+    return {
+      action: 'ask',
+      reason: '权限规则表这次读不出来，你写过的规则可能没有生效 ⇒ 这一步必须逐次确认',
+      risk: 'high',
+      bypassable: false,
+    };
   }
 
   // 5) 只读且可逆：到这里才不打扰用户

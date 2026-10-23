@@ -377,6 +377,8 @@ export interface ChatDeps {
   mode?: PermissionMode | undefined;
   /** 用户自定义权限规则 */
   rules?: ReadonlyArray<PermissionRule>;
+  /** **规则表这次读不出来**（T74）⇒ 非只读一律硬 ask；不传 = 可信 */
+  rulesUntrusted?: boolean;
   /** 高危清单（来自配置，引擎级兜底） */
   alwaysAsk?: ReadonlyArray<string>;
   /** 生命周期钩子运行器（W5d） */
@@ -704,6 +706,8 @@ export function sendMessage(
           alwaysAllow: session.alwaysAllow,
           ...(deps.mode ? { mode: deps.mode } : {}),
           ...(deps.rules ? { rules: deps.rules } : {}),
+          // T74：规则表读不出来 ⇒ 往下传（缺省即"可信"）
+          ...(deps.rulesUntrusted ? { rulesUntrusted: true } : {}),
           ...(deps.alwaysAsk ? { alwaysAsk: deps.alwaysAsk } : {}),
           ...(deps.hooks ? { hooks: deps.hooks } : {}),
           ...(deps.onDecision ? { onDecision: deps.onDecision } : {}),

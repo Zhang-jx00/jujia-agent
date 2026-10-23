@@ -73,6 +73,11 @@ export interface RunToolOptions {
   /** 用户自定义规则（allow/deny/ask，按工具名 glob）。deny / ask 优先于模式 */
   rules?: ReadonlyArray<PermissionRule>;
   /**
+   * **规则表这次读不出来**（T74）⇒ 非只读一律**硬 ask**。
+   * 缺省 = 规则表可信（行为与从前一字不差）。
+   */
+  rulesUntrusted?: boolean;
+  /**
    * 高危清单：命中即**硬 ask**（任何「总是允许」都压不掉）。
    *
    * 2026-09-23 接通：此前策略层读 `alwaysAsk`，但**没有任何调用方传它** ——
@@ -240,6 +245,8 @@ async function runToolCore(
     // 工具声明过"哪条参数是命令行"才送过去：命令前缀规则靠它取值，没声明就不参与
     ...(tool.commandArg !== undefined ? { commandArg: tool.commandArg } : {}),
     ...(opts.rules ? { rules: opts.rules } : {}),
+    // T74：规则表读不出来 ⇒ 非只读一律硬 ask（**只传 true**，缺省即"可信" ⇒ 行为与从前一字不差）
+    ...(opts.rulesUntrusted ? { rulesUntrusted: true } : {}),
     ...(opts.alwaysAsk ? { alwaysAsk: opts.alwaysAsk } : {}),
     // 敏感判定的 8.3 短名兜底只扫"相对根"的那一段 —— ctx.workspaceRoot 就是本轮的工作区根
     // （未选工作区时是哨兵 `__no_workspace__`：前缀匹配不上任何真实路径，等价旧的保守行为；

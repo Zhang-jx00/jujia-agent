@@ -49,6 +49,8 @@ export function registerToolIpc(ctx: IpcContext): void {
       mode: policy.mode,
       rules: policy.rules,
       alwaysAsk: policy.alwaysAsk,
+      // T74：规则表读不出来 ⇒ 非只读一律硬 ask（手动执行与对话链路同一口径）
+      rulesUntrusted: policy.rulesUntrusted,
       hooks: hookRunner,
       sessionId: 'manual',
       // 手动执行与对话链路走同一个出口：两处各写一份"怎么记"，账迟早对不上

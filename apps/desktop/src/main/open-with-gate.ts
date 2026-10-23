@@ -51,6 +51,8 @@ export function decideOpenTarget(input: {
   mode: PermissionMode;
   rules?: ReadonlyArray<PermissionRule>;
   alwaysAsk?: ReadonlyArray<string>;
+  /** **规则表这次读不出来**（T74）⇒ 非只读一律硬 ask；不传 = 可信 */
+  rulesUntrusted?: boolean;
 }): GateDecision {
   const gate = decideGate({
     mode: input.mode,
@@ -59,6 +61,8 @@ export function decideOpenTarget(input: {
     // args 里不放 path/url：url 可能很长且不是"往哪写"的判定依据，规则表按工具名匹配
     args: {},
     ...(input.rules ? { rules: input.rules } : {}),
+    // T74：规则表读不出来 ⇒ 非只读一律硬 ask（**只传 true** ⇒ 缺省即"可信"）
+    ...(input.rulesUntrusted ? { rulesUntrusted: true } : {}),
     ...(input.alwaysAsk ? { alwaysAsk: input.alwaysAsk } : {}),
   });
   if (openAskClass(input.target) === 'hard' && gate.action === 'ask') {

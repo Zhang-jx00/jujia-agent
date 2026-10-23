@@ -38,6 +38,8 @@ export interface GitPolicy {
   mode: PermissionMode;
   rules: ReadonlyArray<PermissionRule>;
   alwaysAsk: ReadonlyArray<string>;
+  /** **规则表这次读不出来**（T74）⇒ 非只读一律硬 ask；不传 = 可信 */
+  rulesUntrusted?: boolean;
 }
 
 export interface GitServiceDeps {
@@ -155,7 +157,14 @@ export function createGitService(deps: GitServiceDeps): GitService {
     const root = opened.root;
 
     const policy = await deps.loadPolicy();
-    const gate = decideGitAction({ action, mode: policy.mode, rules: policy.rules, alwaysAsk: policy.alwaysAsk });
+    const gate = decideGitAction({
+      action,
+      mode: policy.mode,
+      rules: policy.rules,
+      alwaysAsk: policy.alwaysAsk,
+      // T74：规则表读不出来 ⇒ 非只读一律硬 ask（exactOptionalPropertyTypes ⇒ 只在真的降级时传）
+      ...(policy.rulesUntrusted ? { rulesUntrusted: true } : {}),
+    });
     const toolName = gitToolName(action);
     // 弹窗与账本用的是**同一份** args —— 两处各拼一份早晚漂移（账上记的却不是问过人的那份）
     const gateArgs: Record<string, unknown> = {

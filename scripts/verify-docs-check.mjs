@@ -129,6 +129,24 @@ const STEP_FROM = `${readmeSteps} 步全自动`;
 const STEP_TO = `${readmeSteps + 3} 步全自动`;
 
 /**
+ * 队列计数那条用例的锚点**从现树现取**（与上面 e2e 步数同一手法）—— **不写死数字**。
+ *
+ * 为什么必须现取：队列计数**每关掉一条未完成项就变一次**（R64 关掉 T74 ⇒ ✅77→79 · ⬜3→2），
+ * 写死的锚点**必然随之失效** ⇒ 自检会当场中止（"锚点未命中"）—— 这不是自检坏了，
+ * 是**锚点该跟着现树走**。⇒ 治法与 R59 记的同一条：**让那个数现算现出**。
+ */
+const HANDOVER_REL = '俱佳Agent交接文档.md';
+const handoverText = readFileSync(join(repoRoot, HANDOVER_REL), 'utf8');
+const queueCell = handoverText.split('\n').find((l) => l.startsWith('| 队列 |')) ?? '';
+/** 队列格里那句"机器口径"（判据要求逐字包含的那一串） */
+const queueCanon = /：(\d+ 物理行 \/ \d+ 个唯一编号 · ✅ 已交付 \d+ 条 · .+?)。⇒/.exec(queueCell)?.[1] ?? '';
+if (queueCanon === '') {
+  die('自检锚点失效：交接文档 §2 的「队列」格里找不到「机器口径」那一句 —— 请更新本脚本的锚点');
+}
+/** 注入形态 = 把"已交付 N 条"改成 N-1（其余一字不动 ⇒ 判据必须当场判红） */
+const queueInjected = queueCanon.replace(/已交付 (\d+) 条/, (_m, n) => `已交付 ${String(Number(n) - 1)} 条`);
+
+/**
  * 「CHANGELOG 标题时间戳」这条的靶子**从文件现读**：取第二条标题（第一条是本轮新条目，
  * 按口径还没打标签、只查格式）。写死版本号或写死某分钟都会在下一次交付后被腐蚀（本仓四次），
  * 而这一条天生"只增不换"，所以锚点必须跟着台账走。
@@ -664,8 +682,9 @@ const cases = [
     // （本仓这一份计数已经被手抄漂过两轮）⇒ 治法是让判据现算现出，而不是"记得重测"。
     name: '队列计数被手抄漂了（§2 那一句与现扫对不上）',
     file: '俱佳Agent交接文档.md',
-    from: '✅ 已交付 78 条 · ⬜ 待排 3 条',
-    to: '✅ 已交付 77 条 · ⬜ 待排 3 条',
+    // 锚点**从现树现取**（见上面 queueCanon 的注释）⇒ 队列计数变了也不用改这个脚本
+    from: queueCanon,
+    to: queueInjected,
     expect: '队列计数与交接文档',
   },
   {

@@ -85,6 +85,8 @@ export function registerExtensionIpc(ctx: IpcContext): void {
         mode: policy.mode,
         rules: policy.rules,
         alwaysAsk: policy.alwaysAsk,
+        // T74：规则表读不出来 ⇒ 非只读一律硬 ask
+        rulesUntrusted: policy.rulesUntrusted,
       });
       mark({ gate, args: { path: configPath, commands, config: input }, commandKey: 'commands' });
 

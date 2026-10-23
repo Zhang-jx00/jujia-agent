@@ -40,6 +40,8 @@ export function decideHooksModify(input: {
   mode: PermissionMode;
   rules?: ReadonlyArray<PermissionRule>;
   alwaysAsk?: ReadonlyArray<string>;
+  /** **规则表这次读不出来**（T74）⇒ 非只读一律硬 ask；不传 = 可信 */
+  rulesUntrusted?: boolean;
 }): GateDecision {
   const gate = decideGate({
     mode: modeForWrite(input.mode),
@@ -49,6 +51,8 @@ export function decideHooksModify(input: {
     // （钩子配置**总是**敏感，档口由下面那行硬 ask 保证）
     args: {},
     ...(input.rules ? { rules: input.rules } : {}),
+    // T74：规则表读不出来 ⇒ 非只读一律硬 ask（**只传 true** ⇒ 缺省即"可信"）
+    ...(input.rulesUntrusted ? { rulesUntrusted: true } : {}),
     ...(input.alwaysAsk ? { alwaysAsk: input.alwaysAsk } : {}),
   });
   if (gate.action === 'ask') return { ...gate, bypassable: false };

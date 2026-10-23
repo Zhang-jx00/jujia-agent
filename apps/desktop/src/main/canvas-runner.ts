@@ -120,6 +120,8 @@ export function createCanvasRunner(deps: CanvasRunnerDeps): CanvasRunner {
             mode: policy.mode,
             rules: policy.rules,
             alwaysAsk: policy.alwaysAsk,
+            // T74：规则表读不出来 ⇒ 非只读一律硬 ask（图执行与手动执行同一口径）
+            rulesUntrusted: policy.rulesUntrusted,
             hooks: deps.hooks,
             // 与手动执行同一口径：**不带**会话级"总是允许"白名单（图执行不是某个会话）
             sessionId: 'canvas',

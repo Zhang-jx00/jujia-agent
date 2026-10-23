@@ -4,6 +4,7 @@ import { IPC, type PermissionMode, type StreamEvent } from '@jujia/shared-ipc';
 import {
   createDefaultRegistry,
   createProcessHookRunner,
+  rulesAreUntrusted,
   type HookRunner,
   type PermissionRule,
   type ToolRegistry,
@@ -59,6 +60,14 @@ export interface IpcPolicy {
    * 这是**记账 stamps**，不是判定输入，判定用的仍是上面那份 rules；可接受，写在这里备查。
    */
   rulesHealth: PermissionRulesHealth;
+  /**
+   * **规则表这次读不出来**（T74）⇒ 判定侧要按"非只读一律硬 ask"处理。
+   *
+   * 口径（R49 定的）：**`recovered` 才是"真的发生过降级/失败"**（主文件损坏 / 被截断
+   * ⇒ 落到了备份档或空表 ⇒ 用户写过的 `deny` 可能根本没进这次判定），
+   * 而 `source === 'default' && !recovered` 是**「从来没有规则文件」**（正常首装，**不该当成读坏了**）。
+   */
+  rulesUntrusted: boolean;
 }
 
 /**
@@ -186,6 +195,9 @@ export function createIpcContext(deps: IpcDeps): IpcContext {
       mode: snapshot.config.permissionMode,
       rules,
       rulesHealth,
+      // T74：**只有 `recovered` 才算"读不出来"**（正常首装 / 正常读出 ⇒ 不触发额外询问）
+      // 口径用 agent-core 的**同一个函数**（`rulesAreUntrusted`）⇒ 判定侧 / 审计侧 / 界面横幅不各写各的
+      rulesUntrusted: rulesAreUntrusted(rulesHealth),
       // 高危清单：引擎级兜底（命中即硬 ask）。来自配置，不经渲染层写入
       alwaysAsk: snapshot.config.alwaysAskTools,
     };
