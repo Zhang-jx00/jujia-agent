@@ -25,12 +25,13 @@
  * 不出安装包，也不再与任何人共用 `release/win-unpacked`。
  * 退出码：0 = 通过；1 = 失败（打印失败在哪一步与当时的界面文本）。
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright-core';
 import { buildCjkPdf } from './pdf-fixtures.mjs';
+import { probeFileLock } from './lock-probe.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 /**
@@ -226,7 +227,8 @@ const BUILDER_WAIT_MS = 5_000;
 const TRANSIENT_RE = /(EPERM|EBUSY|operation not permitted|resource busy)/i;
 
 /**
- * **锁的现场取证**：当场试一次"给那只解包用的 asar 改名"（成功就立刻改回来，内容一个字节不动）。
+ * **锁的现场取证**（R65 · T69③：判据抽成了独立模块 `lock-probe.mjs`，
+ * 好让**两条分支都能在门禁内部被真跑一次** —— 此前这里是个闭包，"改得动"那一支从未被执行过）。
  *
  * 只回答一个问题：**句柄此刻还在不在**（返回值里的 `held`）。
  * · 在 ⇒ 是"工作区根之内被本机常驻进程盯着"那一族（环境侧）——**不是产品坏，也不许记成绿**；
@@ -236,34 +238,8 @@ const TRANSIENT_RE = /(EPERM|EBUSY|operation not permitted|resource busy)/i;
  *
  * @returns {{ held: boolean, text: string }}
  */
-const lockProbe = () => {
-  const asar = join(RUN_OUT_DIR, 'win-unpacked.tmp', 'resources', 'default_app.asar');
-  if (!existsSync(asar)) {
-    return { held: false, text: '现场取证：本轮目录里没有那只解包用的 asar ⇒ 红的不是这一把锁，按上面的错误行判' };
-  }
-  const t0 = Date.now();
-  try {
-    renameSync(asar, `${asar}.fx`);
-    const ms = Date.now() - t0;
-    try {
-      renameSync(`${asar}.fx`, asar);
-    } catch (e) {
-      return { held: false, text: `现场取证：改名**成功**（${String(ms)}ms）但**还原失败**（${String(e.code)}）—— 现场已被改成 default_app.asar.fx，请人工看一眼` };
-    }
-    return { held: false, text: `现场取证：改名**改得动**（${String(ms)}ms）⇒ 句柄这一刻松了，按真·瞬时锁处理` };
-  } catch (e) {
-    return {
-      held: true,
-      text: `现场取证：改名**改不动**（${String(e.code)}，${String(Date.now() - t0)}ms）⇒ 句柄还在别人手里。\n` +
-        '   R35 底账：同一条命令今天 6 试 4 红 2 绿 —— 绿的两次首attempt 都**慢**（30.0s / 60.4s）、' +
-        '红的几次首attempt 只用 7.5–8.0s ⇒ 最好解释是**解包刚结束就去 rename** 撞上本机扫描/索引者的竞态；' +
-        '与目录叫什么名字无关（全新空目录照样红），与工作区根之内/外**相关但不决定**（之外 2 试全绿、之内 6 试 4 红）。\n' +
-        '   操作口径：**直接重跑一次**（重跑用全新目录，不碰这些残骸）；连红两把就判"这台机器此刻验不了打包产物"，\n' +
-        '   台账只能记"**未能运行 + 原因**"—— **不许记成绿，也不许写成产品缺陷**；' +
-        '要自动化"每轮回全新目录"或把产物挪出项目文件夹，都得所有者点头（已登记 T69）。',
-    };
-  }
-};
+const lockProbe = () =>
+  probeFileLock(join(RUN_OUT_DIR, 'win-unpacked.tmp', 'resources', 'default_app.asar'));
 
 const runBuilderWithWaits = async (entry, args, cwd) => {
   for (let i = 0; i < BUILDER_TRIES; i += 1) {

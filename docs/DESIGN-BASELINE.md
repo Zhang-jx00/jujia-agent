@@ -314,7 +314,7 @@ CSS 侧镜像在 `apps/desktop/src/renderer/src/styles/motion.css` 的 `:root`�
 > 令牌层（`packages/ui-tokens/src/tokens.ts` + 渲染层 `styles/motion.css`）**早就存在且完整**，
 > 动效基线（W6 · 八条铁律）**也在**，配色对比度**默认与高对比上下文全部 AA 达标**。
 > ⇒ 本轮**不是"从零建"**，而是**"把已有的那套真正接上主样式表"**。
-> 调研稿（196 条外部参考）见 `docs/RESEARCH-UI-DESIGN.md` —— 它用来**对照方向**，不照抄。
+> 那份调研稿（175 条外部参考）**已移出公开树**（R65 · T85 ⇒ 研究底稿只留私有目录）⇒ 私有副本在 `.workbuddy/research/RESEARCH-UI-DESIGN.md`；**它的结论已经内化进本文与令牌 / 动效基线** —— 仓里留下的是"我们为什么这样做"。
 
 ### 现扫数字（2026-10-21，判据形态可复现）
 

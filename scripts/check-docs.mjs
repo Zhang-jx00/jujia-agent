@@ -628,9 +628,20 @@ const BLOCKED_NAME_DIGESTS = [
 ];
 const digest12 = (s) => createHash('sha256').update(s.toLowerCase(), 'utf8').digest('hex').slice(0, 12);
 
-/** 仓库内需要扫描的活文件（排除依赖、产物、回收站与历史归档） */
+/**
+ * 一行是不是**表格的分隔行**（`|---|---|`）—— 用来认出"哪一行是表头"。
+ *
+ * 为什么提到模块级（R65）：第 29 条判据与第 54 条判据（"活文档的表头里不许出现
+ * 『可借鉴 / 对标』"）都要认表头 ⇒ **同一件事只准有一份实现**（R63 那次教训：
+ * 自己写第二份 ⇒ 两份数 ⇒ 假账）。
+ */
+const isSepRow = (l) => /^\s*\|[\s:|-]*-[\s:|-]*\|?\s*$/.test(l) && l.includes('-');
+
+/**
+ * 仓库内需要扫描的活文件（排除依赖、产物、回收站与历史归档） */
 const walkLiveFiles = (exts) => {
-  const SKIP_DIRS = new Set(['node_modules', '.git', '.trash', '.tmp', 'out', 'dist', 'release', 'coverage']);
+  // `.workbuddy` 是**本地私有目录**（研究底稿，WORK-PROTOCOL 第 11/64 条 ⇒ 永不入库）⇒ 不算仓里的活文件
+  const SKIP_DIRS = new Set(['node_modules', '.git', '.trash', '.tmp', '.workbuddy', 'out', 'dist', 'release', 'coverage']);
   const out = [];
   const walk = (dir) => {
     let entries;
@@ -1971,8 +1982,6 @@ const walkLiveFiles = (exts) => {
 {
   // 切格规则用**模块级**的 `gfmCells`（GFM 真实切分：只认未转义竖线）——
   // 原先这里是块级的一份副本；R63 加"队列计数现扫"那条判据时才发现：两份实现会长出两份数。
-  const isSepRow = (l) => /^\s*\|[\s:|-]*-[\s:|-]*\|?\s*$/.test(l) && l.includes('-');
-
   const bad = [];
   let dataRows = 0;
   let tables = 0;
@@ -2744,12 +2753,17 @@ const walkLiveFiles = (exts) => {
       (a, b) => Number(a.slice(1)) - Number(b.slice(1)),
     );
   const uniqueAll = new Set(rows.map((r) => r.id)).size;
+  /** 一个桶的口径片段：`⬜ 待排 3 条（T74 / T85 / T86）`；**空桶不带括号**（别写"0 条（）"） */
+  const bucketPart = (label, ids) =>
+    ids.length === 0
+      ? ` · ${label} 0 条`
+      : ` · ${label} ${String(ids.length)} 条（${ids.join(' / ')}）`;
   const canonical =
     `${String(rows.length)} 物理行 / ${String(uniqueAll)} 个唯一编号` +
     ` · ✅ 已交付 ${String(idsIn('done').length)} 条` +
-    ` · ⬜ 待排 ${String(idsIn('todo').length)} 条（${idsIn('todo').join(' / ')}）` +
-    ` · 🔶 等人拍板 ${String(idsIn('pending').length)} 条（${idsIn('pending').join(' / ')}）` +
-    ` · 🟡 部分交付或根因未定 ${String(idsIn('partial').length)} 条（${idsIn('partial').join(' / ')}）`;
+    bucketPart('⬜ 待排', idsIn('todo')) +
+    bucketPart('🔶 等人拍板', idsIn('pending')) +
+    bucketPart('🟡 部分交付或根因未定', idsIn('partial'));
 
   const handover = read('俱佳Agent交接文档.md');
   const queueCell = handover.split('\n').find((l) => l.startsWith('| 队列 |')) ?? '';
@@ -2764,6 +2778,61 @@ const walkLiveFiles = (exts) => {
         : '',
       `现扫出来的口径是：${canonical}`,
       matched ? '' : '而交接文档 §2 的「队列」格里没有这一句 ⇒ 要么抄错了，要么改了队列忘了改交接文档。',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 54. 活文档的**表头**里不许出现「可借鉴 / 对标」这类把别家当参照物的说法（R65 · T85）
+ *
+ * 为什么立它（T85 的原题面）：`docs/RESEARCH-UI-DESIGN.md` 是一份**同类产品清单**，
+ * 它的每个表头都有一列叫「可借鉴点」⇒ 整份文档就是"175 条具名同类项目 + 来源链接"，
+ * 而 `WORK-PROTOCOL` 第 11 条写的是"全仓不得出现参考项目名称或『借鉴 / 对标』表述"。
+ * ⇒ 规则与现树对不上 ⇒ **让违例自己冒出来**（T85 处置的第一步）。
+ *
+ * 判据只认**表头**（结构性事实），不认段落里的散文：
+ *   · 表头是"这份文档在拿什么当参照物"的**公开声明** ⇒ 它才是对外表述里最刺眼的那一处；
+ *   · 段落里引用"规则说不要借鉴"是**讨论**规则，不是拿别家当参照物
+ *     （台账里到处都在转述这件事 ⇒ 判散文必然误报 ⇒ 误报三次的判据最后都是被人删掉）。
+ *
+ * 覆盖面（如实写明）：**只盯表头** ⇒ 散文/单元格里的违禁表述**它抓不到**；
+ * 那些由 `WORK-PROTOCOL` 的文字边界与人工复核负责 ⇒ **不许把这条说成"全仓零违禁表述"**。
+ * ------------------------------------------------------------------ */
+{
+  const BANNED_HEADER_WORDS = ['可借鉴', '对标'];
+  const offenders = [];
+  let scanned = 0;
+  let headerRows = 0;
+  for (const rel of walkLiveFiles(['.md'])) {
+    // 历史归档与复核台账是**审计轨迹**（允许它们引用当时写错的话）⇒ 不扫
+    if (rel.includes('ARCHIVE') || rel.startsWith('review/')) continue;
+    scanned += 1;
+    const lines = read(rel).split('\n');
+    for (let i = 0; i < lines.length - 1; i += 1) {
+      const line = lines[i];
+      if (!/^\s*\|/.test(line)) continue;
+      if (!isSepRow(lines[i + 1])) continue; // 只有"下一行是分隔行"的才是表头
+      headerRows += 1;
+      for (const word of BANNED_HEADER_WORDS) {
+        if (line.includes(word)) {
+          offenders.push(`${rel}:${String(i + 1)}　表头里出现「${word}」`);
+        }
+      }
+    }
+  }
+  report(
+    '活文档的表头里不许出现「可借鉴 / 对标」（R65 · T85：把别家当参照物的那一列不许挂在表头上）',
+    scanned > 0 && headerRows > 0 && offenders.length === 0,
+    [
+      scanned === 0 ? '一份活文档都没扫到 —— 定位器失效（防失焦先红）' : '',
+      headerRows === 0 ? '一个表头都没认出来 —— 定位器失效（防失焦先红）' : '',
+      ...offenders,
+      offenders.length > 0
+        ? '   ⇒ 这类文档是"同类产品清单"：把参照物当公开表头，正是 WORK-PROTOCOL 第 11 条要禁的。' +
+          '处置见 `docs/TRACK-ROADMAP.md` §4.1 的 T85 行（研究底稿只留私有目录 · 仓里留"我们为什么这样做"）。'
+        : '',
     ]
       .filter(Boolean)
       .join('\n     '),

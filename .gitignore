@@ -49,6 +49,8 @@ apps/desktop/release/
 .tmp/
 # 取证文件（T36：cleanup 不收、路径长期有效；内容仍要抄进台账）
 .evidence/
+# 研究底稿只留本地（WORK-PROTOCOL 第 11/64 条：研究痕迹不进仓；R65 起生效）
+.workbuddy/
 .workbuddy-tmp-*
 # 本机工作区里放凭据的目录（仓内应永远不入库）
 .workbuddy/
