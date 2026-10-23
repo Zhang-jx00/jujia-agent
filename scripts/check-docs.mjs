@@ -1594,6 +1594,74 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 51. 展示图不许悄悄过期（界面动过 ⇒ 该重拍 · R62 立 · 2026-10-22）
+ *
+ * 立它的起因是**实测到的现状**：第 9/9b 条（R32 立的）只判**结构** ——
+ * 图在盘上、清单与 README 双向对账、图注写着清单记录的那个版本
+ * ⇒ **它管不住"图是多久以前的"**。而 R32 当时**刻意**不判新旧，理由是
+ * 「图注 == 当前版本」是**每轮必然红**的锁（发版比截图勤）⇒ 「天生红的锁教人无视红灯」。
+ *
+ * ⇒ 结果就是：**R45 拍过一次（v1.4.0 / 2026-10-21）之后，十七轮没人重拍**
+ * ⇒ 而这十七轮里界面动得很厉害（主按钮对比度 · 占位符 · 命中区 · 主色接线 · 图标按钮 · summary 高度）⇒
+ * **对外那 4 张图已经和今天的产品不一样了** ⇒ 而**没有任何人知道**（门禁是绿的）。
+ *
+ * ⇒ 这里的形状：**只判"界面相关的代码动过没有"** ⇒ **不每轮必红**（只碰界面才红）
+ * ⇒ 而且红的时候**直接给出解法**（重拍一条命令，离屏不弹窗）⇒ 这不是"制造红灯"，是**把一个没人管的缺口接上闸门**。
+ *
+ * 什么算"界面相关"：渲染层源码与样式 + 令牌层（配色/尺寸的源头）。
+ * ⚠️ **刻意不包含**：主进程逻辑、脚本、文档 ⇒ 那些改了**不影响画面** ⇒ 不该要求重拍。
+ * ------------------------------------------------------------------ */
+{
+  const MANIFEST = 'docs/screenshots/manifest.json';
+  const UI_GLOBS = ['apps/desktop/src/renderer', 'packages/ui-tokens'];
+  const bad = [];
+  if (!exists(MANIFEST)) {
+    bad.push('缺 docs/screenshots/manifest.json（这条判据依赖它记录的拍摄提交）');
+  } else {
+    let mf = null;
+    try {
+      mf = JSON.parse(read(MANIFEST));
+    } catch (err) {
+      bad.push(`清单不是合法 JSON：${err instanceof Error ? err.message : String(err)}`);
+    }
+    const commit = typeof mf?.commit === 'string' ? mf.commit : '';
+    if (mf !== null && commit === '') {
+      bad.push('清单里没有 commit —— 算不出"图落后了多少"');
+    } else if (commit !== '') {
+      let out = '';
+      try {
+        out = execFileSync('git', ['diff', '--name-only', `${commit}..HEAD`, '--', ...UI_GLOBS], {
+          cwd: repoRoot,
+          encoding: 'utf8',
+        });
+      } catch (err) {
+        bad.push(
+          `查 ${commit}..HEAD 的界面改动失败（拍摄提交可能不存在）：${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      const touched = out
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (touched.length > 0) {
+        const more = touched.length > 3 ? ' …' : '';
+        bad.push(
+          `界面代码自 ${commit}（图的拍摄那一次）起动过（${String(touched.length)} 个文件：${touched.slice(0, 3).join('、')}${more}）` +
+            ' ⇒ **展示图与今天的产品已经不一样了** ⇒ 该重拍：npm run screenshots（离屏渲染，不弹窗口）',
+        );
+      }
+    }
+  }
+  report(
+    '展示图不许悄悄过期（界面代码动过 ⇒ 该重拍；只碰界面才红，不每轮必红）',
+    bad.length === 0,
+    bad.join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 24. e2e 的"批准之后读磁盘"必须先等到界面回执（T64 · R32 立 · 2026-10-15）
  *
  * 立闸的起因是真实的红灯：`npm run e2e` 在第 25 步报"批准了却没写进磁盘"，而盘上两秒后

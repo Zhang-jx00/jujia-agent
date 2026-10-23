@@ -24,14 +24,14 @@
 
 ---
 
-## 二、Release 文案草案（v1.21.0 起，数字全部取本轮门禁真值）
+## 二、Release 文案草案（v1.22.0 起，数字全部取本轮门禁真值）
 
 > 用法：所有者认可后整段贴进 Releases 编辑器；标题里的版本按实际发布号替换。
 > **不写任何"校验值/下载链接"**：产物没上传之前写哈希 = 制造对不上的校验值（本仓 §九 明确禁止的形状）。
 
 ### 标题
 
-`俱佳Agent v1.21.0 · 本地优先的 Windows 桌面 Agent —— 有副作用的动作都要你点头`
+`俱佳Agent v1.22.0 · 本地优先的 Windows 桌面 Agent —— 有副作用的动作都要你点头`
 
 ### 正文
 
@@ -62,7 +62,7 @@
 ```bash
 npm ci
 npm run typecheck && npm run lint && npm run test      # 2207 通过 / 150 文件
-npm run check:docs && npm run check:docs:selftest     # 文档一致性 50 条 + 47 处注入自检
+npm run check:docs && npm run check:docs:selftest     # 文档一致性 51 条 + 48 处注入自检
 npm run e2e        # 真应用界面级 69 步（含权限门、审计账、断点续跑）
 npm run smoke      # 真实启动断言 IPC 全链路与渲染层无 Node 泄漏
 npm run perf       # 启动预算判定（当前实测首帧 541~613ms，预算 1000ms）
@@ -117,7 +117,7 @@ npm run mut        # 变异测试 330 条（故意改坏关键约束，验证测
 ## 四、发布动作清单（**owner 点头前我一步都不做**）
 
 1. `npm run dist`（或 `dist:dir` 后 `verify:pack`）出安装包与 portable；
-2. Releases：把 §一 那张旧页**整段替换**（文案见 §二），或先发布新的 v1.21.0；
+2. Releases：把 §一 那张旧页**整段替换**（文案见 §二），或先发布新的 v1.22.0；
 3. 处理那个挂在 `untagged-…` 上的草稿（改名挂标签或作废）；
 4. 仓库可见性切 public（切之前 §三 第 2 行的"过程记录是否保留"要有决定）；
 5. 凭据按现行口径走（现役 = GCM 的 OAuth 令牌；失效就重过一遍授权）。
