@@ -260,7 +260,7 @@ describe('样式接线锁：className 上引用的类名必须在渲染层样式
     const rootClasses = new Set<string>();
     for (const text of sources) {
       for (const m of text.matchAll(/className\s*=\s*"([^"]*)"/g)) {
-        const classes = m[1].split(/\s+/).filter(Boolean);
+        const classes = (m[1] ?? '').split(/\s+/).filter(Boolean);
         if (classes.includes('app-root')) for (const c of classes) rootClasses.add(c);
       }
     }
