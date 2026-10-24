@@ -51,12 +51,25 @@ export interface NavGroup {
 }
 
 /**
- * 左栏分组。
+ * 左栏分组（R68 · 左栏瘦身）。
  *
- * 分组的原则是**按"每天用它的频率"排**，不是按功能分类学：
- * 前两组是"干活要用的"，第三组是"偶尔调一次的"。
+ * 只留**工作区类**入口 —— 所有者那句「**不要把所有东西都丢在左边的侧边栏**」。
+ * 低频的那几项（连接 / 浏览器 / 绘图 / 定时）去了 `LAUNCHER_ONLY_TABS`
+ * （**仍在启动器里一处搜得到**，不是"藏起来"）。
  */
 export const NAV_GROUPS: readonly NavGroup[] = [
   { title: '工作区', tabs: ['overview', 'chat', 'ide', 'docs', 'git', 'canvas', 'terminal'] },
-  { title: '连接与工具', tabs: ['connections', 'browser', 'media', 'schedule'] },
 ];
+
+/**
+ * **不在左栏、但仍能到达**的入口（R68 · 左栏瘦身）。
+ *
+ * 为什么它们离开左栏：所有者那句「不要把所有东西都丢在左边的侧边栏」。
+ * 为什么它们不会"消失"：**启动器**（Ctrl/Cmd+Shift+P）里能搜到
+ * （命令清单由 `features/launcher/commands.ts` 生成 ⇒ 侧栏 + 这里 + 设置
+ * = **并集完整、不交叠**，由判据盯着）。
+ *
+ * ⚠️ 这不是"藏起来"：本仓 T83 那条教训是「横向滚动把入口藏在右边 ⇒ 用户不知道还有 ⇒ 更糟」——
+ * 移出侧栏**必须**配一条**一处搜得到**的路（启动器），否则就是重犯那条错。
+ */
+export const LAUNCHER_ONLY_TABS: readonly Tab[] = ['connections', 'browser', 'media', 'schedule'];

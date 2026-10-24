@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { NAV_GROUPS, TAB_LABEL } from './nav';
+import { NAV_GROUPS, LAUNCHER_ONLY_TABS, TAB_LABEL } from './nav';
 import type { Tab } from './nav';
 
 const styles = readFileSync(fileURLToPath(new URL('./styles.css', import.meta.url)), 'utf8');
@@ -24,15 +24,25 @@ const stylesNoComments = styles.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/
  * 不是真缺（这正是 R63 那次"同两份队列被数出 78 与 76"的同款坑）。
  */
 describe('左栏导航：入口不许漏收', () => {
-  it('每个入口恰好属于一个分组（漏收 = 界面上少一个入口，且看不出来）', () => {
+  it('每个入口**恰好**出现在「左栏分组 ∪ 仅启动器项」里（R68：侧栏瘦身后，移出去的那些也不能消失）', () => {
     const all = Object.keys(TAB_LABEL) as Tab[];
-    const count = new Map<Tab, number>();
+    const seen = new Map<Tab, number>();
     for (const group of NAV_GROUPS) {
-      for (const tab of group.tabs) count.set(tab, (count.get(tab) ?? 0) + 1);
+      for (const tab of group.tabs) seen.set(tab, (seen.get(tab) ?? 0) + 1);
     }
-    const missing = all.filter((tab) => !count.has(tab));
-    const duplicated = [...count.entries()].filter(([, n]) => n > 1).map(([tab]) => tab);
+    for (const tab of LAUNCHER_ONLY_TABS) seen.set(tab, (seen.get(tab) ?? 0) + 1);
+    const missing = all.filter((tab) => !seen.has(tab));
+    const duplicated = [...seen.entries()].filter(([, n]) => n > 1).map(([tab]) => tab);
     expect({ missing, duplicated }).toEqual({ missing: [], duplicated: [] });
+  });
+
+  it('左栏不许把所有入口都收进来（R68 · 左栏瘦身：侧栏只放工作区类，低频项走启动器）', () => {
+    const railCount = NAV_GROUPS.reduce((n, g) => n + g.tabs.length, 0);
+    expect(
+      railCount,
+      '左栏又把所有入口收回来了 ⇒ 所有者那句「不要把所有东西都丢在左边的侧边栏」就白改了',
+    ).toBeLessThan(Object.keys(TAB_LABEL).length);
+    expect(LAUNCHER_ONLY_TABS.length, '低频入口没进启动器 ⇒ 侧栏瘦了但那些页到不了').toBeGreaterThan(0);
   });
 
   it('分组不许是空壳（有标题没有入口 = 分组没真分）', () => {
@@ -46,7 +56,11 @@ describe('左栏导航：入口不许漏收', () => {
   });
 
   it('至少两个分组（只有一个组 = 没分组，只是换了个画法）', () => {
-    expect(NAV_GROUPS.length).toBeGreaterThanOrEqual(2);
+    // R68：左栏瘦身后**分组这件事搬到了启动器**（工作区 / 工具 / 设置）⇒ 这条判据**跟着搬家**，
+    // 不是被删掉：新家在 `features/launcher/launcher-wiring.test.ts`
+    // （「启动器的分组 ≥2 且每组 ≥1 项」）⇒ 覆盖没有丢：**分组要真分**这件事，
+    // 现在盯的是**真正在分的那份清单**。
+    expect(NAV_GROUPS.length).toBeGreaterThanOrEqual(1);
   });
 
   it('每个入口都有显示名（显示名空 = 界面上是个空按钮）', () => {

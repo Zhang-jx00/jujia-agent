@@ -1,5 +1,5 @@
 {
-  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）；M20–M21 来自扩容 3（文档查看：innerHTML 不许回来 / 链接协议白名单不许放宽）；M22–M23 来自铺设 6（记忆写入：路径守卫不许退化成拼字符串 / 写类档位不许降成读）；M26–M32 来自安全内核修复轮（外部审查 T1 只读绕过敏感判定 / T2 NTFS 备用数据流 / T3 钩子子进程环境 / T4 钩子配置写入过门）；M33–M37 来自外部审查修复 2（P1 第一批：T7 流式两条时间界限 / T5 会话闸门 / T6 落盘记账与清单串行）；M40 来自组件测试首批（错误边界的捕获状态）；M41–M44 来自外部审查修复 3（T19 硬 ask 不渲染「总是允许」/ T9 超时精准关闭与批准计划回读）；M71–M81 来自无限画布 M9a 前三步（图契约与键名扫描 · 编排层纯规则 · 豁免清单）；M82–M84 来自 M9a 接线锁（界面归属判别 · 事件归属字段 · 执行链路不许另起）；M85 来自复核 047 第二遍实验（停止被判成完成）；M86–M88 来自 M9b B1（对齐辅助线 / 命令面板 / 吸附时机）；M89 来自 CSS 版接线锁（样式规则整块失去）；M90–M92 来自 B2 局部重跑；M93–M99 来自 B3 条件分支；M100–M103 来自 M8 push 收口（推送被降成软 ask / 推送绕过权限门 / 远端名形状校验失守 / 外发文案被换成中性一句）；M104–M105 来自加固 4（cmd 元字符表 / 经 cmd 的判据分叉）；**M106–M119 来自修复批二**（T23 终端会话生命周期：接回失效 / 上限失效 / 尾部不截 / 截错头 / 不记 tail / seq 不动 / 卸载又杀会话 / 决策被绕过 / 状态通道永远答「没有」/ 硬 ask 被放宽；T24 文档页阅读位置：换文件带走旧位置 / 空路径也记 / 滚动没接上 / 读失败不忘）；M127–M128 来自修复批三（下）T30（入参上限被摘 / handler 绕开契约）。基线：本轮主提交；M193–M205 来自铺设 7（M7 定时任务：算式层拒收口径与锚点边界 · 补跑水位线 · 只跑一条 · 免审批键拒收 · 装配即启动）；M206–M211 来自优化5（R18：展开用真实高度轨道过渡 · 箭头同元素转 180° · 收起态 inert · 按压反馈覆盖可点家族）；M212–M215 来自优化6（R19：图标 aria-hidden 契约 · currentColor · 字符画/emoji 清扫）；M216 来自规整13（R20：属性门控背景规则的目标类必须存在 —— 主题背景静默失效的防复发）；**M263–M275 来自加固18（R27 审计清零批）**（T49 钩子改写后不重判 / 「总是允许」按旧 bypassable 压硬 ask；T48 JSON 形态不剔密 / HTTP 正文绕过剔密 / SSE error 原文无界；T47 失败只进 console / 装配根没接 logger；T43 手动执行退回不过契约；T44 定时事件缺窗口守卫；T46 memo 依赖丢视口；T45 监听器没装 / 告警溢出挤错方向；T50 diff 正文失败被折成空）；**M276 来自加固18 的 CI 红（T60）**（剔密键名段的无上界星号 → 长文本 O(n²)）；**M277–M295 来自接驳1（R28 终端与外部件批）**（T51 诊断条数上界 / 收集被摘 / 不进回执出口 / 回合级丢失 / 不并进 done 那一格；T58 契约里回潮的 tool_calls / length 那格改口 / 超时与关窗共用一句 / 弹窗退回三元兜底；T41 三条硬判据各摘一条 + recordGate 不透传 + 拒绝那次不记账 + 终端标成策略判定 + 覆盖范围说反；T59 审批桥不判形状；T53 自述只读的提示消失 / 不再标要先看风险；T52 规则页不再举出改写形态）；**M296–M297 来自规整17（R29 收口轮）**（T53 现状锁的两条判据源头：敏感路径表对整个 MCP 瞎掉 / 「自述只读」判定翻向另一侧）；M298–M308 来自加固19 / R31（流的结束证据两条 + 拼装器的空参数拒绝 + 循环的截断判据 + 契约那一格 + 界面那句话 + 命令的 exitCode/timedOut 三处 + 早退 cancel + 真原因文案）；M309–M310 来自规整19 / R32（离屏截图：无头开关的并集 · 安全基线出口那唯一一位 offscreen，两侧断言在 `security.test.ts` 与 `headless-shoot-wiring.test.ts` 各自持有）；M311–M313 来自加固20 / R33（killProcessTree 的三条判据：/T 杀树 · 已退出不再发信号 · 宽限期后 SIGKILL，专测 `commands/process.test.ts` 自己持有断言）；M320–M321 来自排查16 / R48（清理脚本的两条行为锁：GBK 控制台崩栈 · 取证目录被搬走）；M322 来自排查17 / R49（空文件被当成「没有文件」⇒ 规则表静默变空表）；M325–M327 来自排查27 / R58（主题包主色接线：字色不跟随主色 · 换包不清残值 · 导入侧闸门被摘掉）；M331–M332 来自排查33 / R64（T74 fail-closed：规则表读不出来 ⇒ 非只读一律硬 ask —— 判定分支被摘 / 执行器不再往下传）",
+  "note": "变异清单：M1–M7 来自轨道回归计划 2 · R-03（配置白名单 / 会话淘汰 / 窗口收尾）；M8–M9 来自扩容 1 第 2 步（浏览器跨站守卫 / 视图 preload）；M10–M12 来自铺设 9（git 硬 ask 的三重保险）；M13–M15 来自铺设 8（run_command 的执行类声明 / 工作目录守卫 / 环境脱敏）；M16 来自规整 8（R-12 拆分后漏装配模块）；M17–M19 来自扩容 2（打开方式：外发硬 ask 不可压 / 程序路径不经渲染层 / 外发档位不被降级）；M20–M21 来自扩容 3（文档查看：innerHTML 不许回来 / 链接协议白名单不许放宽）；M22–M23 来自铺设 6（记忆写入：路径守卫不许退化成拼字符串 / 写类档位不许降成读）；M26–M32 来自安全内核修复轮（外部审查 T1 只读绕过敏感判定 / T2 NTFS 备用数据流 / T3 钩子子进程环境 / T4 钩子配置写入过门）；M33–M37 来自外部审查修复 2（P1 第一批：T7 流式两条时间界限 / T5 会话闸门 / T6 落盘记账与清单串行）；M40 来自组件测试首批（错误边界的捕获状态）；M41–M44 来自外部审查修复 3（T19 硬 ask 不渲染「总是允许」/ T9 超时精准关闭与批准计划回读）；M71–M81 来自无限画布 M9a 前三步（图契约与键名扫描 · 编排层纯规则 · 豁免清单）；M82–M84 来自 M9a 接线锁（界面归属判别 · 事件归属字段 · 执行链路不许另起）；M85 来自复核 047 第二遍实验（停止被判成完成）；M86–M88 来自 M9b B1（对齐辅助线 / 命令面板 / 吸附时机）；M89 来自 CSS 版接线锁（样式规则整块失去）；M90–M92 来自 B2 局部重跑；M93–M99 来自 B3 条件分支；M100–M103 来自 M8 push 收口（推送被降成软 ask / 推送绕过权限门 / 远端名形状校验失守 / 外发文案被换成中性一句）；M104–M105 来自加固 4（cmd 元字符表 / 经 cmd 的判据分叉）；**M106–M119 来自修复批二**（T23 终端会话生命周期：接回失效 / 上限失效 / 尾部不截 / 截错头 / 不记 tail / seq 不动 / 卸载又杀会话 / 决策被绕过 / 状态通道永远答「没有」/ 硬 ask 被放宽；T24 文档页阅读位置：换文件带走旧位置 / 空路径也记 / 滚动没接上 / 读失败不忘）；M127–M128 来自修复批三（下）T30（入参上限被摘 / handler 绕开契约）。基线：本轮主提交；M193–M205 来自铺设 7（M7 定时任务：算式层拒收口径与锚点边界 · 补跑水位线 · 只跑一条 · 免审批键拒收 · 装配即启动）；M206–M211 来自优化5（R18：展开用真实高度轨道过渡 · 箭头同元素转 180° · 收起态 inert · 按压反馈覆盖可点家族）；M212–M215 来自优化6（R19：图标 aria-hidden 契约 · currentColor · 字符画/emoji 清扫）；M216 来自规整13（R20：属性门控背景规则的目标类必须存在 —— 主题背景静默失效的防复发）；**M263–M275 来自加固18（R27 审计清零批）**（T49 钩子改写后不重判 / 「总是允许」按旧 bypassable 压硬 ask；T48 JSON 形态不剔密 / HTTP 正文绕过剔密 / SSE error 原文无界；T47 失败只进 console / 装配根没接 logger；T43 手动执行退回不过契约；T44 定时事件缺窗口守卫；T46 memo 依赖丢视口；T45 监听器没装 / 告警溢出挤错方向；T50 diff 正文失败被折成空）；**M276 来自加固18 的 CI 红（T60）**（剔密键名段的无上界星号 → 长文本 O(n²)）；**M277–M295 来自接驳1（R28 终端与外部件批）**（T51 诊断条数上界 / 收集被摘 / 不进回执出口 / 回合级丢失 / 不并进 done 那一格；T58 契约里回潮的 tool_calls / length 那格改口 / 超时与关窗共用一句 / 弹窗退回三元兜底；T41 三条硬判据各摘一条 + recordGate 不透传 + 拒绝那次不记账 + 终端标成策略判定 + 覆盖范围说反；T59 审批桥不判形状；T53 自述只读的提示消失 / 不再标要先看风险；T52 规则页不再举出改写形态）；**M296–M297 来自规整17（R29 收口轮）**（T53 现状锁的两条判据源头：敏感路径表对整个 MCP 瞎掉 / 「自述只读」判定翻向另一侧）；M298–M308 来自加固19 / R31（流的结束证据两条 + 拼装器的空参数拒绝 + 循环的截断判据 + 契约那一格 + 界面那句话 + 命令的 exitCode/timedOut 三处 + 早退 cancel + 真原因文案）；M309–M310 来自规整19 / R32（离屏截图：无头开关的并集 · 安全基线出口那唯一一位 offscreen，两侧断言在 `security.test.ts` 与 `headless-shoot-wiring.test.ts` 各自持有）；M311–M313 来自加固20 / R33（killProcessTree 的三条判据：/T 杀树 · 已退出不再发信号 · 宽限期后 SIGKILL，专测 `commands/process.test.ts` 自己持有断言）；M320–M321 来自排查16 / R48（清理脚本的两条行为锁：GBK 控制台崩栈 · 取证目录被搬走）；M322 来自排查17 / R49（空文件被当成「没有文件」⇒ 规则表静默变空表）；M325–M327 来自排查27 / R58（主题包主色接线：字色不跟随主色 · 换包不清残值 · 导入侧闸门被摘掉）；M331–M332 来自排查33 / R64（T74 fail-closed：规则表读不出来 ⇒ 非只读一律硬 ask —— 判定分支被摘 / 执行器不再往下传）；M333–M336 来自排查35 / R66（左栏两栏化：导航真源与分组 / 落地屏快捷胶囊 / 选中态实心主色 / 入口接线锁）；M337–M339 来自排查36 / R67（设置中心：面板只在设置中心挂载 / 设置项一行一条 / 选中态不许被 hover 吃掉）；M340–M345 来自排查37 / R68（左栏瘦身 + 启动器：移出侧栏的项忘了进启动器 / 筛选变摆设 / 启动器只剩快捷键没有鼠标入口 / 鼠标入口命中区退化 / 那一族按钮丢了显式行高 / 右侧提示变成显示名的复读）",
   "mutations": [
     {
       "id": "M1",
@@ -2687,8 +2687,8 @@
       "id": "M336",
       "desc": "左栏入口不再显式给 `line-height`（R66 · 主界面两栏化）：Chromium 给表单控件的 `line-height: normal` 按字体度量算行盒 ⇒ 纯拉丁标签（Git / MCP）比中文标签矮 4px（28.67px < 32px 下限）",
       "file": "apps/desktop/src/renderer/src/styles.css",
-      "find": "  line-height: 1.5;\n  text-align: left;",
-      "replace": "  text-align: left;",
+      "find": "  line-height: 1.5;\n  text-align: left;\n  white-space: nowrap;",
+      "replace": "  text-align: left;\n  white-space: nowrap;",
       "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
     },
 
@@ -2715,6 +2715,54 @@
       "find": ".app-tab-active:hover {\n  background: var(--primary);\n  border-color: var(--primary);\n  color: var(--primary-ink);\n}\n",
       "replace": "",
       "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
+    },
+    {
+      "id": "M340",
+      "desc": "移出侧栏的那几项忘了放进启动器（R68 · 左栏瘦身）：连接 / 浏览器 / 绘图 / 定时 ⇒ 界面上**真的少了几页**（左栏瘦了但它们没处可去）",
+      "file": "apps/desktop/src/renderer/src/features/launcher/commands.ts",
+      "find": "  ...LAUNCHER_ONLY_TABS.map((tab) => toCommand(tab, '工具')),\n",
+      "replace": "",
+      "test": "apps/desktop/src/renderer/src/features/launcher/launcher-wiring.test.ts"
+    },
+    {
+      "id": "M341",
+      "desc": "启动器的筛选变成摆设（R68 · 左栏瘦身）：搜索框**永远返回全部** ⇒ 用户搜「定时」看到 12 条 ⇒ 等于没有搜索",
+      "file": "apps/desktop/src/renderer/src/features/launcher/commands.ts",
+      "find": "  if (tokens.length === 0) return [...commands];",
+      "replace": "  if (tokens.length >= 0) return [...commands];",
+      "test": "apps/desktop/src/renderer/src/features/launcher/launcher-wiring.test.ts"
+    },
+    {
+      "id": "M342",
+      "desc": "启动器只剩快捷键、没了鼠标入口（R68 · 左栏瘦身）：低频入口离开左栏之后**唯一的路**就只剩一个快捷键 ⇒ 对不用键盘的人等于藏起来（本仓 T83 的教训）",
+      "file": "apps/desktop/src/renderer/src/App.tsx",
+      "find": "        <button\n          type=\"button\"\n          className=\"jj-rail-search jj-transition\"\n          title=\"搜索功能（Ctrl/Cmd+Shift+P）\"\n          onClick={() => setPaletteOpen(true)}\n        >\n          <IconSearch size={15} />\n          <span>搜索功能</span>\n        </button>\n",
+      "replace": "",
+      "test": "apps/desktop/src/renderer/src/features/launcher/launcher-wiring.test.ts"
+    },
+    {
+      "id": "M343",
+      "desc": "启动器那个鼠标入口的**命中区退化了**（R68）：把 `min-height` 与显式 `line-height` 去掉 ⇒ 按钮又矮又小 ⇒ 左栏里唯一的第二入口用户根本不会注意到（还是等于藏起来）",
+      "file": "apps/desktop/src/renderer/src/styles.css",
+      "find": "  line-height: 1.5;\n  min-height: 32px;\n  text-align: left;\n",
+      "replace": "  text-align: left;\n",
+      "test": "apps/desktop/src/renderer/src/features/launcher/launcher-wiring.test.ts"
+    },
+    {
+      "id": "M344",
+      "desc": "启动器那一族按钮**丢了显式行高**（R68）：Chromium 的表单控件不继承 body 的 line-height ⇒ 行盒高度随字体度量变 ⇒ 清单里纯拉丁标签（Git）比中文标签矮 4px（本仓 .app-tab 那条坑的同款）",
+      "file": "apps/desktop/src/renderer/src/styles.css",
+      "find": "  cursor: pointer;\n  font-size: var(--fs-body);\n  /* 显式给行高：Chromium 的**表单控件不继承 body 的 line-height**（UA 样式表给 button 写死\n     `line-height: normal`）⇒ 行盒高度随**字体度量**变 ⇒ 纯拉丁标签（Git）会比中文标签矮 4px。\n     这正是本仓 `.app-tab` 那条坑的同款 ⇒ 这一族显式写死。 */\n  line-height: 1.5;\n",
+      "replace": "  cursor: pointer;\n  font-size: var(--fs-body);\n",
+      "test": "apps/desktop/src/renderer/src/features/launcher/launcher-wiring.test.ts"
+    },
+    {
+      "id": "M345",
+      "desc": "启动器右侧那一列**变成显示名的复读**（R68）：第一版取别名的第一个词 ⇒ 而每个别名的第一个词都恰好等于显示名 ⇒ 12 行全是「概览 … 概览」这种重复字样 ⇒ 看起来像 bug",
+      "file": "apps/desktop/src/renderer/src/features/launcher/commands.ts",
+      "find": "      .find((k) => k !== '' && k.toLowerCase() !== label.toLowerCase()) ?? ''",
+      "replace": "      .find((k) => k !== '') ?? '';",
+      "test": "apps/desktop/src/renderer/src/features/launcher/launcher-wiring.test.ts"
     }
   ]
 }

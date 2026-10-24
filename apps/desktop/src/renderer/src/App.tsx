@@ -16,8 +16,10 @@ import { UpdateCard } from './features/update/UpdateCard';
 import { PermissionDialog } from './features/permission/PermissionDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { KeepAlive } from './KeepAlive';
-import { IconGear, IconTriangleAlert } from './ui/icons';
+import { IconGear, IconSearch, IconTriangleAlert } from './ui/icons';
 import { FailureNotices } from './ui/failure-notice';
+import { CommandPalette } from './features/launcher/CommandPalette';
+import type { AppCommand } from './features/launcher/commands';
 
 // 懒加载：连接页与对话页不在首屏，拆出去可显著减小初始 bundle（懒加载策略见 PERF-BUDGET）
 const ConnectionsPanel = lazy(() =>
@@ -110,12 +112,22 @@ export function App(): ReactElement {
    */
   const [themePack, setThemePack] = useState<ThemePack | null>(null);
   /**
-   * 设置中心开着没有（R67 · 设置中心）。
+   * 设置中心开着没有（R67 · 设置中心 · **R68 改成盖住整窗**）。
    *
-   * 为什么是**外壳的一等状态**而不是又一个页签：设置是"整页覆盖主区"的那种界面
-   * （左导航分组 + 右侧内容），**左栏保持可见** ⇒ 用户在设置与应用之间来回切不用先关窗口。
+   * 为什么是**外壳的一等状态**而不是又一个页签：设置是"整页覆盖"的那种界面
+   * （左导航分组 + 右侧内容）。
+   * R67 取的是"占主区、左栏保持可见" ⇒ 界面上同时出现**两根左栏**（应用那根 + 设置中心那根）
+   * ⇒ R68 改成**盖住整窗**：整个外壳（连左栏）一起被藏起来 ⇒ **任何时候只剩一根左栏**。
+   * 正文**只是被藏，不许卸载**（T22 报备 §二「对话页常驻」：会话 / 连接选择 / 在飞的流都留着）。
    */
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /**
+   * 启动器开着没有（R68 · 左栏瘦身的第二入口）。
+   *
+   * 为什么要有它：左栏瘦到 7 项之后，低频入口（连接 / 浏览器 / 绘图 / 定时）**不在侧栏了**
+   * ⇒ 必须有**一处搜得到**的路（否则就是重犯 T83 那条「入口藏起来 ⇒ 用户不知道还有」的错）。
+   */
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -184,20 +196,74 @@ export function App(): ReactElement {
       .catch((err: unknown) => console.error('[app] 读取连接失败:', err));
   }, [state.phase]);
 
+  /**
+   * 启动器的快捷键：**Ctrl/Cmd + Shift + P**（同类 IDE 的命令面板惯例）。
+   *
+   * **不用 Ctrl+K**：画布的命令面板已经占着它（`CanvasPanel` 的窗口级监听）⇒ 两个面板撞键。
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      if (!e.shiftKey) return;
+      if (e.key.toLowerCase() !== 'p') return;
+      e.preventDefault();
+      setPaletteOpen((v) => !v);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  /** 启动器里选中一条 ⇒ 跳过去（设置这一项是"开设置中心"，其余是"切到那一页"） */
+  const runCommand = useCallback((cmd: AppCommand): void => {
+    setPaletteOpen(false);
+    if (cmd.target === 'settings') {
+      setSettingsOpen(true);
+      return;
+    }
+    setTab(cmd.target);
+    setSettingsOpen(false);
+  }, []);
+
   const smokeMarker = state.phase === 'ready' ? 'ok' : state.phase;
 
   return (
     <div className="app-root">
       {/*
-        左栏（R66 · 主界面两栏化）：品牌 → 分组导航 → 底部信息。
+        **这一整块只是被藏起来，不许卸载**（R67 的 e2e 当场抓到的真回归）：
+        之前用「条件分支」换页面 ⇒ 打开设置中心会把**对话页一起卸载**
+        ⇒ 它的会话、连接选择、**在飞的流**全丢 ⇒ 违反 T22 报备的「**对话页常驻**」。
+        ⇒ 改法：外壳整体 `hidden`（`display:none`），DOM 结构一直在。
+        ⇒ R68：设置中心**盖住整窗**（连左栏一起盖）⇒ 任何时候**只有一根左栏**。
+      */}
+      <div className="app-shell" hidden={settingsOpen}>
+      {/*
+        左栏（R66 · 主界面两栏化 · R68 · 左栏瘦身）：品牌 → 分组导航 → 底部信息。
         为什么从顶栏搬下来：16 个入口横排在顶栏里，窗口一窄就被压扁/换行，
         而"入口"是**导航**（左栏是导航的天然位置），"当前在看哪一页"才是顶栏的活。
+        R68：左栏只留**工作区类**入口（7 项）⇒ 低频的那几项去**启动器**（一处搜得到，不是藏起来）。
       */}
       <aside className="app-rail">
         <div className="app-rail-brand">
           <span className="app-rail-mark" aria-hidden="true" />
           <span className="app-rail-name">俱佳Agent</span>
         </div>
+        {/*
+          **启动器的鼠标入口**（R68）。
+          为什么非有不可：低频入口（连接 / 浏览器 / 绘图 / 定时）已经离开左栏 ⇒
+          它们只剩启动器这一条路 ⇒ 而启动器如果**只有快捷键**，对不用键盘的人来说
+          就是**藏起来** ⇒ 正是本仓 T83 那条教训（「入口藏起来 ⇒ 用户不知道还有 ⇒ 更糟」）。
+          ⇒ 所以左栏顶上给一个**看得见、点得到**的搜索按钮。
+          （这条有判据盯着：见 `features/launcher/launcher-wiring.test.ts` 的「鼠标入口」一条。）
+        */}
+        <button
+          type="button"
+          className="jj-rail-search jj-transition"
+          title="搜索功能（Ctrl/Cmd+Shift+P）"
+          onClick={() => setPaletteOpen(true)}
+        >
+          <IconSearch size={15} />
+          <span>搜索功能</span>
+        </button>
         <nav className="app-tabs" aria-label="主导航">
           {NAV_GROUPS.map((group) => (
             <div className="app-rail-group" key={group.title}>
@@ -254,30 +320,15 @@ export function App(): ReactElement {
       </aside>
 
       <div className="app-main">
-        {settingsOpen ? (
-          <ErrorBoundary key="settings" area="设置">
-            <Suspense fallback={PANEL_FALLBACK}>
-              <SettingsCenter
-                pack={themePack}
-                onSavePack={async (pack) => {
-                  await window.jujia.configSet({
-                    appearance: { packId: pack.id, pack },
-                  });
-                  setThemePack(pack);
-                }}
-                onClose={() => setSettingsOpen(false)}
-              />
-            </Suspense>
-          </ErrorBoundary>
-        ) : null}
         {/*
           注意：**这一段不许被卸载**（R67 的 e2e 当场抓到的真回归）：
           之前这里是「设置中心开 ⇒ 整段换成设置中心」的**条件分支** ⇒
           打开设置中心会把**对话页一起卸载** ⇒ 它的会话、连接选择、在飞的流**全丢**
           ⇒ 违反 T22 报备的「**对话页常驻**（切页签只切可见性、不卸载）」。
           ⇒ 改法：设置中心与正文**并存**，正文用 `hidden` 藏起来（`display:none`，不卸载）。
+          R68：整个**外壳**（左栏 + 主区）一起藏 ⇒ 设置中心盖住整窗 ⇒ 只剩一根左栏。
         */}
-        <div className="app-content" hidden={settingsOpen}>
+        <div className="app-content">
           <header className="app-header">
             <h1 className="p0-title">{TAB_LABEL[tab]}</h1>
             <div className="app-header-meta">
@@ -333,6 +384,40 @@ export function App(): ReactElement {
           </main>
         </div>
       </div>
+      </div>
+
+      {/*
+        设置中心（R67 · R68 盖整窗）：**外壳的兄弟节点** ⇒ 它一开，左栏与主区一起被盖住
+        ⇒ 任何时候**只有一根左栏**（R67 留下"两根左栏并排"，是所有者那句抱怨的另一半）。
+        ⇒ 正文**只是被藏起来**（上面的 `.app-shell[hidden]`）⇒ 对话页**不会被卸载**（T22）。
+      */}
+      {settingsOpen && (
+        <ErrorBoundary key="settings" area="设置">
+          <Suspense fallback={PANEL_FALLBACK}>
+            <SettingsCenter
+              pack={themePack}
+              onSavePack={async (pack) => {
+                await window.jujia.configSet({
+                  appearance: { packId: pack.id, pack },
+                });
+                setThemePack(pack);
+              }}
+              onClose={() => setSettingsOpen(false)}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+
+      {/*
+        启动器（R68 · 左栏瘦身的第二入口）：一处搜全部。
+        快捷键用 **Ctrl/Cmd+Shift+P**（同类 IDE 的命令面板惯例）——
+        **不用 Ctrl+K**：画布的命令面板已经占着它（节点命令，与这个不是一回事）。
+      */}
+      {paletteOpen && (
+        <ErrorBoundary key="launcher" area="启动器">
+          <CommandPalette onClose={() => setPaletteOpen(false)} onRun={runCommand} />
+        </ErrorBoundary>
+      )}
 
       {/* 权限审批弹窗挂在最外层：任何页面触发的工具调用都能被审批 */}
       <PermissionDialog />

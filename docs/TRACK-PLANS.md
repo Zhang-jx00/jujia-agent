@@ -123,7 +123,7 @@
 | 扩容5 | `packages/agent-core/src/media/` · `packages/shared-ipc/src/contracts-media.ts` · `apps/desktop/src/main/{image-intake,model-history}.ts` · `apps/desktop/src/main/media/` · `apps/desktop/src/renderer/src/features/media/` | 多模态图片输入（M11 批一）：魔数 / 上限 / 剥元数据的**准入内核**（纯层）· IPC 契约 · 图片接收层 · 出站 content parts 拼装；**媒体生成 S1（R51 · 扩容5 的另一半）**：文生图面板 · 产物落盘（**回程**字节过同一道门） |
 | 铺设16 | `apps/desktop/src/main/{task-state,task-store}.ts` · `apps/desktop/src/main/ipc/chat-task.ts` · `packages/agent-core/src/context/task-resume.ts` · `packages/shared-ipc/src/contracts-task.ts` · `apps/desktop/src/renderer/src/features/chat/{TaskCard.tsx,use-task-card.ts}` | 长任务断点续跑（M17 批一）：任务状态机（纯层）· 记录落盘（JsonStore）· 续跑三通道 · 注入段 · 被打断卡片 |
 | 接驳 | `apps/desktop/src/main/ipc/` · `apps/desktop/src/main/*-wiring.test.ts` | 渲染层↔IPC↔主进程↔引擎的对接面与接线锁 |
-| 规整 | `apps/desktop/src/renderer/src/{App.tsx,KeepAlive.tsx,styles.css,styles-wiring.test.ts}` · `apps/desktop/src/renderer/src/features/settings/` · `apps/desktop/src/main/test-policy.test.ts` | 结构与规范（挂载保持 / 样式 / 测试策略）· **设置中心**（R67：整页覆盖 + 左导航分组 + 一行一条的行原语 + 接线锁） |
+| 规整 | `apps/desktop/src/renderer/src/{App.tsx,KeepAlive.tsx,styles.css,styles-wiring.test.ts}` · `apps/desktop/src/renderer/src/features/{settings,launcher}/` · `apps/desktop/src/main/test-policy.test.ts` | 结构与规范（挂载保持 / 样式 / 测试策略）· **设置中心**（R67：整页覆盖 + 左导航分组 + 一行一条的行原语 + 接线锁）· **全局启动器**（R68：左栏瘦身的第二入口 —— 一处搜全部 · 命令清单由导航真源生成 · Ctrl/Cmd+Shift+P） |
 | 规整 | `apps/desktop/scripts/` · `scripts/` | 门禁与工具链（check-docs / verify-pack / run-electron / license-check） |
 | 优化1 | `packages/shared/src/stream-batcher.ts` | 渲染合批（行为不变、更快） |
 | 优化2 | `apps/desktop/scripts/e2e-ui.mjs` | 零人工测试基建（可重复验证效率） |

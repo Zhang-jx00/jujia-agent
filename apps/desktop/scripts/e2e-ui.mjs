@@ -877,18 +877,58 @@ try {
   }
   ok('主进程窗口 isVisible() = false ⇒ 这一轮 e2e 没有在用户桌面上弹出窗口');
 
-  const tabButton = (label) => win.locator('nav.app-tabs button', { hasText: label });
   /**
-   * 设置中心里的那一项（R67 · 设置中心）。
-   *
-   * 为什么脚本要多这一步：设置类面板（外观 / 权限规则 / 钩子 / 插件 / MCP）
-   * 全部收进了**设置中心**（整页覆盖主区 + 左导航分组），**左栏不再有那些入口**
-   * ⇒ 必须"先开设置中心、再点那一项"。
-   * ⇒ 左栏**保持可见** ⇒ 开着设置中心时也能继续点左栏（点左栏会自动把设置中心收起来）。
+   * 去左栏点那一项（R68：设置中心**盖住整窗** ⇒ 左栏被一起盖住 ⇒ 点之前要先关掉设置中心）。
+   * ⇒ 所有左栏点击都走这一个口子，脚本侧不用到处记得"先关设置中心"。
    */
+  const gotoTab = async (w, label) => {
+    await closeSetting(w);
+    await w.locator('nav.app-tabs button', { hasText: label }).first().click();
+  };
+  /**
+   * 设置中心开着没有（R68 · 设置中心**盖住整窗** ⇒ 左栏被一起盖住 ⇒ 左栏点不到）。
+   *
+   * 为什么脚本需要它：设置类面板（外观 / 权限规则 / 钩子 / 插件 / MCP）全部收进了设置中心，
+   * **左栏不再有那些入口** ⇒ 必须"先开设置中心、再点那一项"；
+   * 而设置中心**盖住整窗** ⇒ **要先关掉它，左栏才点得到**。
+   */
+  const closeSetting = async (w) => {
+    const back = w.locator('.jj-settings-back');
+    if ((await back.count()) > 0 && (await back.first().isVisible())) {
+      await back.first().click();
+      await w.waitForTimeout(150);
+    }
+  };
+  /** 设置中心里的那一项（R67 · 设置中心）—— 顺带把上一次可能开着的设置中心关掉 */
   const openSetting = async (w, label) => {
+    await closeSetting(w);
     await w.locator('.jj-rail-settings').click();
     await w.locator('.jj-settings-item', { hasText: label }).first().click();
+  };
+  /**
+   * 去**启动器**里找那一项（R68 · 左栏瘦身）。
+   *
+   * 为什么需要它：R68 把左栏从 11 项瘦到 **7** 项 ⇒ 「浏览器 / 绘图 / 定时 / 连接」
+   * **不在 `nav.app-tabs` 里了** ⇒ 脚本按老路 `nav.app-tabs button` 点它们 ⇒ **30 秒定位器超时**
+   * （第一跑就是这么红的 —— 红在真问题上，不是脚本抽风）。
+   * ⇒ 改走启动器：点**左栏顶上那个「搜索功能」按钮**（鼠标入口）⇒ 搜名字 ⇒ 回车。
+   *
+   * 为什么用**鼠标入口**而不是快捷键：这条路和用户看到的是同一条
+   * ⇒ 脚本顺带把"那个按钮真的能点开启动器"也验了。
+   */
+  const gotoLauncher = async (w, label) => {
+    await closeSetting(w);
+    await w.locator('.jj-rail-search').click();
+    await w.waitForSelector('.jj-launcher', { timeout: 10_000 });
+    const input = w.locator('.jj-launcher-search input');
+    await input.fill(label);
+    await w.waitForTimeout(250);
+    const count = await w.locator('.jj-launcher-item').count();
+    if (count === 0) {
+      fail(`启动器里搜不到「${label}」（移出左栏的入口到不了）`, `筛完剩 ${String(count)} 条`);
+    }
+    await input.press('Enter');
+    await w.waitForTimeout(500);
   };
   /**
    * 轮询等待界面出现某段文本。
@@ -1145,7 +1185,7 @@ try {
   const baseUrl = `http://127.0.0.1:${String(portAddr)}`;
   const otherUrl = `http://127.0.0.1:${String(otherPort)}`;
 
-  await tabButton('浏览器').click();
+  await gotoLauncher(win, '浏览器');
   const browserReady = await waitForText('尚未打开');
   if (browserReady !== true) fail('浏览器页签没有渲染出来', String(browserReady).slice(0, 600));
 
@@ -1410,7 +1450,7 @@ try {
   const gitFile = `改动-${String(Date.now()).slice(-6)}.txt`;
   writeFileSync(join(wsDir, gitFile), '第一轮改动\n', 'utf8');
 
-  await tabButton('Git').click();
+  await gotoTab(win, 'Git');
   const gitReady = await waitForText('Git 变更');
   if (gitReady !== true) fail('Git 页签没有渲染出来', String(gitReady).slice(0, 600));
 
@@ -1554,7 +1594,7 @@ try {
   ok('硬 ask 不被"总是允许"压掉；拒绝 → 零副作用');
 
   /* 回到浏览器页签：这一步只验"交给外部程序"那一支，不需要视图真的打开 */
-  await tabButton('浏览器').click();
+  await gotoLauncher(win, '浏览器');
   const backToBrowser = await waitForText('尚未打开');
   if (backToBrowser !== true) fail('切回浏览器页签没有渲染出来', String(backToBrowser).slice(0, 600));
 
@@ -1692,7 +1732,7 @@ try {
   writeFileSync(join(wsDir, docFile), docBody, 'utf8');
 
   step('应用内文档查看：Markdown 真解析、原始 HTML 真不解释、长文档真分块');
-  await tabButton('文档').click();
+  await gotoTab(win, '文档');
   const docsReady = await waitForText('还没打开文档');
   if (docsReady !== true) fail('文档页签没有渲染出来', String(docsReady).slice(0, 600));
 
@@ -1817,7 +1857,7 @@ try {
    * ③ 关掉再重开：进程死了历史还在，且能再次读回同样内容（"重启不丢对话"的字面验证）。
    */
   step('会话持久化：从磁盘续上历史、真的点「记住这一点」、关掉重开之后历史仍在');
-  await tabButton('对话').click();
+  await gotoTab(win, '对话');
   const connSelect = win.locator('select').first();
   await connSelect.selectOption(seededConnId);
   const historyPicker = await waitForText('历史会话');
@@ -2144,7 +2184,7 @@ try {
         vis: document.visibilityState,
       });
     });
-  await win2.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win2, '对话');
   await win2.locator('select').first().selectOption(seededStreamConnId);
   const chatBox = win2.locator('textarea[placeholder^="输入消息"]');
   const sendNow = async (text) => {
@@ -2264,7 +2304,7 @@ try {
    * ③ 压缩之后发给模型的历史真的换成了"摘要 + 最近几条"（回显服务把收到的内容体检回来）。
    */
   step('6b 压缩：到阈值只提示、预览与「先不存」都不落盘、点存才写 summary.md（原始记录一字不少）');
-  await win2.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win2, '对话');
   await win2.locator('select').first().selectOption(seededEchoConnId);
   // 开一个干净的会话来测：上一步把焦点留在流式会话 B 上，直接发问会写进 B 的历史里
   await win2.locator('button', { hasText: '新会话' }).first().click();
@@ -2392,7 +2432,7 @@ try {
    */
   step('6b 退出留账：关掉应用再重开，账真的在、补问真的出现，刚记过的会话不会被问第二遍');
   // S1：记过要点**之后又多聊了一句** —— 这一批是新内容，退出时该被再问一次
-  await win2.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win2, '对话');
   await ask6b('E2E6B_记完之后又多聊了一句', 'ECHO n=3 sum=1');
   /**
    * S2：记过要点、之后一个字都没再多 —— **不该**被问第二遍。
@@ -2459,7 +2499,7 @@ try {
   if (ledgerRaw.includes('E2E6B_记过就不再问')) {
     fail('刚记过、之后一个字没多的会话又被记了一笔（不该问的问了）', ledgerRaw.slice(0, 600));
   }
-  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win3, '对话');
   if ((await waitText3('E2E6B_START')) !== true) {
     fail('重启后没给出补问提示条', (await body3()).slice(0, 700));
   }
@@ -2486,7 +2526,7 @@ try {
   ok('补问的预览同样不落盘；「不记」只清账 —— 每一步都有磁盘证据');
 
   /** 追加验收⑦：不用猜路径就有直达入口，而且看得见内容（在**重启之后**的窗口里验，顺带证明它真在盘上） */
-  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  await gotoTab(win3, '文档');
   await win3.locator('button', { hasText: '查看长期记忆' }).first().click();
   if ((await waitText3(NOTE_6B)) !== true) {
     fail('「查看长期记忆」没能把 NOTES.md 打开给人看', (await body3()).slice(0, 700));
@@ -2515,7 +2555,7 @@ try {
    * "element is not visible" 卡了 30 秒）。常驻面板带来的这条测试纪律写在这里：
    * **凡是要操作对话页控件的地方，先把页签切到对话页**。
    */
-  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win3, '对话');
   const boxT22 = win3.locator('textarea[placeholder^="输入消息"]');
   const askT22 = async (text, needle) => {
     await boxT22.fill(text);
@@ -2558,8 +2598,8 @@ try {
   const beforeLinesT22 = linesT22();
   const beforeListT22 = listT22.length;
 
-  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
-  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win3, '文档');
+  await gotoTab(win3, '对话');
 
   const backT22 = await body3();
   if (!backT22.includes('T22_切页签前的第一问')) {
@@ -2584,7 +2624,7 @@ try {
   ok('切走再切回：连接与会话选择都留着、视图恢复，第二问落回原会话且没有新建会话（磁盘为证）');
 
   step('T22 流式中切走再切回：订阅没随页签卸载，后续增量照常到达');
-  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win3, '对话');
   await win3.locator('select').first().selectOption(seededStreamConnId);
   await win3.locator('button', { hasText: '新会话' }).first().click();
   await boxT22.fill('STREAM_A T22 切走验证');
@@ -2592,9 +2632,9 @@ try {
   if ((await waitText3('A_1_', 12_000)) !== true) {
     fail('流没有开始（假服务的头两段没到）', (await body3()).slice(0, 700));
   }
-  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  await gotoTab(win3, '文档');
   await new Promise((resolve) => setTimeout(resolve, 2_000));
-  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win3, '对话');
   if ((await waitText3('A_16_', 15_000)) !== true) {
     fail('切回来之后这一轮没有走完 —— 订阅随页签卸载了（T22 要修的正是这个）', (await body3()).slice(0, 900));
   }
@@ -2614,7 +2654,7 @@ try {
   writeFileSync(join(wsDir, idePdf), buildMinimalPdf(), 'utf8');
   // 中文 fixture 也在这里先落盘：树的清单是**懒加载缓存**的，开页签之后再写就看不见（第 33 步实测过）
   writeFileSync(join(wsDir, ideCjkPdf), buildCjkPdf(), 'utf8');
-  await win3.locator('nav.app-tabs button', { hasText: '文件' }).first().click();
+  await gotoTab(win3, '文件');
   if ((await waitText3(ideFile, 12_000)) !== true) {
     fail('「文件」页签没有列出刚写进去的文件（树没读磁盘？）', (await body3()).slice(0, 800));
   }
@@ -2728,7 +2768,7 @@ try {
   step('M19 逐行 diff：点开改动的文件看到逐行 patch（内容真值）');
   const trackedFile = 'README-e2e-seed.md';
   writeFileSync(join(wsDir, trackedFile), 'seed\n新增一行给 patch 看\n', 'utf8');
-  await win3.locator('nav.app-tabs button', { hasText: 'Git' }).first().click();
+  await gotoTab(win3, 'Git');
   /**
    * **先有界等到那行出现在界面里，再点**（复核 051 R-7）。
    * 原来是直接 `.click()`：元素没出现时走的是 Playwright 自己的 30 秒超时，
@@ -2748,7 +2788,7 @@ try {
   ok('逐行 patch 真取回来了：新增行以 + 出现（看的是内容，不是界面文案）');
 
   step('M19b 中文 PDF：内置的 CJK cmap 真被取用，字节经它正确映射成「你好」（抽取为证）');
-  await win3.locator('nav.app-tabs button', { hasText: '文件' }).first().click();
+  await gotoTab(win3, '文件');
   await win3.locator('button', { hasText: ideCjkPdf }).first().click();
   if ((await waitText3('第 1 / 1 页', 15_000)) !== true) {
     fail('中文 PDF 没有渲染出页数', (await body3()).slice(0, 900));
@@ -2922,7 +2962,7 @@ try {
   });
 
   step('M9a 画布：三节点链真的跑完（节点状态来自主进程事件，最后一步工具的输出在回执里）');
-  await win3.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  await gotoTab(win3, '画布');
   if ((await waitText3('运行这张图', 15_000)) !== true) {
     fail('「画布」页签没有渲染出来（React Flow 的懒加载 chunk 没取到？）', (await body3()).slice(0, 700));
   }
@@ -2983,7 +3023,7 @@ try {
    * 松手后真的贴到同一条竖线（±1.5px）"两头验 —— 不碰任何执行语义。
    */
   step('B1 画布：命令面板（按钮与 Ctrl+K 两条路）过滤后建节点；右键菜单与双击在落点建节点');
-  await win3.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  await gotoTab(win3, '画布');
   await win3.locator(`button[data-graph-id="e2e-canvas-chain-0001"]`).first().click();
   if ((await waitText3('已打开 e2e-canvas-chain-0001', 10_000)) !== true) {
     fail('重新打开三节点图失败（B1 步骤的起点）', (await body3()).slice(0, 700));
@@ -3087,7 +3127,7 @@ try {
    * （它没被重跑）—— 三个都用 DOM 真值断，不看界面文案自述之外的任何东西。
    */
   step('B2 画布：从中间节点重跑 —— 只跑该段、上游不动、重跑标点在节点上');
-  await win3.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  await gotoTab(win3, '画布');
   await win3.locator(`button[data-graph-id="e2e-canvas-chain-0001"]`).first().click();
   if ((await waitText3('已打开 e2e-canvas-chain-0001', 10_000)) !== true) {
     fail('重新打开三节点图失败（B2 步骤的起点）', (await body3()).slice(0, 700));
@@ -3132,7 +3172,7 @@ try {
    * 工具输出确实会进回执这条由 M9a 三节点链那步负责（那里读的就是 readme 的内容）。
    */
   step('B3 画布：条件分支 —— 选中的口执行、没选的那支与它的下游被跳过（都记在节点上）');
-  await win3.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  await gotoTab(win3, '画布');
   await win3.locator(`button[data-graph-id="${branchId}"]`).first().click();
   if ((await waitText3(`已打开 ${branchId}`, 10_000)) !== true) {
     fail('打开条件分支那张图失败', (await body3()).slice(0, 700));
@@ -3216,7 +3256,7 @@ try {
   };
 
   await localCommit();
-  await win3.locator('nav.app-tabs button', { hasText: 'Git' }).first().click();
+  await gotoTab(win3, 'Git');
   if ((await waitText3('推送到远端', 12_000)) !== true) {
     fail('Git 页签里没有"推送到远端"这一块（界面没挂上？）', await body3());
   }
@@ -3282,7 +3322,7 @@ try {
    * 不是界面文案：如果"回来"走的是重新起进程，这里会变成 2 —— 而旧那个进程的 id 渲染层已经叫不出来，
    * 只能等应用退出才回收。这就是 T23 修掉的那条缺陷的真值口径（复核 026 的 G-8 同一条纪律）。
    */
-  await win3.locator('nav.app-tabs button', { hasText: '终端' }).first().click();
+  await gotoTab(win3, '终端');
   if ((await waitText3('启动终端（新会话需审批）', 12_000)) !== true) {
     fail('终端页没挂上（看不到启动按钮）', await body3());
   }
@@ -3302,11 +3342,11 @@ try {
   await win3.locator('.jj-terminal-host').first().click();
   await win3.keyboard.type("node -e \"setTimeout(function(){console.log('R4_LATE')},2500)\"");
   await win3.keyboard.press('Enter');
-  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  await gotoTab(win3, '文档');
   // 这一句是**有意的定时等待**：要等的是子进程那边的定时器，而"输出发生在看不见的那一页"
   // 这个条件本身没法用条件等待表达（切回去等就破坏被测语义）
   await win3.waitForTimeout(4000);
-  await win3.locator('nav.app-tabs button', { hasText: '终端' }).first().click();
+  await gotoTab(win3, '终端');
 
   if ((await waitText3('已接回本工作区仍在运行的终端会话', 12_000)) !== true) {
     fail('切回来没有接回会话（要么被杀了，要么当成新会话又起了一个）', await body3());
@@ -3330,8 +3370,8 @@ try {
   if ((await waitText3('会话已由你结束', 12_000)) !== true) {
     fail('点了「结束会话」界面没有反应', await body3());
   }
-  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
-  await win3.locator('nav.app-tabs button', { hasText: '终端' }).first().click();
+  await gotoTab(win3, '文档');
+  await gotoTab(win3, '终端');
   if ((await waitText3('上一个终端会话已结束（退出码', 12_000)) !== true) {
     fail(
       '会话结束之后再回来，界面只说"未启动"—— 它到底是怎么没的，用户看不见（会以为是切页签弄丢的）',
@@ -3349,7 +3389,7 @@ try {
   for (let i = 1; i <= 600; i += 1) r4DocHeads.push(`## H${String(i)}`);
   writeFileSync(join(wsDir, r4DocFile), `# R4 长文档\n\n${r4DocHeads.join('\n')}\n`, 'utf8');
 
-  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  await gotoTab(win3, '文档');
   /**
    * 填路径**之前必须等面板挂载那轮「恢复上次阅读」落地**，填完**必须核对**。
    *
@@ -3404,8 +3444,8 @@ try {
   if (scrolledTop < 900) {
     fail(`阅读容器没能滚到 900（读到 ${String(scrolledTop)}）—— 后面的"位置回来了"就无从判起`, await body3());
   }
-  await win3.locator('nav.app-tabs button', { hasText: '终端' }).first().click();
-  await win3.locator('nav.app-tabs button', { hasText: '文档' }).first().click();
+  await gotoTab(win3, '终端');
+  await gotoTab(win3, '文档');
   if ((await waitText3('已恢复到上次打开的 r4-doc.md', 15_000)) !== true) {
     fail('切回来没有恢复上次打开的文件（T24 的"记住路径"没兑现）', await body3());
   }
@@ -3441,7 +3481,7 @@ try {
    * 三条都在同一个新会话里连着问：截断的两条要各自出现，垃圾流那条必须报错而不是画一条空回答。
    */
   step('R7 上游截断 / 垃圾流：半截回答要写"不完整"、全是垃圾要报错（不许记成一次成功的空回答）');
-  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win3, '对话');
   await win3.locator('select').first().selectOption(seededEchoConnId);
   const boxR7 = win3.locator('textarea[placeholder^="输入消息"]');
   const askR7 = async (text, needle, miss) => {
@@ -3660,7 +3700,7 @@ try {
    * —— 只按字节攒批的话这里全程空白，正是本轮补静默刷新要修掉的东西。
    */
   const streamMarker = `E2ESTREAM${String(Date.now()).slice(-5)}`;
-  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win3, '对话');
   await win3.locator('select').first().selectOption(seededStreamConnId);
   await win3.locator('button', { hasText: '新会话' }).first().click();
   const streamChatBox = win3.locator('textarea[placeholder^="输入消息"]');
@@ -3717,7 +3757,7 @@ try {
   ok('收尾之后：最后一段输出补全，模型的收尾回答也照常到达');
 
   step('M7 定时任务：开机补跑只补一次、跳过几次要说出来，且水位线记的是"那一次"而不是"此刻"');
-  await win3.locator('nav.app-tabs button', { hasText: '定时' }).first().click();
+  await gotoLauncher(win3, '定时');
   if ((await waitText3('E2E 定时补跑', 10_000)) !== true) {
     fail('定时任务页没有列出启动前就埋在磁盘上的那条任务（清单没读盘，或通道没接）', await body3());
   }
@@ -4079,7 +4119,7 @@ try {
   );
 
   step('运行日志：概览页看得见今天的记录，磁盘上真有那一本（数据没出隔离目录）');
-  await win3.locator('nav.app-tabs button', { hasText: '概览' }).first().click();
+  await gotoTab(win3, '概览');
   const logCard = win3.locator('[data-logs-card]');
   await logCard.waitFor({ state: 'visible', timeout: 8_000 });
   let logCardText = '';
@@ -4133,7 +4173,7 @@ try {
   );
 
   step('更新检查：点一次查一次（本地假发布页），"有新版本"说得出来、别的时候一声不吭');
-  await win3.locator('nav.app-tabs button', { hasText: '概览' }).first().click();
+  await gotoTab(win3, '概览');
   const updateCard = win3.locator('[data-update-card]');
   await updateCard.waitFor({ state: 'visible', timeout: 8_000 });
   if (updateHits !== 0) {
@@ -4162,7 +4202,7 @@ try {
   ok('查一次说一句：新版本 v99.9.9 显示出来、发布页入口在；点击前 0 次出站、点击后恰好 1 次');
 
   step('B3b 画布：有界循环 —— 命中终止词提前停；没命中就停在轮次上限并把"到界"说出来');
-  await win3.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  await gotoTab(win3, '画布');
   // 场景一：第 1 轮就命中（回显服务的回答里带 ECHO）→ 循环提前结束，下游照常执行
   await win3.locator(`button[data-graph-id="${loopHitId}"]`).first().click();
   if ((await waitText3(`已打开 ${loopHitId}`, 10_000)) !== true) {
@@ -4211,7 +4251,7 @@ try {
    * 服务端在收到的字节里找它：找得到 = 剥离没生效（红），找不到 = 出站前真剥了（绿）。
    */
   step('M11 多模态：图片以 parts 形态到达模型（元数据已剥），本机只有一行计数、零字节副本');
-  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win3, '对话');
   await win3.locator('select').first().selectOption(seededEchoConnId);
   const newChatImg = win3.locator('button', { hasText: '新会话' });
   for (let i = 0; i < 20 && (await newChatImg.count()) === 0; i += 1) await win3.waitForTimeout(150);
@@ -4313,7 +4353,7 @@ try {
     process.platform === 'win32'
       ? 'echo TASKR1-EARLY & ping -n 4 127.0.0.1 >nul & echo TASKR1-LATE'
       : 'echo TASKR1-EARLY; sleep 3; echo TASKR1-LATE';
-  await win3.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win3, '对话');
   await win3.locator('select').first().selectOption(seededEchoConnId);
   const newChatTask = win3.locator('button', { hasText: '新会话' });
   for (let i = 0; i < 20 && (await newChatTask.count()) === 0; i += 1) await win3.waitForTimeout(150);
@@ -4382,7 +4422,7 @@ try {
       return false;
     }
   };
-  await win4.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win4, '对话');
   await win4.locator('select').first().selectOption(seededEchoConnId);
   await win4.locator('select[aria-label="继续会话"]').selectOption(taskSid);
   await win4.locator('button', { hasText: '继续' }).first().click();
@@ -4456,7 +4496,7 @@ try {
    * 种子见脚本头部的 `seededPageSessionId`。判据全是真值：计数来自"共 N 条"、窗口变化来自
    * 按钮文案（"从磁盘再读 11 条" → "显示更早的 11 条" → 消失），**最早那条的正文必须真的出现**。
    */
-  await win4.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win4, '对话');
   // 历史会话下拉**按选中连接过滤**：种子属于流式连接，先把它选上；
   // 选完还要点「继续」——下拉的 onChange 只记 pickId，真正 resume 的是那颗按钮（与 [60] 同形）
   await win4.locator('select').first().selectOption(seededStreamConnId);
@@ -4574,7 +4614,7 @@ try {
     fail('盘上的钩子配置不是启用态（写进去了却没启用，界面那步就失去意义）', diagDisk.slice(0, 400));
   }
 
-  await win4.locator('nav.app-tabs button', { hasText: '概览' }).first().click();
+  await gotoTab(win4, '概览');
   await win4.locator('button', { hasText: 'list_dir' }).first().click();
   if ((await waitText4('[钩子诊断]')) !== true) {
     fail(
@@ -4592,7 +4632,7 @@ try {
     fail('第二次改钩子配置没有再弹确认（改一次问一次不许因为"刚改过"而免问）', (await body4()).slice(0, 800));
   }
   await clickDialog4('允许一次');
-  await win4.locator('nav.app-tabs button', { hasText: '概览' }).first().click();
+  await gotoTab(win4, '概览');
   await win4.locator('button', { hasText: 'list_dir' }).first().click();
   await win4.waitForTimeout(1_200);
   const offBody = await body4();
@@ -4610,7 +4650,7 @@ try {
    * 所以断言取的是**语义锚点**（界面文案原文），不是"整页里找得到某个词"。
    */
   step('T55/T56 断流与空参数：没结束标记要说"可能不完整"，参数没送到不许当合法零参');
-  await win4.locator('nav.app-tabs button', { hasText: '对话' }).first().click();
+  await gotoTab(win4, '对话');
   await win4.locator('select').first().selectOption(seededEchoConnId);
   const boxT55 = win4.locator('textarea[placeholder^="输入消息"]');
   const newT55 = win4.locator('button', { hasText: '新会话' });
@@ -4768,7 +4808,7 @@ try {
    *
    * 判据形状：**底色亮度**（白底 ⇒ 相对亮度 > 0.5）+ **命中区下限 32×32** + **图标与底对比 ≥ 4.5**。
    */
-  await live.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  await gotoTab(live, '画布');
   await live.waitForSelector('.react-flow__controls-button', { timeout: 15_000 });
   const canvasLook = await live.evaluate(() => {
     const btn = document.querySelector('.react-flow__controls-button');
@@ -4958,7 +4998,7 @@ try {
       minNative: round(minNative),
     };
   });
-  await live.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
+  await gotoTab(live, '画布');
   if (setRows.rowCount === 0) {
     fail('渲染契约：外观页一个设置项都没量到（锁失焦了 —— 量不到东西的锁会一直绿）', JSON.stringify(setRows));
   }
@@ -5287,7 +5327,7 @@ try {
    * 顺带把界面上那三句口径也钉住（能力差异 / 成本上限 / 本机保留副本）。
    */
   step('M11 剩余 · R51 S1 文生图：提示词真的发出去 · 图片字节真的落盘 · 界面说得清');
-  await win4.locator('nav.app-tabs button', { hasText: '绘图' }).first().click();
+  await gotoLauncher(win4, '绘图');
   /**
    * **R55 · 渲染锁：标签里裹着的控件不许压住/贴住标签文字**（真窗口现扫抓到的"堆叠"）。
    *
@@ -5445,17 +5485,22 @@ try {
   step('T78 命中区：四族各自达标（每族单独判）');
   {
     /**
-     * 去哪一页量：`via` = 'rail'（左栏）或 'settings'（**设置中心**）。
+     * 去哪一页量：`via` = 'rail'（左栏）/ 'settings'（**设置中心**）/ 'launcher'（**启动器**）。
      *
      * 为什么要有第二种（R67）：权限规则 / 外观这两页**已经搬进设置中心**了 ⇒
      * 左栏里**没有**那两个入口 ⇒ 还按老路数点左栏 ⇒ 定位器等不到（30s 超时）。
      * ⇒ 搬家的连带面，脚本这一侧也要跟着搬。
+     *
+     * 为什么要有第三种（R68）：左栏瘦到 7 项之后，「浏览器 / 连接」这两页**也不在左栏了**
+     * ⇒ 它们只剩**启动器**这一条路 ⇒ 量它们的命中区也得走启动器。
      */
     const measureIn = async (tabText, sel, via = 'rail') => {
       if (via === 'settings') {
         await openSetting(live, tabText);
+      } else if (via === 'launcher') {
+        await gotoLauncher(live, tabText);
       } else {
-        await live.locator('nav.app-tabs button', { hasText: tabText }).first().click();
+        await gotoTab(live, tabText);
       }
       await live.waitForTimeout(400);
       return live.evaluate((s) => {
@@ -5484,7 +5529,7 @@ try {
       );
 
     // ① 图标按钮族（浏览器页）—— 尺子：按钮族 ≥32×32
-    const iconBtns = await measureIn('浏览器', 'button.jj-icon-btn');
+    const iconBtns = await measureIn('浏览器', 'button.jj-icon-btn', 'launcher');
     if (iconBtns.length === 0) {
       fail('T78 ①：浏览器页一个 `.jj-icon-btn` 都没量到（锁失焦了 —— 量不到东西的锁会一直绿）');
     }
@@ -5521,7 +5566,7 @@ try {
     }
 
     // ③ chip 族（连接页）—— 尺子：WCAG 2.5.8 的 24×24（实测 26.67 ⇒ 达标，只锁住）
-    const chips = await measureIn('连接', '.w2-chip');
+    const chips = await measureIn('连接', '.w2-chip', 'launcher');
     if (chips.length === 0) {
       fail('T78 ③：连接页一个 `.w2-chip` 都没量到（锁失焦了 —— 量不到东西的锁会一直绿）');
     }
@@ -5566,6 +5611,10 @@ try {
    *   ④ 「返回应用」**真的**回到主界面（正文重新看得见）。
    */
   step('设置中心：整页覆盖主区 + 左导航分组 + 搜索能筛 + 能回应用');
+  // ⚠️ 必须**先关掉可能开着的设置中心**：R68 之后它**盖住整窗**（连左栏一起盖）
+  // ⇒ 上一步 T78 的 `measureIn('外观', …, 'settings')` 把设置中心开着 ⇒ 左栏点不到
+  // ⇒ 第二跑就红在这儿（30 秒定位器超时 · "element is not visible"）。
+  await closeSetting(live);
   await live.locator('.jj-rail-settings').click();
   await live.waitForSelector('.jj-settings', { timeout: 10_000 });
   const settingsShape = await live.evaluate(() => {
@@ -5587,12 +5636,25 @@ try {
       }),
       headerVisible: visible('.app-header'),
       bodyVisible: visible('.app-body'),
-      railStillThere: visible('.app-rail'),
+      railVisible: visible('.app-rail'),
     };
   });
   if (settingsShape.headerVisible !== false || settingsShape.bodyVisible !== false) {
     fail(
       '渲染契约：设置中心不是**整页覆盖**（正文还看得见 ⇒ 它只是盖了一层，不是整页）',
+      JSON.stringify(settingsShape),
+    );
+  }
+  /**
+   * R68：设置中心**盖住整窗** ⇒ **左栏也被盖住**。
+   *
+   * 为什么这条要盯：R67 的时候设置中心只盖主区、左栏一直在 ⇒ 界面上同时出现**两根左栏**
+   * （应用的那根 + 设置中心自己那根 220px 的）⇒ 那正是所有者那句抱怨的另一半。
+   * ⇒ 现在要求：设置中心开着的时候，**界面上只剩一根左栏**（设置中心那根）。
+   */
+  if (settingsShape.railVisible !== false) {
+    fail(
+      '渲染契约：设置中心开着的时候左栏还在 ⇒ 界面上同时有两根左栏（R68 要求它盖住整窗）',
       JSON.stringify(settingsShape),
     );
   }
@@ -5642,7 +5704,117 @@ try {
   }
   ok(
     `设置中心：整页覆盖主区（${String(settingsShape.groups)} 组 / ${String(settingsShape.items)} 项）· ` +
-      `搜索能筛 · 能回应用 · 左栏一直在`,
+      `搜索能筛 · 能回应用 · 应用那根左栏被一起盖住（只剩一根）`,
+  );
+
+  /**
+   * ⑫ **启动器**（R68 · 左栏瘦身的第二入口）。
+   *
+   * 为什么单立一步：左栏瘦到 7 项之后，「连接 / 浏览器 / 绘图 / 定时」**离开了左栏**
+   * ⇒ 它们**唯一的路**就是启动器 ⇒ 所以"启动器能不能真的把人送到那一页"是**这一轮最要紧的事**
+   * （本仓 T83 的教训：入口藏起来 ⇒ 用户不知道还有 ⇒ 更糟）。
+   *
+   * 五条判据（每条都断**真值**，不看界面自述）：
+   *   ① **鼠标入口存在**：左栏顶上那个「搜索功能」按钮点得动（不是只有快捷键 ⇒ 不用键盘的人也能用）；
+   *   ② **清单完整**：搜空 ⇒ 侧栏的 7 项 + 移出侧栏的 4 项 + 设置 **一个不少**；
+   *   ③ **筛选是真的**：搜「定时」⇒ 只剩「定时」这一条；
+   *   ④ **回车真跳转**：回车之后「定时任务清单」真的渲染出来了（不是面板换了、页面没换）；
+   *   ⑤ **快捷键也能唤起**（Ctrl+Shift+P）：键盘这条路也没断。
+   */
+  step('启动器：左栏搜索按钮能唤起 · 清单完整 · 搜索能筛 · 回车真跳转 · 快捷键也能唤起');
+  await live.locator('.jj-rail-search').click();
+  await live.waitForSelector('.jj-launcher', { timeout: 10_000 });
+  const paletteShape = await live.evaluate(() => {
+    const items = [...document.querySelectorAll('.jj-launcher-item')];
+    const groups = [...document.querySelectorAll('.jj-launcher-group-title')];
+    return {
+      items: items.length,
+      groups: groups.length,
+      labels: items.map((i) => (i.querySelector('.jj-launcher-item-label')?.textContent ?? '').trim()),
+      // 右侧那一列：必须**不是**左边的复读（第一版取别名的第一个词 ⇒ 恰好等于显示名 ⇒ 12 行全是重复字样）
+      hints: items.map((i) => (i.querySelector('.jj-launcher-item-hint')?.textContent ?? '').trim()),
+    };
+  });
+  // ② 清单完整：11 个入口 + 设置 = 12 条
+  if (paletteShape.items !== 12) {
+    fail(
+      `渲染契约：启动器的清单只有 ${String(paletteShape.items)} 条（应 12 条 = 11 个入口 + 设置）`,
+      JSON.stringify(paletteShape),
+    );
+  }
+  if (!paletteShape.labels.includes('定时') || !paletteShape.labels.includes('设置')) {
+    fail(
+      '渲染契约：启动器里搜不到「定时」或「设置」（移出左栏的那些页就真的到不了）',
+      JSON.stringify(paletteShape),
+    );
+  }
+  // 右侧那一列不许是左边的复读（第一版就是"概览 … 概览"，12 行全重复）
+  const echoRows = paletteShape.labels
+    .map((label, i) => (paletteShape.hints[i] === label ? label : null))
+    .filter((x) => x !== null);
+  if (echoRows.length > 0) {
+    fail(
+      '渲染契约：启动器右侧那一列在复读显示名（' +
+        echoRows.join('、') +
+        '）⇒ 那一列应该是"还能这么搜"的近义词',
+      JSON.stringify(paletteShape),
+    );
+  }
+  // ③ 筛选是真的
+  const paletteInput = live.locator('.jj-launcher-search input');
+  await paletteInput.fill('定时');
+  await live.waitForTimeout(200);
+  const paletteFiltered = await live.evaluate(() =>
+    [...document.querySelectorAll('.jj-launcher-item-label')].map((e) => (e.textContent ?? '').trim()),
+  );
+  if (paletteFiltered.length !== 1 || paletteFiltered[0] !== '定时') {
+    fail(
+      `渲染契约：启动器的搜索框不真筛（筛「定时」后剩 ${String(paletteFiltered.length)} 条：` +
+        JSON.stringify(paletteFiltered) +
+        '）',
+      JSON.stringify(paletteFiltered),
+    );
+  }
+  // ④ 回车真跳转
+  //    为什么**轮询**而不是固定等待：定时页是懒加载的（React.lazy）⇒ 固定等待要么偶发失败要么白等。
+  await live.keyboard.press('Enter');
+  const scheduleDeadline = Date.now() + 15_000;
+  let afterEnter = { launcherGone: false, bodyVisible: false, hasSchedule: false, headerText: '' };
+  while (Date.now() < scheduleDeadline) {
+    afterEnter = await live.evaluate(() => {
+      const launcher = document.querySelector('.jj-launcher');
+      const body = document.querySelector('.app-body');
+      return {
+        launcherGone: launcher === null,
+        bodyVisible: body !== null && body.getBoundingClientRect().width > 0,
+        hasSchedule: (body?.innerText ?? '').includes('定时任务清单'),
+        headerText: (document.querySelector('.app-header')?.innerText ?? '').trim(),
+      };
+    });
+    if (afterEnter.launcherGone && afterEnter.bodyVisible && afterEnter.hasSchedule) break;
+    await live.waitForTimeout(150);
+  }
+  if (afterEnter.launcherGone !== true || afterEnter.bodyVisible !== true) {
+    fail('渲染契约：启动器里回车之后没回到主界面', JSON.stringify(afterEnter));
+  }
+  if (afterEnter.hasSchedule !== true || !afterEnter.headerText.includes('定时')) {
+    fail(
+      '渲染契约：启动器里回车之后**没有真的跳到定时页**（面板换了、页面没换）',
+      JSON.stringify(afterEnter),
+    );
+  }
+  // ⑤ 快捷键也能唤起（键盘这条路没断）
+  await live.keyboard.press('Control+Shift+P');
+  await live.waitForSelector('.jj-launcher', { timeout: 10_000 });
+  await live.keyboard.press('Escape');
+  await live.waitForTimeout(200);
+  const afterEsc = await live.evaluate(() => document.querySelector('.jj-launcher') === null);
+  if (afterEsc !== true) {
+    fail('渲染契约：启动器里按 Esc 没关闭', JSON.stringify({ afterEsc }));
+  }
+  ok(
+    `启动器：鼠标入口可唤起 · 清单 ${String(paletteShape.items)} 条 / ${String(paletteShape.groups)} 组 · ` +
+      '搜索真筛 · 回车真跳到定时页 · Ctrl+Shift+P 也能唤起 · Esc 能关闭',
   );
 
   step('关闭应用：应干净退出（不留孤儿进程）');

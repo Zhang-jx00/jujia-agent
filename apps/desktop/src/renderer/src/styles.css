@@ -495,6 +495,143 @@ button:disabled {
   min-width: 0;
 }
 
+/*
+ * 外壳（左栏 + 主区）。R68：设置中心开着时**整块被藏起来**（不卸载）⇒ 对话页的 state 不丢。
+ */
+.app-shell {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.app-shell[hidden] {
+  display: none;
+}
+
+/* ==================== 启动器（R68） ==================== */
+
+.jj-launcher-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh 16px 16px;
+  background: var(--c-scrim);
+}
+
+.jj-launcher {
+  display: flex;
+  flex-direction: column;
+  width: min(620px, 100%);
+  max-height: 70vh;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--c-bg-elevated);
+  box-shadow: var(--shadow-dialog);
+}
+
+.jj-launcher-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--c-text-secondary);
+}
+
+.jj-launcher-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-base);
+}
+
+.jj-launcher-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.jj-launcher-group-title {
+  padding: 8px 10px 4px;
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--c-text-secondary);
+}
+
+/* 一个分组（标题 + 该组的命令）—— 列排，组与组之间靠标题分隔 */
+.jj-launcher-group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 命令的名字：左侧那个。**不许换行**：清单是竖排的，折行会让一条命令占两行 */
+.jj-launcher-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jj-launcher-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--fs-body);
+  /* 显式给行高：Chromium 的**表单控件不继承 body 的 line-height**（UA 样式表给 button 写死
+     `line-height: normal`）⇒ 行盒高度随**字体度量**变 ⇒ 纯拉丁标签（Git）会比中文标签矮 4px。
+     这正是本仓 `.app-tab` 那条坑的同款 ⇒ 这一族显式写死。 */
+  line-height: 1.5;
+  text-align: left;
+}
+
+.jj-launcher-item:hover {
+  background: var(--c-overlay-faint);
+}
+
+.jj-launcher-item-on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+.jj-launcher-item-on:hover {
+  background: var(--primary);
+}
+
+.jj-launcher-item-hint {
+  font-size: var(--fs-caption);
+  color: var(--c-text-secondary);
+}
+
+.jj-launcher-item-on .jj-launcher-item-hint {
+  color: var(--primary-ink);
+  opacity: 0.75;
+}
+
+.jj-launcher-empty {
+  padding: 12px 10px;
+  color: var(--c-text-secondary);
+  font-size: var(--fs-body);
+}
+
 /* ==================== 设置中心（R67） ==================== */
 
 /*
@@ -780,6 +917,38 @@ button:disabled {
 
 /* ---------------- 左栏底部的设置入口 ---------------- */
 
+/*
+ * **启动器的鼠标入口**（R68）：左栏顶上的搜索按钮。
+ *
+ * 为什么它必须存在：低频入口离开左栏之后只剩启动器一条路 ⇒ 启动器若**只有快捷键**
+ * ⇒ 对不用键盘的人就是"藏起来"（T83 的教训）⇒ 所以给它一个看得见点得到的按钮。
+ */
+.jj-rail-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 16px);
+  margin: 0 8px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--fs-body);
+  /* 显式给行高 + 高度下限（同 `.jj-launcher-item` 那条注释）：表单控件不继承 body 的 line-height
+     ⇒ 不写死的话，这个按钮的高度会随字体度量变 */
+  line-height: 1.5;
+  min-height: 32px;
+  text-align: left;
+  flex: 0 0 auto;
+}
+
+.jj-rail-search:hover {
+  color: var(--text);
+  border-color: var(--primary);
+}
+
 .jj-rail-settings {
   display: flex;
   align-items: center;
@@ -793,6 +962,9 @@ button:disabled {
   color: var(--text-secondary);
   cursor: pointer;
   font-size: var(--fs-body);
+  /* 显式给行高（同 `.jj-launcher-item` 那条注释）：表单控件不继承 body 的 line-height
+     ⇒ 不写死的话，这个按钮的高度会随字体度量变 */
+  line-height: 1.5;
   text-align: left;
 }
 

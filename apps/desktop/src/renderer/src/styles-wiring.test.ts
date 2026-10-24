@@ -239,18 +239,39 @@ describe('样式接线锁：className 上引用的类名必须在渲染层样式
     expect(missing).toEqual([]);
   });
 
-  it('受属性门控的样式，必须真的有元素带那个类（R20：背景类型曾经静默不生效）', () => {
+  it('受属性门控的样式，必须作用在**根容器**上（R20 立 · R68 加强：目标类不许换成"存在但不对"的类）', () => {
     /**
-     * 形状：`html[data-jj-bg-kind='gradient'] .app-shell { … }` —— 属性出对了、
-     * 规则也在样式表里，**但没有任何元素叫 `.app-shell`**（根容器叫 `.app-root`）
-     * ⇒ 主题包的"渐变/图片/玻璃"三个选项谁都选不动画面，且所有门禁都是绿的。
-     * 这条锁把"属性门控 → 目标类名"这一跳也钉住：目标类必须出现在渲染层源码里。
+     * 形状：`html[data-jj-bg-kind='gradient'] .app-root { … }` —— 属性出对了、
+     * 规则也在样式表里，**但没有任何元素叫 `.app-root`** ⇒ 主题包的"渐变/图片/玻璃"三个选项
+     * 谁都选不动画面，且所有门禁都是绿的。
+     *
+     * ⚠️ **R68 的加强（这条锁原来太弱）**：第一版只判「目标类**在渲染层源码里出现过**」——
+     * 而 R68 **新增了 `.app-shell` 这个真实类名**（外壳容器）⇒ 变异 M216
+     * （把 `.app-root` 改成 `.app-shell`）**从此不再破坏任何东西** ⇒ **那条变异逃逸了**
+     * ⇒ 旧锁当时挡的是"类名不存在"，**挡不住"类名存在但指错了地方"**。
+     * ⇒ 现在改成：**目标类必须是根容器上真实带着的类** ⇒ 指错地方（哪怕那个类存在）照样红。
+     *
+     * 根容器带哪些类**现扫**（不写死第二份清单）：从渲染层源码里找 `className` 含 `app-root` 的那一处。
      */
     const gated = [...css.matchAll(/\[data-[a-z-]+='[^']*'\]\s+\.([a-z][a-z0-9-]*)/g)].map((m) => m[1] ?? '');
     // 防失焦：先确认真的扫到了这类规则（现在有 4 条），否则扫描写坏会空转通过
     expect(gated.length).toBeGreaterThan(0);
-    const sourcesText = sources.join('\n');
-    const orphan = [...new Set(gated)].filter((cls) => !sourcesText.includes(cls));
-    expect(orphan).toEqual([]);
+    // 根容器在渲染层源码里带哪些类（**现扫**，不写死第二份清单）
+    const rootClasses = new Set<string>();
+    for (const text of sources) {
+      for (const m of text.matchAll(/className\s*=\s*"([^"]*)"/g)) {
+        const classes = m[1].split(/\s+/).filter(Boolean);
+        if (classes.includes('app-root')) for (const c of classes) rootClasses.add(c);
+      }
+    }
+    expect(
+      rootClasses.size,
+      '渲染层源码里找不到带 `app-root` 的根容器（结构变了 ⇒ 这条锁的靶子没了 ⇒ 必须跟着改）',
+    ).toBeGreaterThan(0);
+    const notOnRoot = [...new Set(gated)].filter((cls) => !rootClasses.has(cls));
+    expect(
+      notOnRoot,
+      '这些被属性门控的样式指向的类**不在根容器上** ⇒ 背景会铺错地方（或铺不到）⇒ 主题包那三档会静默失效',
+    ).toEqual([]);
   });
 });
