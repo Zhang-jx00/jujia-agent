@@ -130,3 +130,32 @@ export function IconChevronDown(props: IconProps): ReactElement {
     </Glyph>
   );
 }
+
+/**
+ * 放大镜（R67 · 设置中心的搜索框）。
+ *
+ * 取自 Lucide 的 `search`（圆 + 斜柄）—— 与本模块其余图标同源、同许可、同形状约定。
+ */
+export function IconSearch(props: IconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.3-4.3" />
+    </Glyph>
+  );
+}
+
+/**
+ * 齿轮（R67 · 设置中心入口）。
+ *
+ * 取自 Lucide 的 `settings`（齿轮 + 中心圆）—— 与本模块其余图标同源、同许可、同形状约定。
+ * 为什么加它：设置入口在左栏底部，**一个齿轮比一行文字更像"入口"**（同类桌面工具都这么做）。
+ */
+export function IconGear(props: IconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </Glyph>
+  );
+}

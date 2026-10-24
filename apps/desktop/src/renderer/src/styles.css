@@ -121,15 +121,23 @@ body {
 
 .app-rail-foot {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   margin-top: auto;
-  padding: 10px 14px;
+  padding: 10px 8px 12px;
   border-top: 1px solid var(--border);
   font-size: var(--fs-caption);
   color: var(--c-text-secondary);
   white-space: nowrap;
   flex: 0 0 auto;
+}
+
+/* 版本 + 「本地优先」那一行（设置按钮下面） */
+.app-rail-foot > .app-rail-foot-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 4px;
 }
 
 .app-rail-foot-line {
@@ -149,6 +157,23 @@ body {
   flex: 1;
   min-width: 0;
   min-height: 0;
+}
+
+/*
+ * 正文容器（R67）：设置中心开着时它**被藏起来但不卸载**。
+ * ⚠️ `hidden` 属性（UA 样式表里的 `display:none`）会被作者样式的 `display:flex` **盖掉**
+ * ⇒ 必须显式写这条，否则"藏起来"根本藏不住（两页摞在一起）。
+ */
+.app-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.app-content[hidden] {
+  display: none;
 }
 
 .app-header {
@@ -241,6 +266,19 @@ body {
   border-color: var(--primary);
   color: var(--primary-ink);
   font-weight: 600;
+}
+
+/*
+ * ⚠️ **选中态必须压过 hover**（R67 的 e2e 当场抓到的）：
+ * `.app-tab:hover` 的特异性是 (0,2,0) ⇒ **比 `.app-tab-active` 的 (0,1,0) 高**
+ * ⇒ 鼠标停在**选中项**上时，它会退回"淡底 + 浅色字" ⇒ **看起来像没选中**
+ * （实测：字与底 1.09:1，选中态当场消失）。
+ * ⇒ 选中 + 悬停都必须是实心主色（下面这条 (0,2,0) 且写在后面 ⇒ 赢）。
+ */
+.app-tab-active:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
 }
 
 .app-tab-active .app-tab-badge {
@@ -455,6 +493,312 @@ button:disabled {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+/* ==================== 设置中心（R67） ==================== */
+
+/*
+ * 形态：**整页覆盖主区**（左导航 + 右侧内容），不是页签、不是弹窗。
+ * 左栏保持可见（设置中心只占主区）⇒ 用户在设置与应用之间来回切时**不用先关窗口**。
+ */
+.jj-settings {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.jj-settings-nav {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 220px;
+  width: 220px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 10px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-container);
+}
+
+.jj-settings-back {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--fs-body);
+  text-align: left;
+}
+
+.jj-settings-back:hover {
+  color: var(--text);
+  background: var(--c-overlay-faint);
+}
+
+/* 搜索框是**真的**（按设置名过滤左导航），不是摆设 */
+.jj-settings-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--c-bg-input);
+  color: var(--c-text-secondary);
+}
+
+.jj-settings-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+
+.jj-settings-group {
+  margin-top: 10px;
+}
+
+.jj-settings-group-title {
+  padding: 4px 8px;
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--c-text-secondary);
+}
+
+.jj-settings-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--fs-body);
+  text-align: left;
+}
+
+.jj-settings-item:hover {
+  color: var(--text);
+  background: var(--c-overlay-faint);
+}
+
+/* 选中态与左栏同一套（实心主色 + 反色字 ⇒ 与栏底的对比度过 3:1） */
+.jj-settings-item-on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+/* 同款：选中态必须压过 hover（同 `.app-tab-active:hover` 那条的理由） */
+.jj-settings-item-on:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
+}
+
+.jj-settings-empty {
+  padding: 8px;
+}
+
+.jj-settings-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.jj-settings-head {
+  padding: 16px 24px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.jj-settings-title {
+  margin: 0;
+  font-size: var(--fs-heading);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.jj-settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 24px 28px;
+}
+
+/* ---------------- 设置项：一行一条 ---------------- */
+
+.jj-set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.jj-set-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.jj-set-row-title {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.jj-set-row-hint {
+  font-size: var(--fs-small);
+  color: var(--c-text-secondary);
+}
+
+.jj-set-row-control {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 整行铺开的那一格（控件在标题下面）—— 给"样式包"这种多控件的行 */
+.jj-set-row-wide {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.jj-set-row-wide .jj-set-row-control {
+  width: 100%;
+}
+
+/*
+ * 设置项右侧的控件（统一成"深底 + 描边"的一族）。
+ * 为什么单独写：通用输入框样式都挂在 `.jj-field` 下面（那是**表单网格**的类），
+ * 而设置项的控件在 `.jj-set-row-control` 里 ⇒ 不给样式就会退回 Chromium 出厂默认。
+ */
+.jj-set-row-control select,
+.jj-set-row-control input[type='text'] {
+  min-height: 32px;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--c-bg-input);
+  color: var(--text);
+  font-size: var(--fs-small);
+}
+
+.jj-set-row-control input[type='range'] {
+  width: 160px;
+  min-height: 32px;
+  accent-color: var(--c-primary);
+}
+
+.jj-set-row-control input[type='color'] {
+  width: 56px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--c-bg-input);
+}
+
+/* ---------------- 开关（设置项里的开关控件） ---------------- */
+
+/*
+ * 为什么用开关而不是裸 checkbox：裸 checkbox 只有 **13×13** ⇒ 用户实际能点到的那一小块太小
+ * （T78 的口径：原生控件判**关联 label**）⇒ 做成 44×24 的开关，
+ * 既解决了可点区域，也与设置页的通行做法一致。
+ */
+.jj-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 44px;
+  height: 24px;
+  flex: 0 0 44px;
+  cursor: pointer;
+}
+
+.jj-switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.jj-switch-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--c-bg-elevated);
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.jj-switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--c-text-secondary);
+  transition:
+    transform var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.jj-switch:has(input:checked) .jj-switch-track {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.jj-switch:has(input:checked) .jj-switch-track::after {
+  transform: translateX(20px);
+  background: var(--primary-ink);
+}
+
+/* ---------------- 左栏底部的设置入口 ---------------- */
+
+.jj-rail-settings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--fs-body);
+  text-align: left;
+}
+
+.jj-rail-settings:hover {
+  color: var(--text);
+  border-color: var(--primary);
 }
 
 /* ------------------------------ 对话 ------------------------------ */
@@ -1117,22 +1461,12 @@ summary:focus-visible {
   color: var(--c-text-secondary);
 }
 
-.jj-field-wide {
-  grid-column: 1 / -1;
-}
-
-.jj-grid {
-  display: grid;
-  /* T84（2026-10-22）：列最小宽 180 → **160px** —— 窄窗口（内宽 ≤1025）下这一组 5 个字段
-     只排得下 4 列 ⇒ 最后一项（「显示时间戳」）**独占第二行**（top 差 69px）⇒ 像"被甩下去"。
-     160px 时 873px 宽装得下 5 列（5×160 + 4×12 = 848 ≤ 873）⇒ 五个同排。
-     改的是**共享类**，但现扫确认它**全仓只有 2 处、且都在外观页** ⇒ 不牵动别的面板。
-     R66（主界面两栏化）：左栏让出 160px ⇒ 主区在最小窗口（940px）下只剩约 715px ⇒
-     160px 的列下限会让这 5 个字段掉成 4+1（正是 T84 要消灭的那个形态）⇒ 列下限 160 → **120px**
-     （5×120 + 4×12 = 648 ≤ 715 ⇒ 仍然五个同排）。改的仍是**同一个共享类**，覆盖面不变。 */
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: var(--space-md);
-}
+/*
+ * R67：外观页改成**一行一条**（`SettingRow`）⇒ `.jj-grid`（表单网格）与 `.jj-field-wide`
+ * （网格里占满一行）在渲染层**已经没人用**了 ⇒ 留着就是**死样式**
+ * （下一个人会以为还有人在用）⇒ 本轮一并删掉。
+ * （`.jj-field` 本身还在用：浏览器页 / 文档页 / MCP 页。）
+ */
 
 .jj-field input[type='text'],
 .jj-field select,

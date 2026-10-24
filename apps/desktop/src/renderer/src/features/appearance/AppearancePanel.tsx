@@ -15,6 +15,7 @@ import {
   type ThemePack,
 } from '@jujia/ui-tokens';
 import { IconTriangleAlert } from '../../ui/icons';
+import { SettingRow } from '../settings/SettingRow';
 import { applyThemeVars } from './theme-vars';
 
 /**
@@ -200,17 +201,19 @@ export function AppearancePanel({ pack, onSave }: AppearancePanelProps): ReactEl
 
   return (
     <section className="jj-appearance">
+      {/*
+        标题由**设置中心**给（那一页已经写着「外观」）⇒ 这里只留一句说明，
+        不重复一个同名的大标题（两个「外观」摞在一起 = 界面上没想清楚层级）。
+      */}
       <header className="jj-appearance-head">
-        <h2>外观</h2>
         <p className="p0-subtitle">
           对话框样式与背景可自由调整。<strong>样式包只允许受控字段</strong>
           （枚举与范围内数值）——不接受任意 CSS，避免把安全口子开在"可定制"上。
         </p>
       </header>
 
-      {/* ---------------- 样式包 ---------------- */}
-      <div className="jj-field">
-        <label>样式包</label>
+      {/* ---------------- 样式包（一整行：4 个预设） ---------------- */}
+      <SettingRow title="样式包" hint="内置的几套配色与气泡样式；换一套立刻在界面上生效">
         <div className="jj-pack-list">
           {BUILTIN_PACKS.map((p) => (
             <button
@@ -224,73 +227,78 @@ export function AppearancePanel({ pack, onSave }: AppearancePanelProps): ReactEl
             </button>
           ))}
         </div>
-      </div>
+      </SettingRow>
 
       {/* ---------------- 对话框样式 ---------------- */}
-      <div className="jj-grid">
-        <div className="jj-field">
-          <label htmlFor="jj-bubble-shape">气泡形状</label>
-          <select
-            id="jj-bubble-shape"
-            value={draft.dialog.bubbleShape}
-            onChange={(e) => updateDialog({ bubbleShape: e.target.value as DialogStyle['bubbleShape'] })}
-          >
-            <option value="rounded">圆角</option>
-            <option value="square">直角</option>
-            <option value="pill">胶囊</option>
-            <option value="tail">带尾巴</option>
-          </select>
-        </div>
+      <SettingRow title="气泡形状" hint="对话气泡的轮廓" htmlFor="jj-bubble-shape">
+        <select
+          id="jj-bubble-shape"
+          value={draft.dialog.bubbleShape}
+          onChange={(e) => updateDialog({ bubbleShape: e.target.value as DialogStyle['bubbleShape'] })}
+        >
+          <option value="rounded">圆角</option>
+          <option value="square">直角</option>
+          <option value="pill">胶囊</option>
+          <option value="tail">带尾巴</option>
+        </select>
+      </SettingRow>
 
-        <div className="jj-field">
-          <label htmlFor="jj-density">密度</label>
-          <select
-            id="jj-density"
-            value={draft.dialog.density}
-            onChange={(e) => updateDialog({ density: e.target.value as DialogStyle['density'] })}
-          >
-            <option value="comfortable">舒适</option>
-            <option value="compact">紧凑</option>
-          </select>
-        </div>
+      <SettingRow title="信息密度" hint="行距与内边距的松紧" htmlFor="jj-density">
+        <select
+          id="jj-density"
+          value={draft.dialog.density}
+          onChange={(e) => updateDialog({ density: e.target.value as DialogStyle['density'] })}
+        >
+          <option value="comfortable">舒适</option>
+          <option value="compact">紧凑</option>
+        </select>
+      </SettingRow>
 
-        <div className="jj-field">
-          <label htmlFor="jj-radius">圆角 {draft.dialog.radiusPx}px</label>
+      <SettingRow title="气泡圆角" hint={`当前 ${String(draft.dialog.radiusPx)}px`} htmlFor="jj-radius">
+        <input
+          id="jj-radius"
+          type="range"
+          min={0}
+          max={32}
+          value={draft.dialog.radiusPx}
+          onChange={(e) => updateDialog({ radiusPx: Number(e.target.value) })}
+        />
+      </SettingRow>
+
+      <SettingRow
+        title="气泡最大宽度"
+        hint={`当前 ${String(draft.dialog.maxBubbleWidthPct)}%`}
+        htmlFor="jj-width"
+      >
+        <input
+          id="jj-width"
+          type="range"
+          min={40}
+          max={100}
+          value={draft.dialog.maxBubbleWidthPct}
+          onChange={(e) => updateDialog({ maxBubbleWidthPct: Number(e.target.value) })}
+        />
+      </SettingRow>
+
+      <SettingRow title="显示时间戳" hint="每条消息旁边标出时间" htmlFor="jj-timestamp">
+        {/*
+          用**开关**而不是裸 checkbox（R67 的 e2e 当场抓到的）：裸 checkbox 只有 13×13
+          ⇒ 用户实际能点到的那一小块太小（T78 同款口径：原生控件判**关联 label**）
+          ⇒ 改成开关（44×24 的可点区域，视觉上也与设置页的通行做法一致）。
+        */}
+        <label className="jj-switch" htmlFor="jj-timestamp">
           <input
-            id="jj-radius"
-            type="range"
-            min={0}
-            max={32}
-            value={draft.dialog.radiusPx}
-            onChange={(e) => updateDialog({ radiusPx: Number(e.target.value) })}
-          />
-        </div>
-
-        <div className="jj-field">
-          <label htmlFor="jj-width">气泡最大宽度 {draft.dialog.maxBubbleWidthPct}%</label>
-          <input
-            id="jj-width"
-            type="range"
-            min={40}
-            max={100}
-            value={draft.dialog.maxBubbleWidthPct}
-            onChange={(e) => updateDialog({ maxBubbleWidthPct: Number(e.target.value) })}
-          />
-        </div>
-
-        <label className="jj-check">
-          <input
+            id="jj-timestamp"
             type="checkbox"
             checked={draft.dialog.showTimestamp}
             onChange={(e) => updateDialog({ showTimestamp: e.target.checked })}
           />
-          显示时间戳
+          <span className="jj-switch-track" aria-hidden="true" />
         </label>
-      </div>
+      </SettingRow>
 
       {/* ---------------- 背景 ---------------- */}
-      <div className="jj-field">
-        <label>背景</label>
+      <SettingRow title="背景类型" hint="纯色 / 渐变 / 图片 / 毛玻璃">
         <div className="jj-kind-row">
           {BACKGROUND_KINDS.map((k) => (
             <button
@@ -303,90 +311,91 @@ export function AppearancePanel({ pack, onSave }: AppearancePanelProps): ReactEl
             </button>
           ))}
         </div>
-        {draft.background.kind === 'glass' && reducedTransparency && (
-          <p className="p0-subtitle" data-reduced-transparency="true">
-            你的系统开着「减少透明」⇒ **毛玻璃这个包在这台机器上会用不透明底代替**（不是应用坏了，是系统的偏好；关掉那个偏好就能看到玻璃）。
-          </p>
-        )}
-      </div>
+      </SettingRow>
+      {draft.background.kind === 'glass' && reducedTransparency && (
+        <p className="p0-subtitle" data-reduced-transparency="true">
+          你的系统开着「减少透明」⇒ **毛玻璃这个包在这台机器上会用不透明底代替**（不是应用坏了，是系统的偏好；关掉那个偏好就能看到玻璃）。
+        </p>
+      )}
 
-      <div className="jj-grid">
-        {(draft.background.kind === 'solid' || draft.background.kind === 'glass') && (
-          <div className="jj-field">
-            <label htmlFor="jj-bg-color">背景色</label>
+      {(draft.background.kind === 'solid' || draft.background.kind === 'glass') && (
+        <SettingRow title="背景色" hint="窗口底色" htmlFor="jj-bg-color">
+          <input
+            id="jj-bg-color"
+            type="color"
+            value={draft.background.color ?? '#141414'}
+            onChange={(e) => updateBackground({ color: e.target.value })}
+          />
+        </SettingRow>
+      )}
+
+      {draft.background.kind === 'gradient' && (
+        <>
+          <SettingRow title="起始色" hint="渐变的上端颜色" htmlFor="jj-bg-from">
             <input
-              id="jj-bg-color"
+              id="jj-bg-from"
               type="color"
-              value={draft.background.color ?? '#141414'}
-              onChange={(e) => updateBackground({ color: e.target.value })}
+              value={draft.background.from ?? '#1b2440'}
+              onChange={(e) => updateBackground({ from: e.target.value })}
             />
-          </div>
-        )}
-
-        {draft.background.kind === 'gradient' && (
-          <>
-            <div className="jj-field">
-              <label htmlFor="jj-bg-from">起始色</label>
-              <input
-                id="jj-bg-from"
-                type="color"
-                value={draft.background.from ?? '#1b2440'}
-                onChange={(e) => updateBackground({ from: e.target.value })}
-              />
-            </div>
-            <div className="jj-field">
-              <label htmlFor="jj-bg-to">结束色</label>
-              <input
-                id="jj-bg-to"
-                type="color"
-                value={draft.background.to ?? '#0f1117'}
-                onChange={(e) => updateBackground({ to: e.target.value })}
-              />
-            </div>
-          </>
-        )}
-
-        {draft.background.kind === 'image' && (
-          <div className="jj-field jj-field-wide">
-            <label htmlFor="jj-bg-image">图片地址（仅 http(s) 或本机绝对路径）</label>
+          </SettingRow>
+          <SettingRow title="结束色" hint="渐变的下端颜色" htmlFor="jj-bg-to">
             <input
-              id="jj-bg-image"
-              type="text"
-              placeholder="https://… 或 D:\pics\bg.png"
-              value={draft.background.imageUrl ?? ''}
-              onChange={(e) => updateBackground({ imageUrl: e.target.value })}
+              id="jj-bg-to"
+              type="color"
+              value={draft.background.to ?? '#0f1117'}
+              onChange={(e) => updateBackground({ to: e.target.value })}
             />
-          </div>
-        )}
+          </SettingRow>
+        </>
+      )}
 
-        {draft.background.kind === 'glass' && (
-          <>
-            <div className="jj-field">
-              <label htmlFor="jj-bg-blur">模糊 {draft.background.blurPx ?? 0}px</label>
-              <input
-                id="jj-bg-blur"
-                type="range"
-                min={0}
-                max={40}
-                value={draft.background.blurPx ?? 0}
-                onChange={(e) => updateBackground({ blurPx: Number(e.target.value) })}
-              />
-            </div>
-            <div className="jj-field">
-              <label htmlFor="jj-bg-opacity">不透明度 {(draft.background.opacity ?? 1).toFixed(2)}</label>
-              <input
-                id="jj-bg-opacity"
-                type="range"
-                min={0}
-                max={1}
-                step={0.02}
-                value={draft.background.opacity ?? 1}
-                onChange={(e) => updateBackground({ opacity: Number(e.target.value) })}
-              />
-            </div>
-          </>
-        )}
-      </div>
+      {draft.background.kind === 'image' && (
+        <SettingRow
+          title="图片地址"
+          hint="仅 http(s) 或本机绝对路径"
+          htmlFor="jj-bg-image"
+          wide
+        >
+          <input
+            id="jj-bg-image"
+            type="text"
+            placeholder="https://… 或 D:\pics\bg.png"
+            value={draft.background.imageUrl ?? ''}
+            onChange={(e) => updateBackground({ imageUrl: e.target.value })}
+          />
+        </SettingRow>
+      )}
+
+      {draft.background.kind === 'glass' && (
+        <>
+          <SettingRow title="模糊" hint={`当前 ${String(draft.background.blurPx ?? 0)}px`} htmlFor="jj-bg-blur">
+            <input
+              id="jj-bg-blur"
+              type="range"
+              min={0}
+              max={40}
+              value={draft.background.blurPx ?? 0}
+              onChange={(e) => updateBackground({ blurPx: Number(e.target.value) })}
+            />
+          </SettingRow>
+          <SettingRow
+            title="不透明度"
+            hint={`当前 ${(draft.background.opacity ?? 1).toFixed(2)}`}
+            htmlFor="jj-bg-opacity"
+          >
+            <input
+              id="jj-bg-opacity"
+              type="range"
+              min={0}
+              max={1}
+              step={0.02}
+              value={draft.background.opacity ?? 1}
+              onChange={(e) => updateBackground({ opacity: Number(e.target.value) })}
+            />
+          </SettingRow>
+        </>
+      )}
 
       {/* ---------------- 对比度守护 ---------------- */}
       <div className={contrast.ok ? 'jj-note' : 'jj-note jj-note-warn'} role="status">

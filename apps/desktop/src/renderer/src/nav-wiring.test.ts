@@ -87,6 +87,24 @@ describe('左栏导航：选中态不许退化成淡底', () => {
     expect(block, '样式表里找不到 `.app-tab` 规则').not.toBe('');
     expect(block).toContain('white-space: nowrap');
   });
+
+  /**
+   * **选中态不许被 hover 吃掉**（R67 的 e2e 当场抓到的）。
+   *
+   * `.app-tab:hover` 的特异性是 (0,2,0) ⇒ **比 `.app-tab-active` 的 (0,1,0) 高**
+   * ⇒ 鼠标停在**选中项**上时，它会退回"淡底 + 浅色字" ⇒ **选中态当场消失**
+   * （实测：字与底 1.09:1 —— 那正是本文件上面那条"选中态不许退化成淡底"要防的形态）。
+   * ⇒ 修法：加一条 `.app-tab-active:hover` 的覆盖（(0,2,0) 且写在后面 ⇒ 赢）。
+   */
+  it('`.app-tab-active:hover` 必须存在且仍是实心主色（否则选中项一被悬停就"看起来没选中"）', () => {
+    const block = /^\.app-tab-active:hover \{[^}]*\}/m.exec(styles)?.[0] ?? '';
+    expect(
+      block,
+      '样式表里找不到 `.app-tab-active:hover` ⇒ 悬停会盖掉选中态（`.app-tab:hover` 特异性更高）',
+    ).not.toBe('');
+    expect(block, '选中 + 悬停时不是实心主色底').toMatch(/background:\s*var\(--primary\)/);
+    expect(block, '选中 + 悬停时字色没跟着主色走').toMatch(/color:\s*var\(--primary-ink\)/);
+  });
 });
 
 /**

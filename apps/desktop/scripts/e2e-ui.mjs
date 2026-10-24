@@ -879,6 +879,18 @@ try {
 
   const tabButton = (label) => win.locator('nav.app-tabs button', { hasText: label });
   /**
+   * 设置中心里的那一项（R67 · 设置中心）。
+   *
+   * 为什么脚本要多这一步：设置类面板（外观 / 权限规则 / 钩子 / 插件 / MCP）
+   * 全部收进了**设置中心**（整页覆盖主区 + 左导航分组），**左栏不再有那些入口**
+   * ⇒ 必须"先开设置中心、再点那一项"。
+   * ⇒ 左栏**保持可见** ⇒ 开着设置中心时也能继续点左栏（点左栏会自动把设置中心收起来）。
+   */
+  const openSetting = async (w, label) => {
+    await w.locator('.jj-rail-settings').click();
+    await w.locator('.jj-settings-item', { hasText: label }).first().click();
+  };
+  /**
    * 轮询等待界面出现某段文本。
    * 为什么不用固定 sleep：界面数据来自异步 IPC，固定等待要么偶发失败要么白等；
    * 轮询既能快速通过也能在真的出不来时给出明确失败（附超时原因）。
@@ -918,7 +930,7 @@ try {
   ok('数据目录已隔离到临时目录');
 
   step('插件页：应识别出预置的 my-team 插件与它贡献的技能目录');
-  await tabButton('插件').click();
+  await openSetting(win, '插件');
   const pluginsReady = await waitForText('已加载');
   if (pluginsReady !== true) fail('插件页没有加载出汇总文本', String(pluginsReady).slice(0, 800));
   const plugins = await bodyText();
@@ -994,7 +1006,7 @@ try {
   ok('错误信息列出了可用技能');
 
   step('权限页：新增一条规则（填表单 + 点按钮，全自动）');
-  await tabButton('权限').click();
+  await openSetting(win, '权限');
   await win.locator('.jj-perm-form input').first().waitFor({ timeout: 8_000 });
   await win.locator('.jj-perm-form input').first().fill('mcp__*');
   await win.locator('.jj-perm-form select').selectOption('deny');
@@ -1023,7 +1035,7 @@ try {
   ok('规则已删除');
 
   step('钩子页：七类事件都在，且默认关闭');
-  await tabButton('钩子').click();
+  await openSetting(win, '钩子');
   const hooksReady = await waitForText('SessionStart');
   if (hooksReady !== true) fail('钩子页没有加载出事件表', String(hooksReady).slice(0, 800));
   const hooks = await bodyText();
@@ -1034,7 +1046,7 @@ try {
   ok('七类事件齐全，默认关闭');
 
   step('MCP 页：新增表单与列表可用');
-  await tabButton('MCP').click();
+  await openSetting(win, 'MCP');
   const mcpReady = await waitForText('新增服务端');
   if (mcpReady !== true) fail('MCP 页没有加载出新增表单', String(mcpReady).slice(0, 800));
   const mcp = await bodyText();
@@ -2015,7 +2027,7 @@ try {
   step('钩子配置：改一次问一次、拒绝不落盘、批准才落盘、批准也不外溢到下一次');
   const hooksFile = join(dataDir, 'hooks.json');
   const saveHooksFromEditor = async (text) => {
-    await win2.locator('nav.app-tabs button', { hasText: '钩子' }).first().click();
+    await openSetting(win2, '钩子');
     await fillHooksEditor(win2, text);
     await win2.locator('button', { hasText: '保存并校验' }).first().click();
   };
@@ -3459,7 +3471,7 @@ try {
    * - 没命中前缀 → 必须**照常弹**（规则窄了不等于放行松了）。
    */
   step('M4 收尾：命令前缀只拦它说的那条命令（拦下时不弹窗，没拦下的照常问人）');
-  await win3.locator('nav.app-tabs button', { hasText: '权限' }).first().click();
+  await openSetting(win3, '权限');
   await win3.locator('.jj-perm-form input').first().waitFor({ timeout: 8_000 });
   await win3.locator('.jj-perm-form input').first().fill('run_command');
   await win3.locator('.jj-perm-form select').selectOption('deny');
@@ -3504,7 +3516,7 @@ try {
     fail(`前缀管到了它没说的那条命令：${JSON.stringify(notCoveredRes).slice(0, 300)}`);
   }
 
-  await win3.locator('nav.app-tabs button', { hasText: '权限' }).first().click();
+  await openSetting(win3, '权限');
   await win3.getByRole('button', { name: '删除' }).first().click();
   let rowsAfterDelete = 1;
   for (let i = 0; i < 40 && rowsAfterDelete !== 0; i += 1) {
@@ -3535,7 +3547,7 @@ try {
   const writeRes = await writeProbe;
   if (writeRes.ok !== true) fail(`写入没成功，审计断言随之失真：${JSON.stringify(writeRes).slice(0, 300)}`);
 
-  await win3.locator('nav.app-tabs button', { hasText: '权限' }).first().click();
+  await openSetting(win3, '权限');
   if ((await waitText3('执行审计（今天）', 8_000)) !== true) {
     fail('权限页没有执行审计这一卡', await body3());
   }
@@ -3866,7 +3878,7 @@ try {
   ok('展开用真实高度的轨道过渡（transition-property 含 grid-template-rows）；箭头同元素转 180°（矩阵为负单位阵）；收起态内容 inert');
 
   step('主题包的背景类型真的落在画面上：选「柔和渐变」根容器上出现渐变、选「毛玻璃」出现模糊（R20 修的静默失效）');
-  await win3.locator('nav.app-tabs button', { hasText: '外观' }).first().click();
+  await openSetting(win3, '外观');
   if ((await waitText3('样式包', 8_000)) !== true) fail('外观页没有样式包区块', await body3());
   /**
    * **⑧② `.jj-btn` 那一族的命中区**（R54 · **变异当场照出来的失焦**，补在这一步）。
@@ -4528,7 +4540,7 @@ try {
    * 红在判据写法而不是产品，这条如实记进复核 085。
    */
   const saveHooks4 = async (text) => {
-    await win4.locator('nav.app-tabs button', { hasText: '钩子' }).first().click();
+    await openSetting(win4, '钩子');
     await fillHooksEditor(win4, text);
     await win4.locator('button', { hasText: '保存并校验' }).first().click();
   };
@@ -4879,33 +4891,121 @@ try {
     };
   });
   /**
-   * T84（2026-10-22）：**窄窗口下外观页那 5 个字段不许掉行**。
+   * ⑧ 之三（R67 · 设置中心）：**设置项必须"一行一条"**，且**控件在右、标题在左**。
    *
-   * 实测：内宽 1025 时 `.jj-grid` 只排得下 4 列 ⇒ 第 5 项（「显示时间戳」）**独占第二行**
-   * （top 差 69px）⇒ 观感上"最后一项被甩下去了"。
-   * 修法：列最小宽 180 → **160px**（`auto-fit` 的最小列宽）⇒ 873px 宽装得下 5 列（5×160 + 4×12 = 848 ≤ 873）。
-   * 改的是**共享类** `.jj-grid` —— 现扫确认它**全仓只有 2 处、且都在外观页** ⇒ 不牵动别的面板。
+   * 为什么换了判据（不是"改判据让它绿"）：R64 那条量的是"外观页那 5 个字段**不许掉成 4+1**"
+   * —— 它锁的是**表单网格**的排版事实。R67 把外观页改成**一行一条**（标题 + 说明 + 右侧控件）
+   * ⇒ 那 5 个字段**不再并排**，它们**各占一行** ⇒ "5 个字段排成几行"这件事**不再存在**
+   * ⇒ 旧判据量的对象没了（而且它会**失焦**：`.jj-grid` 已经不存在 ⇒ 量到 0 行 ⇒ 恒绿）。
    *
-   * **判据量的是真窗口里排出来的行数**（不是 CSS 里的数字）—— 声明层说"改了"不算数，**排出来才是**。
+   * ⇒ 换成**新形态的同一条纪律**（这才是它真正想防的）：
+   *   ① 每个设置项**独占一行**（不许并排 —— 并排就退回表单了）；
+   *   ② **控件在标题右侧**（`control.left ≥ title.right` —— 控件跑到左边 = 布局反了）；
+   *   ③ 每一行都有**一句说明**（`.jj-set-row-hint`）—— 只有标题没有说明 ⇒ 用户看不出"改了会怎样"；
+   *   ④ **控件的命中区**：按钮族 ≥ **32×32**；**原生控件**判**「用户实际能点到的那块」**
+   *      （= 控件本身，或它关联的 label，取大的那个）≥ **24×24**（WCAG 2.5.8 · 本仓 T78 同款口径）
+   *      ⇒ 裸 checkbox（13×13）就是靠这条被判下来的 ⇒ 改成了 44×24 的开关。
+   *
+   * 量的是**真窗口里排出来的结果**（getBoundingClientRect），不是 CSS 里的数字。
    */
-  await live.locator('nav.app-tabs button', { hasText: '外观' }).first().click();
-  const narrowGrid = await live.evaluate(() => {
-    let rows = 0;
-    for (const g of [...document.querySelectorAll('.jj-grid')]) {
-      const kids = [...g.children].filter((el) => el.getBoundingClientRect().width > 0);
-      if (kids.length < 5) continue; // 只看那组 5 个字段
-      const tops = new Set(kids.map((el) => Math.round(el.getBoundingClientRect().top)));
-      rows = Math.max(rows, tops.size);
+  await openSetting(live, '外观');
+  const setRows = await live.evaluate(() => {
+    const rows = [...document.querySelectorAll('.jj-set-row')].filter(
+      (el) => el.getBoundingClientRect().width > 0,
+    );
+    const tops = new Set(rows.map((el) => Math.round(el.getBoundingClientRect().top)));
+    let controlLeftOfTitle = 0;
+    let missingHint = 0;
+    const minButton = { w: Infinity, h: Infinity };
+    const minNative = { w: Infinity, h: Infinity };
+    for (const el of rows) {
+      const title = el.querySelector('.jj-set-row-title');
+      const control = el.querySelector('.jj-set-row-control');
+      const hint = el.querySelector('.jj-set-row-hint');
+      if (hint === null) missingHint += 1;
+      if (title === null || control === null) continue;
+      const t = title.getBoundingClientRect();
+      const c = control.getBoundingClientRect();
+      if (c.left < t.right - 1) controlLeftOfTitle += 1;
+      for (const el2 of control.querySelectorAll('button, input, select, textarea')) {
+        const r = el2.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        if (el2.tagName === 'BUTTON') {
+          minButton.w = Math.min(minButton.w, r.width);
+          minButton.h = Math.min(minButton.h, r.height);
+          continue;
+        }
+        // 原生控件：**判「用户实际能点到的那块」**（控件本身或它关联的 label，取大的）
+        let w = r.width;
+        let h = r.height;
+        const lab = el2.closest('label');
+        if (lab !== null) {
+          const lr = lab.getBoundingClientRect();
+          w = Math.max(w, lr.width);
+          h = Math.max(h, lr.height);
+        }
+        minNative.w = Math.min(minNative.w, w);
+        minNative.h = Math.min(minNative.h, h);
+      }
     }
-    return { rows };
+    const round = (o) => ({ w: Math.round(o.w * 100) / 100, h: Math.round(o.h * 100) / 100 });
+    return {
+      rowCount: rows.length,
+      distinctTops: tops.size,
+      controlLeftOfTitle,
+      missingHint,
+      minButton: round(minButton),
+      minNative: round(minNative),
+    };
   });
   await live.locator('nav.app-tabs button', { hasText: '画布' }).first().click();
-  if (narrowGrid.rows > 1) {
+  if (setRows.rowCount === 0) {
+    fail('渲染契约：外观页一个设置项都没量到（锁失焦了 —— 量不到东西的锁会一直绿）', JSON.stringify(setRows));
+  }
+  if (setRows.distinctTops !== setRows.rowCount) {
     fail(
-      '渲染契约：窄窗口（940px）下外观页那 5 个字段掉成了 ' +
-        String(narrowGrid.rows) +
-        ' 行（最后一项被甩到第二行去了）',
-      JSON.stringify(narrowGrid),
+      '渲染契约：设置项没有"一行一条"（' +
+        String(setRows.rowCount) +
+        ' 项只排了 ' +
+        String(setRows.distinctTops) +
+        ' 行 ⇒ 有并排的）',
+      JSON.stringify(setRows),
+    );
+  }
+  if (setRows.controlLeftOfTitle > 0) {
+    fail(
+      '渲染契约：有 ' +
+        String(setRows.controlLeftOfTitle) +
+        ' 项的控件跑到了标题左边（一行一条 = 标题在左、控件在右）',
+      JSON.stringify(setRows),
+    );
+  }
+  if (setRows.missingHint > 0) {
+    fail(
+      '渲染契约：有 ' +
+        String(setRows.missingHint) +
+        ' 项没有一句说明（只有标题 = 用户看不出改了会怎样）',
+      JSON.stringify(setRows),
+    );
+  }
+  if (setRows.minButton.w < 32 || setRows.minButton.h < 32) {
+    fail(
+      '渲染契约：设置项里的**按钮**命中区只有 ' +
+        String(setRows.minButton.w) +
+        '×' +
+        String(setRows.minButton.h) +
+        '（下限 32×32）',
+      JSON.stringify(setRows),
+    );
+  }
+  if (setRows.minNative.w < 24 || setRows.minNative.h < 24) {
+    fail(
+      '渲染契约：设置项里的**原生控件**实际能点到的那块只有 ' +
+        String(setRows.minNative.w) +
+        '×' +
+        String(setRows.minNative.h) +
+        '（下限 24×24 · WCAG 2.5.8）',
+      JSON.stringify(setRows),
     );
   }
   if (beforeSize !== null) {
@@ -5344,8 +5444,19 @@ try {
    */
   step('T78 命中区：四族各自达标（每族单独判）');
   {
-    const measureIn = async (tabText, sel) => {
-      await live.locator('nav.app-tabs button', { hasText: tabText }).first().click();
+    /**
+     * 去哪一页量：`via` = 'rail'（左栏）或 'settings'（**设置中心**）。
+     *
+     * 为什么要有第二种（R67）：权限规则 / 外观这两页**已经搬进设置中心**了 ⇒
+     * 左栏里**没有**那两个入口 ⇒ 还按老路数点左栏 ⇒ 定位器等不到（30s 超时）。
+     * ⇒ 搬家的连带面，脚本这一侧也要跟着搬。
+     */
+    const measureIn = async (tabText, sel, via = 'rail') => {
+      if (via === 'settings') {
+        await openSetting(live, tabText);
+      } else {
+        await live.locator('nav.app-tabs button', { hasText: tabText }).first().click();
+      }
       await live.waitForTimeout(400);
       return live.evaluate((s) => {
         const out = [];
@@ -5386,7 +5497,7 @@ try {
     }
 
     // ② 原生 radio/checkbox 族（权限页）—— 尺子：关联 label ≥24 高，且**必须**有 label
-    const natives = await measureIn('权限', 'input[type="radio"], input[type="checkbox"]');
+    const natives = await measureIn('权限', 'input[type="radio"], input[type="checkbox"]', 'settings');
     if (natives.length === 0) {
       fail('T78 ②：权限页一个原生控件都没量到（锁失焦了 —— 量不到东西的锁会一直绿）');
     }
@@ -5422,7 +5533,7 @@ try {
     }
 
     // ④ <summary> 族（外观页）—— 尺子：同 ③（实测 19.2 ⇒ 已修到 24）
-    const sums = await measureIn('外观', 'summary');
+    const sums = await measureIn('外观', 'summary', 'settings');
     if (sums.length === 0) {
       fail('T78 ④：外观页一个 summary 都没量到（锁失焦了 —— 量不到东西的锁会一直绿）');
     }
@@ -5438,6 +5549,101 @@ try {
         `（${String(chips.length)} 个）· summary ≥ ${String(sumMin.h)} 高（${String(sums.length)} 个）`,
     );
   }
+
+  /**
+   * ⑪ **设置中心**（R67）：整页覆盖主区 + 左导航分组 + 搜索框**真的**能筛 + 能回应用。
+   *
+   * 为什么单立一步：设置中心是**新的外壳形态**（不是页签）⇒ 它的"整页 / 分组 / 可回退"
+   * 三件事都**只在渲染层能验**，源码里看不出来（类名都在，结构错了也一样编译得过）。
+   *
+   * 四条判据（每条都有下限）：
+   *   ① 打开设置中心后，**正文看不见**（`.app-header` / `.app-body` 的盒子宽度为 0）
+   *      ⇒ 这就是"整页覆盖"；
+   *      ⚠️ 判的是**可见性**而不是"不在 DOM 里"—— 正文是**藏起来**不是**拆掉**的
+   *      （拆掉会把对话页一起卸载 ⇒ 会话与在飞的流全丢，T22 报备的"常驻"就没了）。
+   *   ② 左导航**至少 3 个分组**、**至少 5 项**（设置项不许挤成一坨）；
+   *   ③ 搜索框**真的**能筛（输入一个名字 ⇒ 只剩那一项）—— 摆设的搜索框会让"找不到设置"变成死路；
+   *   ④ 「返回应用」**真的**回到主界面（正文重新看得见）。
+   */
+  step('设置中心：整页覆盖主区 + 左导航分组 + 搜索能筛 + 能回应用');
+  await live.locator('.jj-rail-settings').click();
+  await live.waitForSelector('.jj-settings', { timeout: 10_000 });
+  const settingsShape = await live.evaluate(() => {
+    const nav = document.querySelector('.jj-settings-nav');
+    const groups = nav ? [...nav.querySelectorAll('.jj-settings-group')] : [];
+    const items = nav ? [...nav.querySelectorAll('.jj-settings-item')] : [];
+    const visible = (sel) => {
+      const el = document.querySelector(sel);
+      if (el === null) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    return {
+      groups: groups.length,
+      items: items.length,
+      groupTitles: groups.map((g) => {
+        const t = g.querySelector('.jj-settings-group-title');
+        return t === null ? '' : (t.textContent ?? '').trim();
+      }),
+      headerVisible: visible('.app-header'),
+      bodyVisible: visible('.app-body'),
+      railStillThere: visible('.app-rail'),
+    };
+  });
+  if (settingsShape.headerVisible !== false || settingsShape.bodyVisible !== false) {
+    fail(
+      '渲染契约：设置中心不是**整页覆盖**（正文还看得见 ⇒ 它只是盖了一层，不是整页）',
+      JSON.stringify(settingsShape),
+    );
+  }
+  if (settingsShape.groups < 3 || settingsShape.items < 5) {
+    fail(
+      '渲染契约：设置中心的左导航太空（' +
+        String(settingsShape.groups) +
+        ' 组 / ' +
+        String(settingsShape.items) +
+        ' 项；下限 3 组 / 5 项）',
+      JSON.stringify(settingsShape),
+    );
+  }
+  // 搜索框是**真的**：筛一遍，只该剩那一项
+  const searchBox = live.locator('.jj-settings-search input');
+  await searchBox.fill('钩子');
+  await live.waitForTimeout(200);
+  const afterSearch = await live.evaluate(() => {
+    const items = [...document.querySelectorAll('.jj-settings-item')];
+    return { items: items.length, labels: items.map((i) => (i.textContent ?? '').trim()) };
+  });
+  if (afterSearch.items !== 1 || !afterSearch.labels[0]?.includes('钩子')) {
+    fail(
+      '渲染契约：设置中心的搜索框不真筛（筛「钩子」后剩 ' +
+        String(afterSearch.items) +
+        ' 项：' +
+        JSON.stringify(afterSearch.labels) +
+        '）',
+      JSON.stringify(afterSearch),
+    );
+  }
+  await searchBox.fill('');
+  await live.waitForTimeout(150);
+  // 「返回应用」要真的回得去
+  await live.locator('.jj-settings-back').click();
+  await live.waitForTimeout(300);
+  const closed = await live.evaluate(() => {
+    const body = document.querySelector('.app-body');
+    const r = body === null ? null : body.getBoundingClientRect();
+    return {
+      settingsGone: document.querySelector('.jj-settings') === null,
+      bodyBack: r !== null && r.width > 0 && r.height > 0,
+    };
+  });
+  if (closed.settingsGone !== true || closed.bodyBack !== true) {
+    fail('渲染契约：「返回应用」没有真的回到主界面', JSON.stringify(closed));
+  }
+  ok(
+    `设置中心：整页覆盖主区（${String(settingsShape.groups)} 组 / ${String(settingsShape.items)} 项）· ` +
+      `搜索能筛 · 能回应用 · 左栏一直在`,
+  );
 
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();

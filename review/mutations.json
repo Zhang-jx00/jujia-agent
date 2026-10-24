@@ -2661,11 +2661,11 @@
     },
     {
       "id": "M333",
-      "desc": "左栏分组里漏收一个入口（R66 · 主界面两栏化）：「外观」页在左栏里消失 ⇒ 界面上只表现为少一个按钮，没有任何门禁会红",
-      "file": "apps/desktop/src/renderer/src/nav.ts",
-      "find": "  { title: '扩展与规则', tabs: ['mcp', 'plugins', 'hooks', 'permissions', 'appearance'] },",
-      "replace": "  { title: '扩展与规则', tabs: ['mcp', 'plugins', 'hooks', 'permissions'] },",
-      "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
+      "desc": "设置中心的分组里漏收一项（M333 重新对准：R67 把这一组从左栏搬进设置中心 ⇒ 靶子跟着搬，内容一字未改）：「MCP」在左导航里点不到 ⇒ 界面上只表现为设置里少了一页，没有任何门禁会红",
+      "file": "apps/desktop/src/renderer/src/features/settings/settings-nav.ts",
+      "find": "  { title: '扩展', items: ['plugins', 'mcp'] },",
+      "replace": "  { title: '扩展', items: ['plugins'] },",
+      "test": "apps/desktop/src/renderer/src/features/settings/settings-wiring.test.ts"
     },
     {
       "id": "M334",
@@ -2689,6 +2689,31 @@
       "file": "apps/desktop/src/renderer/src/styles.css",
       "find": "  line-height: 1.5;\n  text-align: left;",
       "replace": "  text-align: left;",
+      "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
+    },
+
+    {
+      "id": "M337",
+      "desc": "App.tsx 又直接挂了一个设置类面板（R67 · 设置中心）：同一个目的地出现**第二处门**（改完设置回左栏发现还是旧的那页 ⇒ 以为没生效）",
+      "file": "apps/desktop/src/renderer/src/App.tsx",
+      "find": "import { NAV_GROUPS, TAB_LABEL } from './nav';",
+      "replace": "import { NAV_GROUPS, TAB_LABEL } from './nav';\nimport { AppearancePanel } from './features/appearance/AppearancePanel';",
+      "test": "apps/desktop/src/renderer/src/features/settings/settings-wiring.test.ts"
+    },
+    {
+      "id": "M338",
+      "desc": "正文不再被藏起来（R67 · 设置中心）：`hidden={settingsOpen}` 变成永远可见 ⇒ 设置中心与正文**摞在一起**；而对话页从此**会被卸载**（T22 报备的「常驻」没了）",
+      "file": "apps/desktop/src/renderer/src/App.tsx",
+      "find": "hidden={settingsOpen}",
+      "replace": "hidden={false}",
+      "test": "apps/desktop/src/renderer/src/features/settings/settings-wiring.test.ts"
+    },
+    {
+      "id": "M339",
+      "desc": "左栏选中态被 hover 吃掉（R67 · 主界面两栏化）：`.app-tab:hover`（0,2,0）压过 `.app-tab-active`（0,1,0）⇒ 鼠标停在选中项上时它退回淡底（字与底 1.09:1 ⇒ 看起来没选中）",
+      "file": "apps/desktop/src/renderer/src/styles.css",
+      "find": ".app-tab-active:hover {\n  background: var(--primary);\n  border-color: var(--primary);\n  color: var(--primary-ink);\n}\n",
+      "replace": "",
       "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
     }
   ]

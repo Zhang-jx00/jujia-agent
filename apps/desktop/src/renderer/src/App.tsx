@@ -16,7 +16,7 @@ import { UpdateCard } from './features/update/UpdateCard';
 import { PermissionDialog } from './features/permission/PermissionDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { KeepAlive } from './KeepAlive';
-import { IconTriangleAlert } from './ui/icons';
+import { IconGear, IconTriangleAlert } from './ui/icons';
 import { FailureNotices } from './ui/failure-notice';
 
 // 懒加载：连接页与对话页不在首屏，拆出去可显著减小初始 bundle（懒加载策略见 PERF-BUDGET）
@@ -29,25 +29,11 @@ const ChatPanel = lazy(() =>
 const MediaGenPanel = lazy(() =>
   import('./features/media/MediaGenPanel').then((m) => ({ default: m.MediaGenPanel })),
 );
-const AppearancePanel = lazy(() =>
-  import('./features/appearance/AppearancePanel').then((m) => ({ default: m.AppearancePanel })),
-);
 const TerminalPanel = lazy(() =>
   import('./features/terminal/TerminalPanel').then((m) => ({ default: m.TerminalPanel })),
 );
-const McpPanel = lazy(() =>
-  import('./features/mcp/McpPanel').then((m) => ({ default: m.McpPanel })),
-);
-const PluginsPanel = lazy(() =>
-  import('./features/plugins/PluginsPanel').then((m) => ({ default: m.PluginsPanel })),
-);
-const HooksPanel = lazy(() =>
-  import('./features/hooks/HooksPanel').then((m) => ({ default: m.HooksPanel })),
-);
-const PermissionRulesPanel = lazy(() =>
-  import('./features/permissions/PermissionRulesPanel').then((m) => ({
-    default: m.PermissionRulesPanel,
-  })),
+const SettingsCenter = lazy(() =>
+  import('./features/settings/SettingsCenter').then((m) => ({ default: m.SettingsCenter })),
 );
 const BrowserPanel = lazy(() =>
   import('./features/browser/BrowserPanel').then((m) => ({ default: m.BrowserPanel })),
@@ -123,6 +109,13 @@ export function App(): ReactElement {
    * 这样首屏完全不依赖 ui-tokens。
    */
   const [themePack, setThemePack] = useState<ThemePack | null>(null);
+  /**
+   * 设置中心开着没有（R67 · 设置中心）。
+   *
+   * 为什么是**外壳的一等状态**而不是又一个页签：设置是"整页覆盖主区"的那种界面
+   * （左导航分组 + 右侧内容），**左栏保持可见** ⇒ 用户在设置与应用之间来回切不用先关窗口。
+   */
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -216,7 +209,12 @@ export function App(): ReactElement {
                     type="button"
                     className={t === tab ? 'app-tab app-tab-active' : 'app-tab'}
                     aria-current={t === tab ? 'page' : undefined}
-                    onClick={() => setTab(t)}
+                    onClick={() => {
+                      setTab(t);
+                      // 点左栏的入口 = "我要去那一页" ⇒ **顺手把设置中心收起来**
+                      // （否则设置中心会一直占着主区，而用户已经换了目的地）。
+                      setSettingsOpen(false);
+                    }}
                   >
                     <span className="app-tab-text">{TAB_LABEL[t]}</span>
                     {t === 'connections' && connections.length > 0 ? (
@@ -229,87 +227,111 @@ export function App(): ReactElement {
           ))}
         </nav>
         <div className="app-rail-foot">
-          <span className="app-rail-foot-line">
-            {state.phase === 'ready' ? `v${state.loaded.info.version}` : 'v—'}
-          </span>
-          <span
-            className="app-rail-foot-line app-rail-foot-dim"
-            title={state.phase === 'ready' ? state.loaded.info.dataRoot : undefined}
+          {/*
+            设置入口（R67）：设置类面板全部收进**设置中心**（整页覆盖主区）⇒
+            左栏只留干活的入口（11 项）+ 这一个齿轮 ⇒ 同一个目的地只有一处门。
+          */}
+          <button
+            type="button"
+            className="jj-rail-settings jj-transition"
+            onClick={() => setSettingsOpen(true)}
           >
-            本地优先
-          </span>
+            <IconGear size={15} />
+            <span>设置</span>
+          </button>
+          <div className="app-rail-foot-line">
+            <span className="app-rail-foot-line">
+              {state.phase === 'ready' ? `v${state.loaded.info.version}` : 'v—'}
+            </span>
+            <span
+              className="app-rail-foot-line app-rail-foot-dim"
+              title={state.phase === 'ready' ? state.loaded.info.dataRoot : undefined}
+            >
+              本地优先
+            </span>
+          </div>
         </div>
       </aside>
 
       <div className="app-main">
-        <header className="app-header">
-          <h1 className="p0-title">{TAB_LABEL[tab]}</h1>
-          <div className="app-header-meta">
-            {connections.length > 0 ? `${String(connections.length)} 个连接` : '尚未配置连接'}
-          </div>
-        </header>
-
-        <main
-          className="app-body"
-          data-smoke={smokeMarker}
-          data-config-version={state.phase === 'ready' ? state.loaded.config.version : ''}
-          data-config-source={state.phase === 'ready' ? state.loaded.config.source : ''}
-        >
-          {state.phase === 'loading' && <p className="p0-subtitle">正在通过 IPC 读取运行时信息…</p>}
-          {state.phase === 'error' && <p className="p0-err">IPC 调用失败：{state.message}</p>}
-
-          {state.phase === 'ready' && tab === 'overview' && (
-            <Overview info={state.loaded.info} config={state.loaded.config} />
-          )}
-          {/*
-            对话页常驻（T22 报备 §二，批复①）：切页签只切可见性、**不卸载** ——
-            流订阅与面板自己那 24 个 state 都留着，所以"流式中切走再切回"能接回现有流。
-            首次激活前不挂载，所以首屏 chunk 与启动时间线不受影响（懒加载性质没丢）。
-            它用**自己的**错误边界与稳定 key：`key={tab}` 那套会把它重挂、状态照样丢。
-          */}
-          {state.phase === 'ready' && (
-            <KeepAlive active={tab === 'chat'}>
-              <ErrorBoundary key={`chat-${String(chatEpoch)}`} area={TAB_LABEL.chat} onError={markChatBroken}>
-                <Suspense fallback={PANEL_FALLBACK}>
-                  <ChatPanel connections={connections} active={tab === 'chat'} />
-                </Suspense>
-              </ErrorBoundary>
-            </KeepAlive>
-          )}
-          <ErrorBoundary key={tab} area={TAB_LABEL[tab]}>
+        {settingsOpen ? (
+          <ErrorBoundary key="settings" area="设置">
             <Suspense fallback={PANEL_FALLBACK}>
-            {state.phase === 'ready' && tab === 'connections' && (
-              <ConnectionsPanel onChanged={setConnections} />
-            )}
-            {/* 媒体生成 · 文生图（M11 剩余 · R51 · S1）：走当前连接，产物落本应用数据目录 */}
-            {state.phase === 'ready' && tab === 'media' && <MediaGenPanel connections={connections} />}
-            {state.phase === 'ready' && tab === 'terminal' && (
-              <TerminalPanel workspaceRoot={state.loaded.config.config.workspace} />
-            )}
-            {state.phase === 'ready' && tab === 'browser' && <BrowserPanel />}
-            {state.phase === 'ready' && tab === 'docs' && <DocPanel />}
-            {state.phase === 'ready' && tab === 'git' && <GitPanel />}
-            {state.phase === 'ready' && tab === 'ide' && <IdePanel />}
-            {state.phase === 'ready' && tab === 'canvas' && <CanvasPanel />}
-            {state.phase === 'ready' && tab === 'schedule' && <SchedulePanel />}
-            {state.phase === 'ready' && tab === 'mcp' && <McpPanel />}
-            {state.phase === 'ready' && tab === 'permissions' && <PermissionRulesPanel />}
-            {state.phase === 'ready' && tab === 'hooks' && <HooksPanel />}
-            {state.phase === 'ready' && tab === 'plugins' && <PluginsPanel />}
-            {state.phase === 'ready' && tab === 'appearance' && themePack !== null && (
-              <AppearancePanel
+              <SettingsCenter
                 pack={themePack}
-                onSave={async (pack) => {
+                onSavePack={async (pack) => {
                   await window.jujia.configSet({
                     appearance: { packId: pack.id, pack },
                   });
                   setThemePack(pack);
                 }}
+                onClose={() => setSettingsOpen(false)}
               />
-            )}
             </Suspense>
           </ErrorBoundary>
-        </main>
+        ) : null}
+        {/*
+          注意：**这一段不许被卸载**（R67 的 e2e 当场抓到的真回归）：
+          之前这里是「设置中心开 ⇒ 整段换成设置中心」的**条件分支** ⇒
+          打开设置中心会把**对话页一起卸载** ⇒ 它的会话、连接选择、在飞的流**全丢**
+          ⇒ 违反 T22 报备的「**对话页常驻**（切页签只切可见性、不卸载）」。
+          ⇒ 改法：设置中心与正文**并存**，正文用 `hidden` 藏起来（`display:none`，不卸载）。
+        */}
+        <div className="app-content" hidden={settingsOpen}>
+          <header className="app-header">
+            <h1 className="p0-title">{TAB_LABEL[tab]}</h1>
+            <div className="app-header-meta">
+              {connections.length > 0 ? `${String(connections.length)} 个连接` : '尚未配置连接'}
+            </div>
+          </header>
+
+          <main
+            className="app-body"
+            data-smoke={smokeMarker}
+            data-config-version={state.phase === 'ready' ? state.loaded.config.version : ''}
+            data-config-source={state.phase === 'ready' ? state.loaded.config.source : ''}
+          >
+            {state.phase === 'loading' && <p className="p0-subtitle">正在通过 IPC 读取运行时信息…</p>}
+            {state.phase === 'error' && <p className="p0-err">IPC 调用失败：{state.message}</p>}
+
+            {state.phase === 'ready' && tab === 'overview' && (
+              <Overview info={state.loaded.info} config={state.loaded.config} />
+            )}
+            {/*
+              对话页常驻（T22 报备 §二，批复①）：切页签只切可见性、**不卸载** ——
+              流订阅与面板自己那 24 个 state 都留着，所以"流式中切走再切回"能接回现有流。
+              首次激活前不挂载，所以首屏 chunk 与启动时间线不受影响（懒加载性质没丢）。
+              它用**自己的**错误边界与稳定 key：`key={tab}` 那套会把它重挂、状态照样丢。
+            */}
+            {state.phase === 'ready' && (
+              <KeepAlive active={tab === 'chat'}>
+                <ErrorBoundary key={`chat-${String(chatEpoch)}`} area={TAB_LABEL.chat} onError={markChatBroken}>
+                  <Suspense fallback={PANEL_FALLBACK}>
+                    <ChatPanel connections={connections} active={tab === 'chat'} />
+                  </Suspense>
+                </ErrorBoundary>
+              </KeepAlive>
+            )}
+            <ErrorBoundary key={tab} area={TAB_LABEL[tab]}>
+              <Suspense fallback={PANEL_FALLBACK}>
+              {state.phase === 'ready' && tab === 'connections' && (
+                <ConnectionsPanel onChanged={setConnections} />
+              )}
+              {/* 媒体生成 · 文生图（M11 剩余 · R51 · S1）：走当前连接，产物落本应用数据目录 */}
+              {state.phase === 'ready' && tab === 'media' && <MediaGenPanel connections={connections} />}
+              {state.phase === 'ready' && tab === 'terminal' && (
+                <TerminalPanel workspaceRoot={state.loaded.config.config.workspace} />
+              )}
+              {state.phase === 'ready' && tab === 'browser' && <BrowserPanel />}
+              {state.phase === 'ready' && tab === 'docs' && <DocPanel />}
+              {state.phase === 'ready' && tab === 'git' && <GitPanel />}
+              {state.phase === 'ready' && tab === 'ide' && <IdePanel />}
+              {state.phase === 'ready' && tab === 'canvas' && <CanvasPanel />}
+              {state.phase === 'ready' && tab === 'schedule' && <SchedulePanel />}
+              </Suspense>
+            </ErrorBoundary>
+          </main>
+        </div>
       </div>
 
       {/* 权限审批弹窗挂在最外层：任何页面触发的工具调用都能被审批 */}
