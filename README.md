@@ -16,7 +16,7 @@
 
 ## 界面一览
 
-截图取自 **`v1.26.0` 的打包产物**（不是设计稿，也不是开发态 —— 开发态的版本号会回落到 Electron 版本）。
+截图取自 **`v1.27.0` 的打包产物**（不是设计稿，也不是开发态 —— 开发态的版本号会回落到 Electron 版本）。
 数据目录与工作区都是**中性演示路径**（`D:\JujiaAgentDemo*`），拍完自动清场。
 **重拍一条命令**：`npm run screenshots`（离屏渲染，不弹窗口；产物与版本、提交、是否干净都记在
 [`docs/screenshots/manifest.json`](docs/screenshots/manifest.json) 里）：
