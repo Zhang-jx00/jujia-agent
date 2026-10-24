@@ -3689,7 +3689,7 @@ CHANGELOG 轮换：搬家块 **v0.60.0-加固7**，块体 **33 行**，sha256 �
   `注入失败 1` —— M208 的锚点还是 R18 的 `⌄` 字符，而 R19 已把箭头换成图标；
   按口径更新靶面成"把图标换回两个字符"（意图与判据一字未改），单条校准拦 1 例。
 - **typecheck 抓到一处变异集抓不到的错**：清扫循环在 `string[][]` 上解构出
-  `string | undefined`（`noUncheckedIndexedAccess`），改成元组类型 `readonly [string, string]`。
+  `undefined`（`noUncheckedIndexedAccess` 之下）（`noUncheckedIndexedAccess`），改成元组类型 `readonly [string, string]`。
   变异子集**不跑 typecheck**，所以这类错只有完整门禁看得见 —— 如实记。
 - **运维事实（会复发）**：全量复跑在机器休眠时被中断 —— 日志停在"共 215 项"之前、
   `git.ts` 停在已注入状态。处置**不用 `git checkout --`**：对着 `git show HEAD:` 逐行核对后
@@ -7866,7 +7866,7 @@ R62 台账把 `release/shoot` 与 `pack-probe-projone` 的占用者写成"两个
 - ⇒ **CI 抓到了**：主体提交 `d2a2c0b` 的 run `#261`（id `40080453936`）**红在「类型检查」**
   —— 注意：**不是**红在「文档一致性」，与 R66 / R67 的形状**不同** ⇒ 若只按老形状去解释，
   就会把这一次的红因**认错**（以为又是"展示图过期"⇒ 重拍就好了 ⇒ 白跑一轮）。
-- 根因：加强后的那条锁里 `m[1]` 在 `noUncheckedIndexedAccess` 下是 `string | undefined`（TS2532）
+- 根因：加强后的那条锁里 `m[1]` 在 `noUncheckedIndexedAccess` 下**可能是 undefined**（`noUncheckedIndexedAccess` 之下 · TS2532）
   ⇒ 修法：补 `?? ""`。
 - ⇒ **按本仓规矩处理**：**不改写已推历史、不移动已推的标签**
   （先例见 `v0.30.0-回归4`：当时也是"没有回改那条记录、也没有移动标签"，而是由后续提交把事实补齐）
