@@ -1,4 +1,4 @@
-import { LAUNCHER_ONLY_TABS, NAV_GROUPS, TAB_LABEL } from '../../nav';
+import { LAUNCHER_ONLY_TABS, NAV_GROUPS, TAB_ICON, TAB_LABEL } from '../../nav';
 import type { Tab } from '../../nav';
 
 /**
@@ -24,6 +24,8 @@ export interface AppCommand {
   readonly keywords: string;
   /** 清单里右侧那一列：一个**与显示名不同**的近义词（提示"还能这么搜"） */
   readonly hint: string;
+  /** 图标名（R69 · 左栏图标化：启动器与左栏用**同一枚**图标 ⇒ 同一个入口在两处长得一样） */
+  readonly icon: string;
   /** 落到哪个目的地 */
   readonly target: CommandTarget;
 }
@@ -70,6 +72,7 @@ function toCommand(tab: Tab, group: string): AppCommand {
     group,
     keywords: KEYWORDS[tab],
     hint: pickHint(label, KEYWORDS[tab]),
+    icon: TAB_ICON[tab],
     target: tab,
   };
 }
@@ -81,6 +84,7 @@ export const SETTINGS_COMMAND: AppCommand = {
   group: '设置',
   keywords: '设置 配置 外观 权限 钩子 插件 mcp settings preferences',
   hint: '配置',
+  icon: 'gear',
   target: 'settings',
 };
 

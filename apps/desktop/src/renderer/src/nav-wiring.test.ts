@@ -1,15 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { NAV_GROUPS, LAUNCHER_ONLY_TABS, TAB_LABEL } from './nav';
+import { NAV_GROUPS, LAUNCHER_ONLY_TABS, TAB_ICON, TAB_LABEL } from './nav';
 import type { Tab } from './nav';
+import { ICON_BY_NAME } from './ui/icons';
 
 const styles = readFileSync(fileURLToPath(new URL('./styles.css', import.meta.url)), 'utf8');
+const appSrc = readFileSync(fileURLToPath(new URL('./App.tsx', import.meta.url)), 'utf8');
 /**
  * **剥掉注释**再判 —— R54 的教训（⑫ 那条锁第一版**被自己的注释喂饱** ⇒ 假绿）。
  * 本文件里那条注释恰好也写着 `flex: 0 0 auto` ⇒ 不剥就等于"注释替声明作证"。
  */
 const stylesNoComments = styles.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const appSrcNoComments = appSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 /**
  * **导航接线锁（R66 · 主界面两栏化）**
@@ -166,5 +169,67 @@ describe('左栏导航：入口不许被压扁', () => {
         `${sel} 没有钉住 \`flex: 0 0 auto\` ⇒ 窗口一矮，入口就可能被压扁`,
       ).toContain('flex: 0 0 auto');
     }
+  });
+});
+
+/**
+ * **左栏图标化（R69）** 的接线锁。
+ *
+ * 为什么立它：R68 之后左栏只剩 7 个**纯文字**入口 ⇒ "文件"和"文档"、"Git"和"画布"都只是两个字
+ * ⇒ 一眼扫过去**认不出哪一页是哪一页** ⇒ 图标是**第二个识别通道**。
+ *
+ * 而"少一个图标"是**静默失效**：界面上那一项只是**没有图标**，别的都在
+ * ⇒ **没有任何门禁会红** ⇒ 只能靠机器盯（与 R66 那条"加了入口忘了分组"同款）。
+ *
+ * 四条锁各管一段（**没有重复、没有互相代替**）：
+ *   ① 每个入口**都有图标名**（`TAB_ICON` 覆盖每一个 `Tab`）；
+ *   ② 每个图标名**都有实现**（`ICON_BY_NAME` 里找得到 ⇒ 否则那枚图标**渲染不出来**）；
+ *   ③ 左栏按钮**不许只剩图标**（图标是装饰 `aria-hidden`，文字才是主识别通道）；
+ *   ④ 左栏与启动器**用同一枚图标**（同一个入口在两处长得不一样 ⇒ 用户会以为是两样东西）。
+ */
+describe('左栏导航：图标（R69）', () => {
+  it('每个入口都有图标名（少一个 ⇒ 那一项界面上就没有图标）', () => {
+    const missing = (Object.keys(TAB_LABEL) as Tab[]).filter((tab) => TAB_ICON[tab] === undefined);
+    expect(missing, '这些入口没有图标名').toEqual([]);
+    expect(
+      Object.keys(TAB_ICON).filter((k) => !(k in TAB_LABEL)),
+      '图标表里有不存在的入口',
+    ).toEqual([]);
+  });
+
+  it('每个图标名都有实现（少一个 ⇒ 那枚图标渲染不出来，界面上是个空位）', () => {
+    const names = [...new Set(Object.values(TAB_ICON))];
+    const missing = names.filter((n) => ICON_BY_NAME[n] === undefined);
+    expect(missing, '这些图标名在 `ICON_BY_NAME` 里没有实现').toEqual([]);
+  });
+
+  it('左栏按钮**不许只剩图标**（图标是装饰，文字才是主识别通道）', () => {
+    // 左栏那个按钮的**源码块**（从 className 到收尾）
+    const at = appSrcNoComments.indexOf('className={t === tab ?');
+    expect(at, 'App.tsx 里找不到左栏按钮那一处').toBeGreaterThan(-1);
+    const close = appSrcNoComments.indexOf('</button>', at);
+    const region = appSrcNoComments.slice(at, close);
+    expect(region, '左栏按钮里没有可见文字的容器 ⇒ 只剩图标 = 少了一个识别通道').toContain(
+      'app-tab-text',
+    );
+    expect(region, '左栏按钮里没有把图标**画出来**（查到了 ≠ 画出来了）').toMatch(/<Icon\b[^>]*\/>/);
+  });
+
+  it('左栏与启动器用**同一枚**图标 ⇒ 同一个入口在两处长得一样（不许各写各的）', () => {
+    // ⚠️ 这里**不**去比"两处写的名字相等"（那只会在有人**硬写**另一个名字时才红）——
+    // 真正的风险是**名字写错**（图标名有拼写错误 ⇒ 那一枚渲染不出来，界面上是个空位）。
+    // ⇒ 这条改判「**每个图标名都有实现**」：左栏与启动器都从这张表取 ⇒ 这一条同时护住两处。
+    const names = [...new Set(Object.values(TAB_ICON))];
+    const missing = names.filter((n) => ICON_BY_NAME[n] === undefined);
+    expect(
+      missing,
+      '这些图标名没有实现 ⇒ 左栏与启动器上那一项会是个空位（图标渲染不出来）',
+    ).toEqual([]);
+  });
+
+  it('左栏那一枚图标**取自** `TAB_ICON`（不许在渲染层另写一个名字）', () => {
+    // 形状锁：左栏按钮里必须**按名字取**（`ICON_BY_NAME[TAB_ICON[t]]`），
+    // 而不是硬编码某一枚 —— 硬编码 ⇒ 改 `TAB_ICON` 时左栏不会跟着改 ⇒ 两处不一致。
+    expect(appSrcNoComments).toContain('ICON_BY_NAME[TAB_ICON[t]]');
   });
 });

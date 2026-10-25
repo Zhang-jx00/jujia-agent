@@ -4724,8 +4724,15 @@ try {
     const boxes = tabs.map((el) => el.getBoundingClientRect());
     const btn = tabs[0] ?? document.querySelector('button');
     const btnStyle = btn ? getComputedStyle(btn) : null;
+    // R69（左栏图标化）：每个入口**都得有图标**、**都得有文字** —— 量的是**真渲染结果**，
+    // 不是源码里有没有那句话（"查到了 ≠ 画出来了"那条坑的同款）。
+    const tabIcons = tabs.map((el) => ({
+      hasIcon: el.querySelector('svg[data-icon]') !== null,
+      text: (el.textContent ?? '').trim(),
+    }));
     return {
       tabCount: tabs.length,
+      tabIcons,
       overflow: nav ? nav.scrollWidth - nav.clientWidth : 0,
       navH: nav ? Math.round(nav.getBoundingClientRect().height * 10) / 10 : 0,
       minW: boxes.length ? Math.round(Math.min(...boxes.map((b) => b.width)) * 10) / 10 : 0,
@@ -4738,6 +4745,30 @@ try {
   });
   if (contract.tabCount === 0) {
     fail('渲染契约：一条页签都没找到（选择器或结构变了 —— 契约要跟着改）', JSON.stringify(contract));
+  }
+  /**
+   * R69（左栏图标化）：**每个入口都有图标 + 都有文字** —— 两条都要。
+   *
+   * 为什么文字也要查：图标是**装饰**（`aria-hidden`）⇒ 文字才是主识别通道
+   * ⇒ 只剩图标那一项，界面上就认不出是哪一页。
+   */
+  {
+    const noIcon = contract.tabIcons.filter((t) => !t.hasIcon).map((t) => t.text);
+    if (noIcon.length > 0) {
+      fail(
+        '渲染契约：左栏有入口**没有图标**（' +
+          noIcon.join('、') +
+          '）⇒ 扫一眼认不出哪一页是哪一页',
+        JSON.stringify(contract.tabIcons),
+      );
+    }
+    const noText = contract.tabIcons.filter((t) => t.text === '').map(() => '(空)');
+    if (noText.length > 0) {
+      fail(
+        '渲染契约：左栏有入口**只剩图标、没了文字** ⇒ 图标是装饰，文字才是主识别通道',
+        JSON.stringify(contract.tabIcons),
+      );
+    }
   }
   if (contract.overflow > 1) {
     fail(`渲染契约：顶栏页签溢出 ${String(contract.overflow)}px（右边的页签被切掉了）`, JSON.stringify(contract));
@@ -5733,8 +5764,20 @@ try {
       labels: items.map((i) => (i.querySelector('.jj-launcher-item-label')?.textContent ?? '').trim()),
       // 右侧那一列：必须**不是**左边的复读（第一版取别名的第一个词 ⇒ 恰好等于显示名 ⇒ 12 行全是重复字样）
       hints: items.map((i) => (i.querySelector('.jj-launcher-item-hint')?.textContent ?? '').trim()),
+      // R69：每一条**都得画出图标**（查到了 ≠ 画出来了 ⇒ 量的是真渲染结果）
+      noIcon: items
+        .filter((i) => i.querySelector('svg[data-icon]') === null)
+        .map((i) => (i.querySelector('.jj-launcher-item-label')?.textContent ?? '').trim()),
     };
   });
+  if (paletteShape.noIcon.length > 0) {
+    fail(
+      '渲染契约：启动器里有命令**没有图标**（' +
+        paletteShape.noIcon.join('、') +
+        '）⇒ 清单里那一项只剩两个字，扫一眼认不出来',
+      JSON.stringify(paletteShape),
+    );
+  }
   // ② 清单完整：11 个入口 + 设置 = 12 条
   if (paletteShape.items !== 12) {
     fail(

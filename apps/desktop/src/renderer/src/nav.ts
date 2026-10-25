@@ -27,7 +27,9 @@ export type Tab =
   | 'media'
   | 'schedule';
 
-/** 页签显示名（唯一出处；界面与判据都从这里取） */
+/**
+ * 页签显示名（唯一出处；界面与判据都从这里取）
+ */
 export const TAB_LABEL: Record<Tab, string> = {
   overview: '概览',
   chat: '对话',
@@ -40,6 +42,32 @@ export const TAB_LABEL: Record<Tab, string> = {
   browser: '浏览器',
   media: '绘图',
   schedule: '定时',
+};
+
+/**
+ * 每个入口的**图标名**（R69 · 左栏图标化）。
+ *
+ * 为什么这里只放**名字**、不放组件：`nav.ts` 是**纯数据模块**（主进程那条接线锁把它当**文本**读）
+ * ⇒ 让它 import React 组件会把纯数据变成 UI 模块。
+ * ⇒ 「图标名 → 组件」那张表在 `ui/icons.tsx`（`ICON_BY_NAME`）⇒ **两张表各管一段，没有重复**。
+ *
+ * 为什么每个入口都要有：R68 之后左栏只剩 7 个**纯文字**入口 ⇒ 一眼扫过去认不出哪一页是哪一页
+ * （"文件"和"文档"、"Git"和"画布"都只是两个字）⇒ 图标是**第二个识别通道**。
+ *
+ * ⚠️ **不许只留图标**：图标旁边永远有文字（图标是装饰，`aria-hidden`）⇒ 文字是**主要**识别通道。
+ */
+export const TAB_ICON: Record<Tab, string> = {
+  overview: 'layout-dashboard',
+  chat: 'message-square',
+  ide: 'folder',
+  docs: 'file-text',
+  git: 'git-branch',
+  canvas: 'workflow',
+  terminal: 'terminal',
+  connections: 'plug',
+  browser: 'globe',
+  media: 'image',
+  schedule: 'clock',
 };
 
 /** 左栏里的一个分组（一组标题 + 一组入口） */

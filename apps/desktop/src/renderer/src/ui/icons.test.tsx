@@ -4,18 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
-import {
-  IconCheck,
-  IconChevronDown,
-  IconFileText,
-  IconFolder,
-  IconLoaderCircle,
-  IconPencil,
-  IconRotateCw,
-  IconTriangleAlert,
-  IconX,
-  LUCIDE_NOTICE,
-} from './icons';
+import { ICON_BY_NAME, LUCIDE_NOTICE } from './icons';
 
 /**
  * 图标系统的接线锁（R19 · 优化6）。
@@ -48,17 +37,15 @@ afterEach(() => {
 
 describe('图标契约', () => {
   it('每个图标都渲染成 aria-hidden 的 svg[data-icon]（装饰性图标的统一形状）', () => {
-    const icons = [
-      IconCheck,
-      IconX,
-      IconTriangleAlert,
-      IconRotateCw,
-      IconPencil,
-      IconFolder,
-      IconFileText,
-      IconLoaderCircle,
-      IconChevronDown,
-    ];
+    /**
+     * ⚠️ **现扫 `ICON_BY_NAME`，不再手写一份名单**（R69 · 左栏图标化）。
+     *
+     * 为什么：原来的名单是**手写的九个** ⇒ R67 加的 `search` / `gear` **从来没进过这条锁**
+     * ⇒ 新加的图标若忘了登记，**没人会发现**（名单少一个 = 少测一个，但看不出来）。
+     * ⇒ 改成**从那张表现扫**：加图标 ⇒ 自动进这条锁；不实现 ⇒ 这条立刻红。
+     */
+    const icons = Object.values(ICON_BY_NAME);
+    expect(icons.length, '图标表空了 ⇒ 这条锁会空转通过（防失焦）').toBeGreaterThan(0);
     for (const Icon of icons) {
       const { container, unmount } = render(<Icon />);
       const svg = container.querySelector('svg');

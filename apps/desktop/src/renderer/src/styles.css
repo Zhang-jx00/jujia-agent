@@ -239,17 +239,6 @@ body {
   text-overflow: ellipsis;
 }
 
-/* 连接数这类"角标"：贴在入口右边，不占标题的注意力 */
-.app-tab-badge {
-  flex: 0 0 auto;
-  padding: 0 6px;
-  border-radius: var(--radius-pill);
-  background: var(--c-bg-elevated);
-  color: var(--c-text-secondary);
-  font-size: var(--fs-micro);
-  line-height: 16px;
-}
-
 .app-tab:hover {
   color: var(--text);
   background: var(--c-overlay-faint);
@@ -279,11 +268,6 @@ body {
   background: var(--primary);
   border-color: var(--primary);
   color: var(--primary-ink);
-}
-
-.app-tab-active .app-tab-badge {
-  background: var(--primary-ink);
-  color: var(--primary);
 }
 
 .app-body {
@@ -571,6 +555,16 @@ button:disabled {
 .jj-launcher-group {
   display: flex;
   flex-direction: column;
+}
+
+/* 一条命令的**左半边**（图标 + 名字）—— 为什么要单独包一层：
+   父容器是 `justify-content: space-between`（左一个右一个）⇒ 若把图标、名字、提示**并排三份**，
+   space-between 会把它们**均匀撑开**（图标和名字之间裂开一道缝）⇒ 必须先包成"一组"。 */
+.jj-launcher-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 /* 命令的名字：左侧那个。**不许换行**：清单是竖排的，折行会让一条命令占两行 */

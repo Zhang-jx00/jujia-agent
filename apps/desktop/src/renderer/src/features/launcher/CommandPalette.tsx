@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { COMMANDS, filterCommands } from './commands';
 import type { AppCommand } from './commands';
-import { IconSearch } from '../../ui/icons';
+import { IconSearch, ICON_BY_NAME } from '../../ui/icons';
 
 /**
  * **启动器**（R68 · 左栏瘦身的第二入口）。
@@ -113,6 +113,7 @@ export function CommandPalette({ onClose, onRun }: CommandPaletteProps): ReactEl
                 flatIndex += 1;
                 const idx = flatIndex;
                 const on = idx === active;
+                const Icon = ICON_BY_NAME[cmd.icon];
                 return (
                   <button
                     key={cmd.id}
@@ -126,7 +127,10 @@ export function CommandPalette({ onClose, onRun }: CommandPaletteProps): ReactEl
                     onMouseEnter={() => setActive(idx)}
                     onClick={() => onRun(cmd)}
                   >
-                    <span className="jj-launcher-item-label">{cmd.label}</span>
+                    <span className="jj-launcher-item-main">
+                      {Icon === undefined ? null : <Icon size={15} />}
+                      <span className="jj-launcher-item-label">{cmd.label}</span>
+                    </span>
                     {cmd.hint !== '' ? (
                       <span className="jj-launcher-item-hint">{cmd.hint}</span>
                     ) : null}

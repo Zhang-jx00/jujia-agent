@@ -8,7 +8,7 @@ import type { AppInfo, ConfigSnapshot, ConnectionView } from '@jujia/shared-ipc'
  */
 import type { ThemePack } from '@jujia/ui-tokens';
 import { WorkspaceCard } from './features/workspace/WorkspaceCard';
-import { NAV_GROUPS, TAB_LABEL } from './nav';
+import { NAV_GROUPS, TAB_ICON, TAB_LABEL } from './nav';
 import type { Tab } from './nav';
 import { applyThemeVars } from './features/appearance/theme-vars';
 import { LogCard } from './features/logs/LogCard';
@@ -16,7 +16,7 @@ import { UpdateCard } from './features/update/UpdateCard';
 import { PermissionDialog } from './features/permission/PermissionDialog';
 import { ErrorBoundary } from './ErrorBoundary';
 import { KeepAlive } from './KeepAlive';
-import { IconGear, IconSearch, IconTriangleAlert } from './ui/icons';
+import { IconGear, IconSearch, IconTriangleAlert, ICON_BY_NAME } from './ui/icons';
 import { FailureNotices } from './ui/failure-notice';
 import { CommandPalette } from './features/launcher/CommandPalette';
 import type { AppCommand } from './features/launcher/commands';
@@ -269,25 +269,26 @@ export function App(): ReactElement {
             <div className="app-rail-group" key={group.title}>
               <div className="app-rail-group-title">{group.title}</div>
               <div className="app-rail-group-items">
-                {group.tabs.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    className={t === tab ? 'app-tab app-tab-active' : 'app-tab'}
-                    aria-current={t === tab ? 'page' : undefined}
-                    onClick={() => {
-                      setTab(t);
-                      // 点左栏的入口 = "我要去那一页" ⇒ **顺手把设置中心收起来**
-                      // （否则设置中心会一直占着主区，而用户已经换了目的地）。
-                      setSettingsOpen(false);
-                    }}
-                  >
-                    <span className="app-tab-text">{TAB_LABEL[t]}</span>
-                    {t === 'connections' && connections.length > 0 ? (
-                      <span className="app-tab-badge">{String(connections.length)}</span>
-                    ) : null}
-                  </button>
-                ))}
+                {group.tabs.map((t) => {
+                  const Icon = ICON_BY_NAME[TAB_ICON[t]];
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      className={t === tab ? 'app-tab app-tab-active' : 'app-tab'}
+                      aria-current={t === tab ? 'page' : undefined}
+                      onClick={() => {
+                        setTab(t);
+                        // 点左栏的入口 = "我要去那一页" ⇒ **顺手把设置中心收起来**
+                        // （否则设置中心会一直占着主区，而用户已经换了目的地）。
+                        setSettingsOpen(false);
+                      }}
+                    >
+                      {Icon === undefined ? null : <Icon size={15} />}
+                      <span className="app-tab-text">{TAB_LABEL[t]}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ))}

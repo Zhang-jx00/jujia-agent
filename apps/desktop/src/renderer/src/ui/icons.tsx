@@ -18,7 +18,7 @@ import type { ReactElement, ReactNode } from 'react';
 export const LUCIDE_NOTICE =
   'Icons from Lucide (https://lucide.dev), ISC License. Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT), and other contributors.';
 
-interface IconProps {
+export interface IconProps {
   /** 边长（px）；默认 14 —— 与 13/14px 正文同高，不抢视线 */
   size?: number;
   /** 额外类名（默认已有 `jj-icon`） */
@@ -159,3 +159,154 @@ export function IconGear(props: IconProps): ReactElement {
     </Glyph>
   );
 }
+
+/*
+ * ============================================================================
+ * 左栏入口图标（R69 · 左栏图标化）
+ * ============================================================================
+ *
+ * 为什么加这一组：R68 之后左栏只剩 **7 个文字入口** ⇒ 一眼扫过去**认不出哪个是哪一页**
+ * （"文件"和"文档"、"Git"和"画布"都只是两个字）⇒ 补图标。
+ *
+ * **路径数据从 Lucide 1.61.0 的实际 SVG 里抄**（`lucide-static@1.61.0/icons/<name>.svg`，
+ * 逐个核对过），**不是凭记忆写的** —— 本模块声明"全部取自 Lucide"，凭记忆写会让那句声明变成假的。
+ *
+ * 为什么零新依赖：路径数据直接内联（同本模块既有做法）⇒ **不引 npm 包**
+ * （引包属停牌②，得先问所有者）。
+ */
+
+/**
+ * 概览（四格仪表盘，Lucide 的 `layout-dashboard`）。
+ *
+ * 为什么用它而不是"房子"：本仓的概览页是**运行时 / 配置 / 日志 / 更新**那种**仪表盘**，
+ * 不是"首页门户" ⇒ 四格比房子更贴。
+ */
+export function IconLayoutDashboard(props: IconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <rect width="7" height="9" x="3" y="3" rx="1" />
+      <rect width="7" height="5" x="14" y="3" rx="1" />
+      <rect width="7" height="9" x="14" y="12" rx="1" />
+      <rect width="7" height="5" x="3" y="16" rx="1" />
+    </Glyph>
+  );
+}
+
+/** 对话（Lucide 的 `message-square` —— 折角的气泡）。 */
+export function IconMessageSquare(props: IconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z" />
+    </Glyph>
+  );
+}
+
+/** Git（Lucide 的 `git-branch` —— 一个分叉的提交图）。 */
+export function IconGitBranch(props: IconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <path d="M15 6a9 9 0 0 0-9 9V3" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+    </Glyph>
+  );
+}
+
+/** 画布（Lucide 的 `workflow` —— 两个节点接一条线）。 */
+export function IconWorkflow(props: IconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <rect width="8" height="8" x="3" y="3" rx="2" />
+      <path d="M7 11v4a2 2 0 0 0 2 2h4" />
+      <rect width="8" height="8" x="13" y="13" rx="2" />
+    </Glyph>
+  );
+}
+
+/** 终端（Lucide 的 `terminal` —— 尖括号 + 一条横线）。 */
+export function IconTerminal(props: IconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <path d="M12 19h8" />
+      <path d="m4 17 6-6-6-6" />
+    </Glyph>
+  );
+}
+
+/** 连接（Lucide 的 `plug` —— 插头）。 */
+export function IconPlug(props: IconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <path d="M12 22v-5" />
+      <path d="M15 8V2" />
+      <path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z" />
+      <path d="M9 8V2" />
+    </Glyph>
+  );
+}
+
+/** 浏览器（Lucide 的 `globe` —— 地球）。 */
+export function IconGlobe(props: IconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+      <path d="M2 12h20" />
+    </Glyph>
+  );
+}
+
+/** 绘图（Lucide 的 `image` —— 相框 + 小圆 + 山）。 */
+export function IconImage(props: IconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+      <circle cx="9" cy="9" r="2" />
+      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+    </Glyph>
+  );
+}
+
+/** 定时（Lucide 的 `clock` —— 表盘 + 时针分针）。 */
+export function IconClock(props: IconProps): ReactElement {
+  return (
+    <Glyph {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 6v6l4 2" />
+    </Glyph>
+  );
+}
+
+/**
+ * **图标名 → 实现**的单查表（R69 · 左栏图标化）。
+ *
+ * 为什么要有这张表：导航真源 `nav.ts` **只认图标名（字符串）**，不认组件 ——
+ * 理由：`nav.ts` 是**纯数据模块**（主进程那条接线锁把它当**文本**读），
+ * 让它 import React 组件会把纯数据变成 UI 模块。
+ * ⇒ 于是「入口 → 图标名」在 `nav.ts`，「图标名 → 组件」在这里，**两张表各管一段、没有重复**。
+ *
+ * 为什么这张表**必须齐全**：少一个名字 ⇒ 那一枚图标**渲染不出来**（界面上少一个图标）。
+ * ⇒ 判据盯着它（见 `nav-wiring.test.ts` 的「图标名 ↔ 实现」那几条）。
+ */
+export const ICON_BY_NAME: Record<string, (props: IconProps) => ReactElement> = {
+  check: IconCheck,
+  x: IconX,
+  'triangle-alert': IconTriangleAlert,
+  'rotate-cw': IconRotateCw,
+  pencil: IconPencil,
+  folder: IconFolder,
+  'file-text': IconFileText,
+  'loader-circle': IconLoaderCircle,
+  'chevron-down': IconChevronDown,
+  search: IconSearch,
+  gear: IconGear,
+  'layout-dashboard': IconLayoutDashboard,
+  'message-square': IconMessageSquare,
+  'git-branch': IconGitBranch,
+  workflow: IconWorkflow,
+  terminal: IconTerminal,
+  plug: IconPlug,
+  globe: IconGlobe,
+  image: IconImage,
+  clock: IconClock,
+};

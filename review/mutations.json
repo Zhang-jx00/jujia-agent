@@ -2696,8 +2696,8 @@
       "id": "M337",
       "desc": "App.tsx 又直接挂了一个设置类面板（R67 · 设置中心）：同一个目的地出现**第二处门**（改完设置回左栏发现还是旧的那页 ⇒ 以为没生效）",
       "file": "apps/desktop/src/renderer/src/App.tsx",
-      "find": "import { NAV_GROUPS, TAB_LABEL } from './nav';",
-      "replace": "import { NAV_GROUPS, TAB_LABEL } from './nav';\nimport { AppearancePanel } from './features/appearance/AppearancePanel';",
+      "find": "import { NAV_GROUPS, TAB_ICON, TAB_LABEL } from './nav';",
+      "replace": "import { NAV_GROUPS, TAB_ICON, TAB_LABEL } from './nav';\nimport { AppearancePanel } from './features/appearance/AppearancePanel';",
       "test": "apps/desktop/src/renderer/src/features/settings/settings-wiring.test.ts"
     },
     {
@@ -2763,6 +2763,54 @@
       "find": "      .find((k) => k !== '' && k.toLowerCase() !== label.toLowerCase()) ?? ''",
       "replace": "      .find((k) => k !== '') ?? '';",
       "test": "apps/desktop/src/renderer/src/features/launcher/launcher-wiring.test.ts"
+    },
+    {
+      "id": "M346",
+      "desc": "有个入口**没有图标名**（R69 · 左栏图标化）：图标表漏了一项 ⇒ 那一项界面上就只是个字 ⇒ 认不出是哪一页",
+      "file": "apps/desktop/src/renderer/src/nav.ts",
+      "find": "  git: 'git-branch',\n",
+      "replace": "",
+      "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
+    },
+    {
+      "id": "M347",
+      "desc": "图标名**没有实现**（R69 · 左栏图标化）：名字拼错 / 忘了加组件 ⇒ 那一枚渲染不出来 ⇒ 界面上是个空位",
+      "file": "apps/desktop/src/renderer/src/ui/icons.tsx",
+      "find": "  'git-branch': IconGitBranch,\n",
+      "replace": "",
+      "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
+    },
+    {
+      "id": "M348",
+      "desc": "左栏入口**只剩图标、没了文字**（R69 · 左栏图标化）：图标是装饰（aria-hidden）⇒ 文字才是主识别通道 ⇒ 少了它那一项就认不出来",
+      "file": "apps/desktop/src/renderer/src/App.tsx",
+      "find": "                      <span className=\"app-tab-text\">{TAB_LABEL[t]}</span>\n",
+      "replace": "",
+      "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
+    },
+    {
+      "id": "M349",
+      "desc": "左栏那一枚图标**硬编码**了（不再取自 `TAB_ICON`）⇒ 改真源时左栏不跟着改 ⇒ 左栏与启动器长得不一样",
+      "file": "apps/desktop/src/renderer/src/App.tsx",
+      "find": "ICON_BY_NAME[TAB_ICON[t]]",
+      "replace": "ICON_BY_NAME['folder']",
+      "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
+    },
+    {
+      "id": "M350",
+      "desc": "启动器**不再渲染图标**（R69 · 左栏图标化）：清单里那一项就只剩两个字 ⇒ 扫一眼认不出是哪一页",
+      "file": "apps/desktop/src/renderer/src/features/launcher/CommandPalette.tsx",
+      "find": "                      {Icon === undefined ? null : <Icon size={15} />}\n",
+      "replace": "",
+      "test": "apps/desktop/src/renderer/src/features/launcher/launcher-wiring.test.ts"
+    },
+    {
+      "id": "M351",
+      "desc": "左栏**查到了图标却没把它画出来**（R69 · 左栏图标化）：只删渲染那一行、查表那行留着 ⇒ 「认名字不认形状」的同款 ⇒ 界面上那一项还是只有两个字",
+      "file": "apps/desktop/src/renderer/src/App.tsx",
+      "find": "                      {Icon === undefined ? null : <Icon size={15} />}\n",
+      "replace": "",
+      "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
     }
   ]
 }

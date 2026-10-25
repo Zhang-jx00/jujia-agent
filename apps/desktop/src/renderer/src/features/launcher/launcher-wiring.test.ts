@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { COMMANDS, filterCommands } from './commands';
 import { LAUNCHER_ONLY_TABS, NAV_GROUPS, TAB_LABEL } from '../../nav';
 import type { Tab } from '../../nav';
+import { ICON_BY_NAME } from '../../ui/icons';
 
 /**
  * 外壳源码（R68 · 启动器的鼠标入口那条锁要读它）。
@@ -93,6 +94,41 @@ describe('启动器：一处搜全部', () => {
         `提示「${cmd.hint}」搜不出「${cmd.label}」⇒ 那一列写的是不能用的词`,
       ).toContain(cmd.id);
     }
+  });
+
+  /**
+   * **每一条命令都要有图标，且图标名要有实现**（R69 · 左栏图标化）。
+   *
+   * 为什么单立一条：启动器是"一处搜全部"的那个清单 ⇒ 它是**用户认页面**的第二处地方
+   * ⇒ 那里少一枚图标，那一页就**只剩两个字**（"绘图" / "浏览器"），扫一眼认不出来。
+   *
+   * ⚠️ 为什么这条**不是**同义反复：图标名**拼错**时，命令仍然在清单里、搜索仍然好用
+   * ⇒ 界面上只是**那个位置空着** ⇒ 没有任何门禁会红 ⇒ 只能靠机器盯。
+   */
+  it('每条命令都有图标名，且那个名字有实现（不许有个"空位"）', () => {
+    const noName = COMMANDS.filter((c) => c.icon.trim() === '').map((c) => c.id);
+    expect(noName, '这些命令没有图标名 ⇒ 清单里那一项是个空位').toEqual([]);
+    const noImpl = COMMANDS.filter((c) => ICON_BY_NAME[c.icon] === undefined).map((c) => c.id);
+    expect(noImpl, '这些命令的图标名没有实现 ⇒ 清单里那一项是个空位').toEqual([]);
+  });
+
+  it('清单真的把图标**渲染出来了**（形状锁：查表 ≠ 渲染）', () => {
+    /**
+     * ⚠️ **这条锁第一版被自己的写法骗过**：它只查「有没有按名字查表」
+     * （`ICON_BY_NAME[cmd.icon]`）⇒ 变异 **M350** 把**渲染那一行**删掉、**查表那行还在**
+     * ⇒ 锁照绿 ⇒ **未被拦住** ⇒ 教训：**"查到了"不等于"画出来了"**。
+     * ⇒ 现在**两样都要**：查表在（名字对）+ `<Icon …/>` 在（真的画出来了）。
+     */
+    const paletteSrc = readFileSync(fileURLToPath(new URL('./CommandPalette.tsx', import.meta.url)), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    expect(paletteSrc, '启动器没有按名字取图标 ⇒ 清单里那一项不会渲染出图标').toContain(
+      'ICON_BY_NAME[cmd.icon]',
+    );
+    expect(
+      paletteSrc,
+      '启动器查到了图标却**没有把它画出来** ⇒ 清单里那一项还是只有两个字',
+    ).toMatch(/<Icon\b[^>]*\/>/);
   });
 
   /**
