@@ -969,6 +969,25 @@ try {
   }
   ok('数据目录已隔离到临时目录');
 
+  step('概览页：第三方素材的版权声明**看得见**（ISC 要求随副本保留 ⇒ 界面上得能读到）');
+  /**
+   * R70 · 排查39：这条测的是**真界面**里那段版权声明在不在。
+   * 原状是它只以一个没人引用的常量躺在源码里 ⇒ 打包时被树摇掉 ⇒ 分发副本里 0 命中。
+   *
+   * **断言为什么按"抹掉空白"来比**：那段版权行很长，界面里会**折行**，
+   * 而 `innerText` 会不会在软换行处插换行、插在哪，取决于排版 ⇒ 直接拿整句/子串去比
+   * 有可能**被折行劈开而假红**（文案没变、断言先红）⇒ 所以**先把两侧的空白全部去掉再比**。
+   */
+  const noticeVisible = await bodyText();
+  const noticeFlat = noticeVisible.replace(/\s+/g, '');
+  if (!noticeFlat.includes('IconsfromLucide') || !noticeFlat.includes('ISCLicense')) {
+    fail(
+      '概览页没有显示第三方素材的版权声明 ⇒ 这段声明进不了分发副本',
+      noticeVisible.slice(0, 600),
+    );
+  }
+  ok('第三方素材的版权声明在概览页可见');
+
   step('插件页：应识别出预置的 my-team 插件与它贡献的技能目录');
   await openSetting(win, '插件');
   const pluginsReady = await waitForText('已加载');
