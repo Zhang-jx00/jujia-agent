@@ -540,15 +540,31 @@ Resolve-DnsName github.com
 # 2) 逐只试（换解析）：通的 IP 会立刻返回
 curl.exe -sS -I --connect-timeout 8 --max-time 12 --resolve github.com:443:<IP> https://github.com/
 
-# 3) 让 git 走那只 IP（必须同时覆盖 SSL 后端 —— 本机 Git 只带 schannel）
-git -C "<仓库根>" -c http.sslBackend=schannel -c http.curloptResolve=github.com:443:<可用IP> ls-remote origin
-git -C "<仓库根>" -c http.sslBackend=schannel -c http.curloptResolve=github.com:443:<可用IP> push origin main
-git -C "<仓库根>" -c http.sslBackend=schannel -c http.curloptResolve=github.com:443:<可用IP> push origin refs/tags/vX.Y.Z-<轨道词>N
+# 3) 让 git 走那只 IP（必须同时覆盖 SSL 后端 —— 本机 Git 只带 schannel；
+#    并把 HTTP 版本压到 1.1 —— 2026-11-03 实测：被中途重置的连接里有一类是 HTTP/2 形态）
+git -C "<仓库根>" -c http.sslBackend=schannel -c http.version=HTTP/1.1 \
+    -c http.curloptResolve=github.com:443:<可用IP> ls-remote origin
+git -C "<仓库根>" -c http.sslBackend=schannel -c http.version=HTTP/1.1 \
+    -c http.curloptResolve=github.com:443:<可用IP> push origin main
+git -C "<仓库根>" -c http.sslBackend=schannel -c http.version=HTTP/1.1 \
+    -c http.curloptResolve=github.com:443:<可用IP> push origin refs/tags/vX.Y.Z-<轨道词>N
 ```
 
 ⚠️ **那只 IP 是"当天实测"的结果，不是永久名单 ⇒ 每轮重扫**（"这次通了"不等于"下次也会通"）。
 ⚠️ **SSH 这条路走不通**：本机 `%USERPROFILE%\.ssh\id_ed25519` **当前用户读不了**
 （`icacls` 报"处理失败"）⇒ 归属不明的文件**不动 ACL**（本仓规矩：归属不明不擅自动手）。
+⚠️ **系统代理那栏是关的**：`ProxyEnable=0`（虽然 `ProxyServer` 仍留着 `127.0.0.1:7890`）⇒ 那个端口**没人监听** ⇒ 走代理这条路不通。
+
+**阻断的三种实测形态**（2026-11-03 一次连推里各撞到一种 ⇒ **别只认一种**）：
+
+| 形态 | 原文 |
+|---|---|
+| 连接超时 | `Failed to connect to github.com:443 after 21058 ms: Could not connect to server` |
+| 被主动重置 | `Recv failure: Connection was reset` |
+| 协议中途断 | `expected flush after ref listing`（连上了、列表读到一半被掐） |
+
+⇒ **处置都一样**：换 IP 重试；**别把它读成"仓库坏了"或"凭据错了"**（这两种形态都发生在**认证之前**）。
+⇒ 实测一次连推里，**10 只候选 IP 有 9 只不通**、只有 1 只通 ⇒ **有界重试的窗口要留够**（本轮留了 4 分钟才碰上）。
 
 ### 7.6 推送后的**独立回读**（不许省）
 
@@ -572,8 +588,20 @@ git -C "<仓库根>" ls-remote origin refs/heads/main refs/tags/vX.Y.Z-<轨道�
 ```bash
 # 令牌只在内存里过 —— 只打印 run 号 / 状态 / 结论 / head_sha
 printf 'protocol=https\nhost=github.com\n\n' | git credential fill
-curl.exe -sS "https://api.github.com/repos/Zhang-jx00/jujia-agent/actions/runs?head_sha=<完整哈希>"
+curl.exe -sS -H "Authorization: Bearer <令牌>" \
+  "https://api.github.com/repos/Zhang-jx00/jujia-agent/actions/runs?head_sha=<完整哈希>"
 ```
+
+⚠️ **三条今天真踩到的坑（比上面那三条更具体）**：
+
+1. **`api.github.com` 与 `github.com` 不是同一批 IP** ⇒ **解析 override 不能跨域名套用**
+   （把 `api.github.com` 指到 `github.com` 的 IP ⇒ 返回**空**）。
+2. **一次 `curl` 只查一个 URL** ⇒ 一次传两个 URL 时输出是**两份 JSON 拼在一起**
+   ⇒ `JSON.parse` 直接失败（看起来像"API 返回的不是 JSON"）。
+3. **要每一步的结论**（不只是 run 的结论）就查 **jobs** 端点：
+   `GET /repos/<owner>/<repo>/actions/runs/<run_id>/jobs` ⇒ 逐个 step 的 `conclusion`。
+   ⇒ **只取 run 结论会看不出"红在哪一步"**（本轮那次红在第 8 步「文档一致性」，
+   而 Lint / 类型检查 / 单元测试都是绿的 ⇒ **一眼看不出是哪条判据**）。
 
 **三条实测坑**：
 
@@ -618,6 +646,7 @@ curl.exe -sS "https://api.github.com/repos/Zhang-jx00/jujia-agent/actions/runs?h
 | 现象 | 根因 | 处置 |
 |---|---|---|
 | `Failed to connect to github.com:443` | 选择性阻断 | §7.5 换解析（**重试无效**） |
+| **CI 红在「文档一致性」，而 Lint / 类型检查 / 单元测试都绿** | **文档与脚本被拆成了两笔**（本轮：文档那笔把 e2e 步数改成 72，脚本那笔还没进仓 ⇒ 「步数与脚本一致」判据红） | 这两者是**一个变更的两面** ⇒ **必须同笔提交**；已经分笔了就**补一笔把脚本带上去**（**不改写已推历史**），并把根因写进提交说明 |
 | `fatal: Unsupported SSL backend 'openssl'` | 本机 Git 只带 schannel | 追加 `-c http.sslBackend=schannel` |
 | 推送命令退出码 0 但远端没有 | 推的不是你以为的 ref | `ls-remote` 回读核对（§7.6） |
 | `refusing to update checked out branch` | 目标端有 worktree 检出着该分支 | 先切分支或换 ref |
