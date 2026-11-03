@@ -344,6 +344,15 @@ body {
   color: var(--c-danger);
 }
 
+/* R70 · 排查39：许可声明这类长文本（英文版权行）用脚注号排版，别跟正文抢眼 */
+.p0-note {
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
 code {
   background: var(--c-overlay-weak);
   padding: 1px 4px;

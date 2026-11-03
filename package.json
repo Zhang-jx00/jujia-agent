@@ -34,7 +34,12 @@
     "verify:pack": "npm run verify:pack:drive --workspace @jujia/desktop",
     "mut": "node scripts/mutation-check.mjs",
     "check:docs": "node scripts/check-docs.mjs",
-    "check:docs:selftest": "node scripts/verify-docs-check.mjs"
+    "check:docs:selftest": "node scripts/verify-docs-check.mjs",
+    "check:notices": "node scripts/check-notices.mjs",
+    "check:notices:selftest": "node scripts/verify-notices-check.mjs",
+    "check:locks": "node scripts/check-lock-trust.mjs",
+    "check:locks:selftest": "node scripts/verify-lock-trust-check.mjs",
+    "mut:locks": "node scripts/mutation-check.mjs review/lock-trust-mutations.json"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

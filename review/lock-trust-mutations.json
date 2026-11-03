@@ -1,0 +1,45 @@
+{
+  "note": "R84（锁自己可不可信）的证红变异：M355–M359，每条对应一条被清掉的「标题比断言宽」的锁。\n\n为什么单独一个文件：review/mutations.json 正被另一轮并行修改（R70 的 M352–M354 未收口），\n⇒ 两边同时改同一个 JSON 会互相踩（锚点预检、条目编号、提交归属三处都容易出事）⇒ 单独开一份，\n用现成的变异执行器跑：node scripts/mutation-check.mjs review/lock-trust-mutations.json\n（或者 npm run mut -- review/lock-trust-mutations.json）\n\n每条变异的意义：把源码改坏成「这条锁声称要防的那件事真的发生了」，锁必须红。\n⇒ 锁不红 = 这条锁恒绿 = 本轮要清的正是它。",
+  "mutations": [
+    {
+      "id": "M355",
+      "desc": "主进程里**多出一处写钩子配置的旁路**（R84 · F1 · hooks-wiring）：在 ipc/handle.ts 里加一处 `hooks.save(` ⇒ 全仓不再只有 extensions.ts 一处 ⇒ '全仓只有 extensions.ts 这一处写钩子配置' 这条锁必须红（改前它只数 extensions.ts 内部 ⇒ 照样绿）",
+      "file": "apps/desktop/src/main/ipc/handle.ts",
+      "find": "export function createTrustedHandle(): HandleRegistrar {\n",
+      "replace": "export function createTrustedHandle(): HandleRegistrar {\n  const extraHookWriter = 'hooks.save(';\n  void extraHookWriter;\n",
+      "test": "apps/desktop/src/main/hooks-wiring.test.ts"
+    },
+    {
+      "id": "M356",
+      "desc": "**多出一条 git 通道**（R84 · F2 · git-wiring）：在 shared-ipc 的 channels.ts 里加第 8 条 GIT_ 通道 ⇒ '七条 git 通道' 这个承诺被打破 ⇒ 那条锁必须红（改前数量来自测试自己手写的名单 ⇒ 照样绿）",
+      "file": "packages/shared-ipc/src/channels.ts",
+      "find": "  GIT_PUSH: 'git:push',\n",
+      "replace": "  GIT_PUSH: 'git:push',\n  GIT_BRANCH: 'git:branch',\n",
+      "test": "apps/desktop/src/main/git-wiring.test.ts"
+    },
+    {
+      "id": "M357",
+      "desc": "**出现一条『通用』git 通道**（R84 · F3 · git-wiring）：加一条 GIT_ANY ⇒ 按动作分级失效 ⇒ '没有通用 git 命令通道' 这条锁必须红（改前只禁了 GIT_RUN/GIT_EXEC/GIT_RAW/GIT_SHELL 四个具体名字 ⇒ 照样绿；这一条同时也会被数量断言逮住 —— 两条断言一起兜，是有意的双保险）",
+      "file": "packages/shared-ipc/src/channels.ts",
+      "find": "  GIT_COMMIT: 'git:commit',\n",
+      "replace": "  GIT_COMMIT: 'git:commit',\n  GIT_ANY: 'git:any',\n",
+      "test": "apps/desktop/src/main/git-wiring.test.ts"
+    },
+    {
+      "id": "M358",
+      "desc": "**解析器的产物里带上了 html 字段**（R84 · F4 · docs-wiring）：把 `k: 'html'` 改成 `html:` ⇒ 产物里就是一个 HTML 字符串字段 ⇒ '产物只有结构、不许有 html 字段' 这条锁必须红（改前的正则只挡 `html: '...'` 这种字面量写法 ⇒ `html: raw` 直接逃逸）",
+      "file": "apps/desktop/src/renderer/src/markdown/parse.ts",
+      "find": "blocks.push({ k: 'html', text: line.trim() });\n",
+      "replace": "blocks.push({ html: line.trim() });\n",
+      "test": "apps/desktop/src/main/docs-wiring.test.ts"
+    },
+    {
+      "id": "M359",
+      "desc": "**打开方式的启动层自己判了一次档**（R84 · F5 · browser-wiring）：在 open-with-launch.ts 里加一处 decideGate( ⇒ 判档被抄到了 gate 之外 ⇒ '判档只活在 open-with-gate.ts 一处' 这条锁必须红（改前只查 ipc 层与服务层，launch 层从来没被查过 ⇒ 照样绿）",
+      "file": "apps/desktop/src/main/open-with-launch.ts",
+      "find": "  return [url];\n",
+      "replace": "  const gate = decideGate(url);\n  void gate;\n  return [url];\n",
+      "test": "apps/desktop/src/main/browser-wiring.test.ts"
+    }
+  ]
+}

@@ -2840,6 +2840,158 @@ const walkLiveFiles = (exts) => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 55–57. 对外 Release 文案里的三个数，必须跟真源对齐（R73 · 2026-10-25）
+ *
+ * 为什么立它：`docs/RELEASE-PREP.md` §二 那份文案的用途是**贴进 Releases 编辑器**
+ * ⇒ 贴出去就是**对外的假数字**。而它此前写的是 `2207 通过 / 150 文件` · `51 条 + 48 处` ·
+ * `69 步` · `330 条` —— 真值早已走到 `2265+/155` · `54/52` · `71 步` · `351 条`
+ * ⇒ **谁都没改它**，因为**没有任何判据盯着它**（本仓老账：抄出来的数会漂，而没人叫）。
+ *
+ * 处置分三类（沿用仓库口径）：
+ * ① **该守的 ⇒ 接真源**（本组三条）：文档一致性判据条数 / 注入自检处数 / 变异条数
+ *    —— 三者的真源都能从仓里**机器推导**，所以可以写死 + 用判据钉住。
+ * ② **别处已有的 ⇒ 删副本**（e2e 步数 / 测试文件数）：PROGRESS「当前规模」行已有人守 ⇒ 文案只指路。
+ * ③ **每笔都变的 ⇒ 不写死**（用例数 / 耗时）：改成"怎么核"。
+ *
+ * ⚠️ **耦合要说清楚**：加一条判据 / 一条注入用例 / 一条变异 ⇒ 必须同步 `docs/RELEASE-PREP.md` §二 的那个数，
+ *   本组三条会当场红并指出改哪儿 ⇒ 这是"把一处手抄变成一处必红的锁"，不是"制造红灯"。
+ * ------------------------------------------------------------------ */
+
+/**
+ * Release 文案里那段 bash 代码块 —— **贴进 Releases 编辑器的就只有它**。
+ *
+ * 为什么只取代码块：① 判据要盯的是**对外的那份东西**，块外的说明文字不是文案；
+ * ② 块外（本文件的分类表与自查段）允许出现同样的字样 ⇒ 不分块就会把说明当文案数（认错对象）。
+ */
+const releaseCopyBlock = () => {
+  const prep = read('docs/RELEASE-PREP.md');
+  const m = /```bash\r?\n([\s\S]*?)```/.exec(prep);
+  return m?.[1] ?? '';
+};
+
+{
+  // 判据数 = 本脚本里每一次 report 调用（每条判据一次 ⇒ 一一对应）。
+  // 数法只取**行首**的调用 ⇒ 注释里提到这个词不会把数数多（不写"两份实现"）。
+  // 为什么不数运行时的 checks 数组长度：那样会把**本组三条自己**算进去 ⇒ 自指 ⇒ 当不了判据。
+  // ⚠️ 与"全文出现次数"**交叉对账**：两者不等 = 有人把调用写成了 `const x = report` 加调用括号这种形状
+  //   ⇒ 行首数法会**少数而不自知** ⇒ 当场红并要求同步数法（**不静默按错形状算**）。
+  //   ⚠️ **交叉计数要排除注释行**：本条注释自己就提到过这个词形（第一版把判据自己炸红了 ⇒ 又一个"判据自伤"）
+  //   ⇒ 只数**代码行**里的出现次数。
+  const src = read('scripts/check-docs.mjs');
+  const truth = [...src.matchAll(/^\s*report\(/gm)].length;
+  const codeOnly = src
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join('\n');
+  const allCalls = [...codeOnly.matchAll(/\breport\(/g)].length;
+  const stated = /文档一致性\s*(\d+)\s*条判据/.exec(releaseCopyBlock())?.[1];
+  report(
+    '对外 Release 文案里的「文档一致性 N 条判据」与真源一致（R73：贴出去就是对外的假数字）',
+    stated !== undefined && Number(stated) === truth && allCalls === truth,
+    [
+      stated === undefined ? '文案代码块里找不到「文档一致性 N 条判据」—— 定位器失效（防失焦先红）' : '',
+      `真源 = scripts/check-docs.mjs 里的判据数 ${String(truth)}；文案写 ${stated ?? '(未写)'}`,
+      allCalls !== truth
+        ? `   ⇒ 调用形状变了（行首 ${String(truth)} 处 vs 全文 ${String(allCalls)} 处）⇒ 同步改本条判据的数法，别让它少数而不自知`
+        : '',
+      stated !== undefined && Number(stated) !== truth
+        ? '   ⇒ 加/删判据后必须同步 docs/RELEASE-PREP.md §二 的这个数（或把那处文案改成"怎么核"）'
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+{
+  // 注入自检用例数 = verify-docs-check.mjs 里用例数组的条数。
+  // 数法：数用例缩进层级的 expect 行（每个用例恰有一条）⇒ 顺带与 name 行数对账，
+  // 两数不等 = 用例数组的形状变了 ⇒ 当场红并要求同步数法（**不静默按新形状算**）。
+  const stated = /(\d+)\s*处注入自检/.exec(releaseCopyBlock())?.[1];
+  const src = read('scripts/verify-docs-check.mjs');
+  const truth = [...src.matchAll(/^ {4}expect:/gm)].length;
+  const names = [...src.matchAll(/^ {4}name:/gm)].length;
+  report(
+    '对外 Release 文案里的「M 处注入自检」与真源一致（R73）',
+    stated !== undefined && Number(stated) === truth && truth === names,
+    [
+      stated === undefined ? '文案代码块里找不到「M 处注入自检」—— 定位器失效（防失焦先红）' : '',
+      `真源 = scripts/verify-docs-check.mjs 里的用例数 ${String(truth)}（用例名 ${String(names)} 条）；文案写 ${stated ?? '(未写)'}`,
+      truth !== names
+        ? '   ⇒ 用例数组的形状变了（expect 与 name 的条数不等）⇒ 同步改本条判据的数法，别让它按新形状默默算'
+        : '',
+      stated !== undefined && Number(stated) !== truth
+        ? '   ⇒ 加/删注入用例后必须同步 docs/RELEASE-PREP.md §二 的这个数'
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+{
+  // 变异条数 = review/mutations.json 里 mutations 数组的条目数（清单本身就是真源）。
+  const stated = /变异测试\s*(\d+)\s*条/.exec(releaseCopyBlock())?.[1];
+  let truth = -1;
+  let why = '';
+  try {
+    const mut = JSON.parse(read('review/mutations.json'));
+    if (Array.isArray(mut.mutations)) truth = mut.mutations.length;
+    else why = 'review/mutations.json 里没有 mutations 数组（结构变了）';
+  } catch (err) {
+    why = `review/mutations.json 读不出来：${err instanceof Error ? err.message : String(err)}`;
+  }
+  report(
+    '对外 Release 文案里的「变异测试 K 条」与真源一致（R73）',
+    stated !== undefined && truth >= 0 && Number(stated) === truth,
+    [
+      stated === undefined ? '文案代码块里找不到「变异测试 K 条」—— 定位器失效（防失焦先红）' : '',
+      why,
+      `真源 = review/mutations.json 里的条目数 ${String(truth)}；文案写 ${stated ?? '(未写)'}`,
+      stated !== undefined && truth >= 0 && Number(stated) !== truth
+        ? '   ⇒ 加/删变异后必须同步 docs/RELEASE-PREP.md §二 的这个数'
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 58. 对外 Release 文案里**不许复述别处已有人守的数**（R75 · 2026-10-25）
+ *
+ * 为什么立它：R73 把文案里的数按三类处置完，还剩一类风险 ——
+ * **同一个数在两处各写一遍**：一处有人盯（PROGRESS「当前规模」行），另一处没人盯（文案）⇒
+ * 后者会**静默漂**，而它偏偏是**贴给外部读者看的那一份**。
+ * 本轮处置：e2e 步数 / 测试文件数**只指路，不复述**（真源在 PROGRESS + 第 4b 条）。
+ *
+ * 口径：只看**贴出去的那段代码块**（`releaseCopyBlock`）⇒ 块外的说明与分类表不受影响
+ * （分类表里写"e2e 步数"是**讨论**这件事，不是对外声称）。
+ *
+ * 为什么这条能机械化：禁的是**两种确定的形态**（"N 步" / "N 个测试文件"）⇒ 不是散文判据。
+ * ------------------------------------------------------------------ */
+{
+  const block = releaseCopyBlock();
+  // ⚠️ **无匹配时 exec 返回的是 null，不是 undefined** —— 写 `=== undefined` 会让本条**永远红**
+  //   （本轮第一版就栽在这里：门禁当场红 ⇒ 一查才发现是判据自己写错，不是文档漂移）⇒ 一律用"是否为空"判。
+  const dupSteps = /(\d+)\s*步/.exec(block);
+  const dupFiles = /(\d+)\s*个测试文件/.exec(block);
+  report(
+    '对外 Release 文案里不重复「别处已有人守」的数（e2e 步数 / 测试文件数 ⇒ 只指路，不复述）',
+    !dupSteps && !dupFiles,
+    [
+      dupSteps
+        ? `文案代码块里写了「${dupSteps[0]}」—— 这个数已由 docs/PROGRESS.md「当前规模」行 + 第 4b 条盯着 ⇒ 这里只指路`
+        : '',
+      dupFiles ? `文案代码块里写了「${dupFiles[0]}」—— 同上：已由 PROGRESS「当前规模」行盯着 ⇒ 这里只指路` : '',
+      !dupSteps && !dupFiles ? '（现状：文案只写"步骤数见 docs/PROGRESS.md「当前规模」行"，不抄第二份）' : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

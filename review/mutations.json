@@ -2811,6 +2811,30 @@
       "find": "                      {Icon === undefined ? null : <Icon size={15} />}\n",
       "replace": "",
       "test": "apps/desktop/src/renderer/src/nav-wiring.test.ts"
+    },
+    {
+      "id": "M352",
+      "desc": "许可声明**不再被真正用上**（R70 · 排查39 · 第三方素材声明）：卡片里把常量引用换成一句写死的字面量 ⇒ 名字还在（import 留着）、声明却不在渲染里 ⇒ 打包时被树摇掉 ⇒ 分发副本里没有版权声明",
+      "file": "apps/desktop/src/renderer/src/features/notices/NoticesCard.tsx",
+      "find": "        {LUCIDE_NOTICE}\n",
+      "replace": "        第三方图标素材声明（此处略）\n",
+      "test": "apps/desktop/src/renderer/src/features/notices/notices-card.test.tsx"
+    },
+    {
+      "id": "M353",
+      "desc": "概览页**不再挂那张卡**（R70 · 排查39 · 第三方素材声明）：卡片写好了却忘了渲染 ⇒ 声明照样进不了分发副本，而界面上看不出任何异常",
+      "file": "apps/desktop/src/renderer/src/App.tsx",
+      "find": "      <NoticesCard />\n\n",
+      "replace": "",
+      "test": "apps/desktop/src/renderer/src/features/notices/notices-card.test.tsx"
+    },
+    {
+      "id": "M354",
+      "desc": "声明文本**被改写**（R70 · 排查39 · 第三方素材声明）：把许可名改一个字（ISC License → ISCLicence）⇒ 版权声明不再是原文，等于没保留",
+      "file": "apps/desktop/src/renderer/src/ui/icons.tsx",
+      "find": "ISC License. Copyright (c) for portions of Lucide",
+      "replace": "ISCLicence. Copyright (c) for portions of Lucide",
+      "test": "apps/desktop/src/renderer/src/ui/icons.test.tsx"
     }
   ]
 }

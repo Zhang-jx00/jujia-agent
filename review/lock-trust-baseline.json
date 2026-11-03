@@ -1,0 +1,33 @@
+{
+  "note": "锁可信度判据的存量基线（棘轮）。每条 = \"标题宣称的覆盖面比断言宽\"，且已登记原因。\n· 新问题（不在本表里）⇒ 判据红 ⇒ 必须当场修，不得往表里加；\n· 表里某条被修好（现扫查不到）⇒ 判据也红 ⇒ 逼你回来删它 ⇒ 本表只许缩、不许涨。",
+  "findings": [
+    {
+      "file": "apps/desktop/src/renderer/src/features/settings/settings-wiring.test.ts",
+      "rule": "R-C",
+      "title": "五个设置类面板**只在设置中心**里被挂载（App.tsx 不许再直接 import 它们）",
+      "why": "标题承诺了数量「五个」，但断言体里没有把数量钉住",
+      "reason": "存量：已登记，待收口（见 review/REVIEW-LOG.md 的 R82–R84）"
+    },
+    {
+      "file": "packages/agent-core/src/permissions/rule-wire-consistency.test.ts",
+      "rule": "R-B",
+      "title": "契约接受 checkRuleInput 接受的每一种长度",
+      "why": "标题声称覆盖全体，但断言体里没有遍历/枚举/计数结构",
+      "reason": "存量：已登记，待收口（见 review/REVIEW-LOG.md 的 R82–R84）"
+    },
+    {
+      "file": "packages/ui-tokens/src/theme-pack.test.ts",
+      "rule": "R-C",
+      "title": "四个内置包的按钮字色都还是 #101010 ⇒ 渲染结果与接线前一致（e2e 那条 5.94:1 不变）",
+      "why": "标题承诺了数量「四个」，但断言体里没有把数量钉住",
+      "reason": "存量：已登记，待收口（见 review/REVIEW-LOG.md 的 R82–R84）"
+    },
+    {
+      "file": "packages/ui-tokens/src/theme-pack.test.ts",
+      "rule": "R-C",
+      "title": "四个内置包的主色都可用（\"内置包不会触发闸门\"是证过的，不是假设）",
+      "why": "标题承诺了数量「四个」，但断言体里没有把数量钉住",
+      "reason": "存量：已登记，待收口（见 review/REVIEW-LOG.md 的 R82–R84）"
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import type { AppInfo, ConfigSnapshot, ConnectionView } from '@jujia/shared-ipc'
  */
 import type { ThemePack } from '@jujia/ui-tokens';
 import { WorkspaceCard } from './features/workspace/WorkspaceCard';
+import { NoticesCard } from './features/notices/NoticesCard';
 import { NAV_GROUPS, TAB_ICON, TAB_LABEL } from './nav';
 import type { Tab } from './nav';
 import { applyThemeVars } from './features/appearance/theme-vars';
@@ -478,6 +479,9 @@ function Overview({ info, config }: { info: AppInfo; config: ConfigSnapshot }): 
       </section>
 
       <WorkspaceCard />
+
+      {/* R70 · 排查39：第三方素材与许可 —— 声明必须被**用上**才留得住（源码里有 ≠ 随副本保留） */}
+      <NoticesCard />
 
       <section className="p0-card">
         <h2>安全基线（任一为否即拒绝启动）</h2>

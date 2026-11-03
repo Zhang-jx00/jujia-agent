@@ -148,12 +148,20 @@ describe('打开方式三档（M10 收尾）：外发动作的接线锁', () => 
   const serviceSource = stripComments(readFileSync(join(here, 'open-with-service.ts'), 'utf8'));
   const launchSource = stripComments(readFileSync(join(here, 'open-with-launch.ts'), 'utf8'));
 
-  it('IPC 层不自己判档：判档只活在 open-with-gate.ts 一处', () => {
+  it('打开方式这一族的判档只活在 open-with-gate.ts 一处（ipc 层 / 服务层 / 启动层都不许自己判）', () => {
+    // **扫全族**（R82 · 排查40）：原来只查了 ipc 层与服务层 ——
+    // 而真正把东西交给本机的 `open-with-launch.ts` **从来没被查过** ⇒ 它自己判一次档，锁照样绿。
+    const family = [
+      ['ipc/browser.ts', ipcSource],
+      ['open-with-service.ts', serviceSource],
+      ['open-with-launch.ts', launchSource],
+      ['open-with-gate.ts', gateSource],
+    ] as const;
+    const hits = family.filter(([, src]) => src.includes('decideGate(')).map(([name]) => name);
+    expect(hits, `判档被抄到了别处（只有 open-with-gate.ts 该有）：${hits.join(', ')}`).toEqual(['open-with-gate.ts']);
     // 就地判档 = 变异咬不到、单测也测不动的那一类老毛病（与 config-write、git-gate 同一教训）
     expect(ipcSource).toContain('createOpenWithService(');
     expect(ipcSource).toContain('openWith.openWith(');
-    expect(ipcSource).not.toContain('decideGate(');
-    expect(serviceSource).not.toContain('decideGate(');
     expect((gateSource.match(/decideGate\(/g) ?? []).length).toBe(1);
   });
 

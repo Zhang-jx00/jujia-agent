@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -22,6 +22,33 @@ const strip = (s: string): string =>
 const ext = strip(readFileSync(join(here, 'ipc', 'extensions.ts'), 'utf8'));
 const gate = strip(readFileSync(join(here, 'hooks-gate.ts'), 'utf8'));
 
+/**
+ * 递归收集主进程源码（测试文件不算）—— **真扫**用。
+ *
+ * R82 · 排查40：原来这条锁只数 `extensions.ts` **内部**的 `hooks.save(` 出现次数，
+ * 却在标题里声称「**全仓**只有这一处」⇒ 别的文件里再写一处，这条锁照样绿 ——
+ * 而那正是一条**不走权限门的旁路**（多一处 = 多一条绕过 `hooks-gate` 的后门）。
+ */
+function collectMainSources(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      collectMainSources(full, out);
+      continue;
+    }
+    if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) out.push(full);
+  }
+  return out;
+}
+
+/** 主进程里真正写着 `hooks.save(` 的文件（剥注释后 —— 注释里提到的不算） */
+function hookConfigWriters(): string[] {
+  return collectMainSources(here)
+    .filter((file) => strip(readFileSync(file, 'utf8')).includes('hooks.save('))
+    .map((file) => file.slice(here.length + 1).replace(/\\/g, '/'))
+    .sort();
+}
+
 describe('HOOKS_SET 真的过权限门', () => {
   it('判档 + 自证 + 弹窗三件都在，且都发生在写盘之前', () => {
     const saveAt = ext.indexOf('hooks.save(');
@@ -38,6 +65,11 @@ describe('HOOKS_SET 真的过权限门', () => {
   });
 
   it('全仓只有 extensions.ts 这一处写钩子配置（多一处就是多一条不走门的旁路）', () => {
+    // **真的扫全仓**（R82 · 排查40）：原写法是 `expect(ext.split('hooks.save(').length - 1).toBe(1)`
+    // —— 那只数了 `extensions.ts` **自己内部**有几处，而标题声称的是「全仓只有这一处」。
+    // ⇒ 别的文件里再写一处 `hooks.save(`，这条锁照样绿 —— 而那是一条不走 `hooks-gate` 的旁路。
+    expect(hookConfigWriters(), '写钩子配置的地方不止一处 ⇒ 多出来的那条不走权限门').toEqual(['ipc/extensions.ts']);
+    // 同一文件里写两遍同样是两条旁路 ⇒ 顺手把"只有一处"也钉住
     expect(ext.split('hooks.save(').length - 1).toBe(1);
   });
 

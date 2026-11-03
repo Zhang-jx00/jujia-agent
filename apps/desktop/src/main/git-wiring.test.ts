@@ -30,16 +30,45 @@ const preloadSource = stripComments(readFileSync(join(here, '../preload/index.ts
 
 const GIT_CHANNELS = ['GIT_STATUS', 'GIT_DIFF', 'GIT_LOG', 'GIT_STAGE', 'GIT_UNSTAGE', 'GIT_COMMIT', 'GIT_PUSH'] as const;
 
+/**
+ * **运行时那张表里的 git 通道**（R82 · 排查40）。
+ *
+ * 为什么不能只信上面那份手写名单：那份名单是**测试自己写的** ⇒ 产品加一条 git 通道，
+ * 名单不会变、锁也不会红，而标题里的「七条」已经陈旧 ⇒ 标题声称的覆盖面比实际测到的宽。
+ * ⇒ 数量与名单一律从**运行时那张表**（`IPC`）数，再与名单对账。
+ */
+function gitChannelsInRuntime(): string[] {
+  return Object.keys(IPC)
+    .filter((k) => k.startsWith('GIT_'))
+    .sort();
+}
+
+/** 通道常量登记表（shared-ipc 的 channels.ts）—— 「登记在 channels.ts」这句要有依据 */
+const channelsSource = readFileSync(
+  join(here, '..', '..', '..', '..', 'packages', 'shared-ipc', 'src', 'channels.ts'),
+  'utf8',
+);
+
 describe('通道登记与命名', () => {
-  it('七条 git 通道都在 channels.ts 里登记（不是裸字符串）', () => {
-    for (const name of GIT_CHANNELS) {
-      expect(IPC).toHaveProperty(name);
+  it('七条 git 通道都登记在 channels.ts 的 IPC 通道表里（数量从运行时那张表数，不靠手写名单）', () => {
+    // **数量从运行时那张表数**（R82 · 排查40）：原来这份"七条"是测试自己手写的名单 ⇒
+    // 产品加一条 git 通道，锁照样绿，而标题已经陈旧。
+    const inRuntime = gitChannelsInRuntime();
+    expect(inRuntime.length, `git 通道数量变了 ⇒ 标题与下面的名单都要一起改：${inRuntime.join(', ')}`).toBe(7);
+    // 名单与运行时对账（改名 / 漏登记 / 多登记都会红）
+    expect(inRuntime).toEqual([...GIT_CHANNELS].sort());
+    // 「登记在 channels.ts」这句话要有依据：七条都能在登记表里找到
+    for (const name of inRuntime) {
+      expect(channelsSource, `${name} 没登记在 channels.ts 里`).toContain(`${name}:`);
     }
+    // 「不许裸字符串」由下面那条锁管（handle(IPC.X,））—— 不在这条锁的覆盖面里，就不写进这条锁的标题
   });
 
   it('没有"通用 git 命令"通道 —— 那会让按动作分级失效', () => {
-    const names = Object.keys(IPC).join(' ');
-    expect(names).not.toMatch(/GIT_RUN|GIT_EXEC|GIT_RAW|GIT_SHELL/);
+    // **白名单式**（R82 · 排查40）：原来只禁了四个具体名字（GIT_RUN/GIT_EXEC/GIT_RAW/GIT_SHELL）
+    // ⇒ 加一条 `GIT_ANY` 照样绿，而那正是这条锁要防的"通用命令通道"。
+    const unknown = gitChannelsInRuntime().filter((k) => !GIT_CHANNELS.includes(k as (typeof GIT_CHANNELS)[number]));
+    expect(unknown, `出现了不在已知清单里的 git 通道：${unknown.join(', ')}`).toEqual([]);
   });
 
   it('每条通道都经统一入口注册（自带发送方校验）', () => {

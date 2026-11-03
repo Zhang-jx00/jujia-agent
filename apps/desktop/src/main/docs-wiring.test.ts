@@ -39,8 +39,12 @@ describe('文档查看的安全底线（渲染第三方文件内容）', () => {
     }
   });
 
-  it('解析器的产物只有结构，没有任何"HTML 字符串"字段', () => {
-    expect(parseSource).not.toMatch(/html:\s*['"`<]/);
+  it('解析器的产物只有结构：源码里不许出现 html 字段（键名级断言，任何取值形式都算）', () => {
+    // **键名级**断言（R82 · 排查40）：原来是 `not.toMatch(/html:\s*['"`<]/)` ——
+    // 那只挡得住 `html: '...'` 这种**字面量**写法 ⇒ 改成 `html: raw`（值是变量）就逃逸了，
+    // 而那恰恰就是「产物里带了一个 HTML 字符串字段」的真身。
+    // ⇒ 现在按**键名**判：`{` / `,` 后面的 `html:` 一律不许（k='html' 是值不是键，不受影响）。
+    expect(parseSource).not.toMatch(/[{,]\s*html\s*:/);
     // 原始 HTML 一律落成 k='html' 的字面文本（渲染层再原样显示）
     expect(parseSource).toContain("k: 'html'");
   });

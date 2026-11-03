@@ -57,9 +57,20 @@ describe('图标契约', () => {
     }
   });
 
-  it('许可声明在模块里（ISC 要求随副本保留）', () => {
+  it('声明文本本身完整：出处 + 许可 + 版权行（**这条只测文本本身**）', () => {
+    /**
+     * ⚠️ **这条锁的覆盖面到此为止**（R70 · 排查39）。
+     * 它原来的标题写着「ISC 要求随副本保留」，实际只断言了「模块里有这个字符串」⇒
+     * **判据宣称的覆盖面 ≠ 它实际测到的覆盖面**：真实情况是这段声明**没有任何被分发的代码引用它**
+     * ⇒ 打包时被树摇掉 ⇒ 分发副本里一个字都没有（实测构建产物对这段文字 0 命中）。
+     * ⇒ 「随副本保留」这件事改由两处**真的去测**的地方负责：
+     *   · `features/notices/notices-card.test.tsx`（界面把它渲染出来了）
+     *   · `npm run check:notices`（构建产物里查得到这段文字）
+     * 这里只管**文本本身**完整（出处 / 许可 / 版权行，缺一就不是合格的声明）。
+     */
     expect(LUCIDE_NOTICE).toContain('Lucide');
-    expect(LUCIDE_NOTICE).toContain('ISC');
+    expect(LUCIDE_NOTICE).toContain('ISC License');
+    expect(LUCIDE_NOTICE).toContain('Copyright');
   });
 });
 

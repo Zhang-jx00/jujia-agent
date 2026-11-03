@@ -162,6 +162,29 @@ if (headStated === '') {
   );
 }
 
+/**
+ * Release 文案里那三个数的锚点**从现树现取**（与上面 e2e 步数、队列计数同一手法）—— **不写死数字**。
+ *
+ * 为什么必须现取：R73 新立的三条判据守的是「对外文案里的数 == 真源」，
+ * 而真源（判据条数 / 注入用例数 / 变异条数）**每轮都会变** ⇒ 写死的锚点**必然随之失效**
+ * ⇒ 自检会当场中止（"锚点未命中"）—— 那个中止是**对的**：一个锚点漂了的注入用例等于没有用例。
+ *
+ * 取的是**代码块里**的那三个数（贴进 Releases 编辑器的就是那块），
+ * 而不是全文第一个匹配 ⇒ 块外的分类表里同样的字样不会抢走锚点。
+ */
+const releasePrepText = readFileSync(join(repoRoot, 'docs/RELEASE-PREP.md'), 'utf8');
+const releaseBash = /```bash\r?\n([\s\S]*?)```/.exec(releasePrepText)?.[1] ?? '';
+const prepCheckCount = /文档一致性\s*(\d+)\s*条判据/.exec(releaseBash)?.[1];
+const prepInjectCount = /(\d+)\s*处注入自检/.exec(releaseBash)?.[1];
+const prepMutCount = /变异测试\s*(\d+)\s*条/.exec(releaseBash)?.[1];
+if (!prepCheckCount || !prepInjectCount || !prepMutCount) {
+  die(
+    '自检锚点失效：RELEASE-PREP §二 的代码块里找不到那三个数' +
+      '（文档一致性 N 条判据 / M 处注入自检 / 变异测试 K 条）' +
+      ' —— 先把文案改到有判据盯的形态，再跑这个验证',
+  );
+}
+
 /** 每个用例：文件、要替换的片段、替换成什么、期望命中的检查项名 */
 const cases = [
   {
@@ -202,8 +225,8 @@ const cases = [
     // ⚠️ 这条锚点**跟着 PROGRESS 的真值走** ⇒ 每轮测试数一变就要更新它
     //   （R58 就撞上过一次：109 → 114，锚点没跟着改 ⇒ 自检**当场中止**并报「锚点未命中」——
     //   那个中止是**对的**：一个锚点漂了的注入用例等于没有用例。）
-    from: '渲染层组件测试 114 例',
-    to: '渲染层组件测试 113 例',
+    from: '渲染层组件测试 116 例',
+    to: '渲染层组件测试 115 例',
     expect: '渲染层组件测试数与实际一致',
   },
   {
@@ -735,6 +758,40 @@ const cases = [
     from: '## 核心理念与独特之处',
     to: '## 核心理念与独特之处（本仓库' + '当前私有' + '）',
     expect: '状态句回归锁',
+  },
+  {
+    // R73：Release 文案里的「文档一致性 N 条判据」漂了 ⇒ 第 55 条判据必须红。
+    // 注入形态 = 把 N 改成 N+1（其余一字不动 ⇒ 判据必须当场判红）。
+    name: 'Release 文案里的文档一致性判据条数漂了',
+    file: 'docs/RELEASE-PREP.md',
+    from: `文档一致性 ${prepCheckCount} 条判据`,
+    to: `文档一致性 ${String(Number(prepCheckCount) + 1)} 条判据`,
+    expect: '对外 Release 文案里的「文档一致性 N 条判据」与真源一致',
+  },
+  {
+    // R73：Release 文案里的「M 处注入自检」漂了 ⇒ 第 56 条判据必须红。
+    name: 'Release 文案里的注入自检处数漂了',
+    file: 'docs/RELEASE-PREP.md',
+    from: `${prepInjectCount} 处注入自检`,
+    to: `${String(Number(prepInjectCount) + 1)} 处注入自检`,
+    expect: '对外 Release 文案里的「M 处注入自检」与真源一致',
+  },
+  {
+    // R73：Release 文案里的「变异测试 K 条」漂了 ⇒ 第 57 条判据必须红。
+    name: 'Release 文案里的变异条数漂了',
+    file: 'docs/RELEASE-PREP.md',
+    from: `变异测试 ${prepMutCount} 条`,
+    to: `变异测试 ${String(Number(prepMutCount) + 1)} 条`,
+    expect: '对外 Release 文案里的「变异测试 K 条」与真源一致',
+  },
+  {
+    // R75：Release 文案里**复述了别处已有人守的数**（e2e 步数）⇒ 第 58 条判据必须红。
+    // 这一条守的是"少写"而不是"写错" ⇒ 注入形态 = 在 e2e 那行补一个步数。
+    name: 'Release 文案里复述了已有人守的 e2e 步数',
+    file: 'docs/RELEASE-PREP.md',
+    from: '真应用界面级（含权限门',
+    to: '真应用界面级 71 步（含权限门',
+    expect: '对外 Release 文案里不重复「别处已有人守」的数',
   },
 ];
 
