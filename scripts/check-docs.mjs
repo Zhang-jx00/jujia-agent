@@ -2992,6 +2992,49 @@ const releaseCopyBlock = () => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 59. CI workflow 里跑的 npm 门禁脚本，必须在 README 挂出（R71 · 2026-11-03）
+ *
+ * 为什么立它：第 1 条只查「README 提到的脚本都存在」，**不查反向** ⇒
+ * 门禁进了 CI，却没人知道它存在 —— 立判据前的现扫：`license:check` / `check:notices` /
+ * `check:locks` / `check:locks:selftest` 四个 CI 在跑的脚本，README 一处都没挂出
+ * （check:notices 是 R70 自己新进 CI 的 ⇒ 本判据立起来**当场红过一次**，补挂后转绿）。
+ *
+ * 口径：
+ * ① 扫 `.github/workflows/*.yml` 里所有 `run: npm run <script>`（两个 workflow 都算 ——
+ *    mutation.yml 是手动慢档，`mut` 在 README 已有挂出 ⇒ 不添新负担，
+ *    但将来谁往任何一个 workflow 里加脚本，都会被这条咬住）；
+ * ② README 侧的「挂出」与第 1 条同一数法（`npm run <script>` 字面量，大小写不敏感）
+ *    —— 不细分"必须在那一段命令清单里"：README 有多处命令表，任何一处挂出都算"看得见"；
+ * ③ 一个脚本都没扫到 = 定位器失效（防失焦先红），与第 54 条同一形状。
+ * ------------------------------------------------------------------ */
+{
+  const wfDir = join(repoRoot, '.github', 'workflows');
+  const sources = new Map();
+  for (const f of readdirSync(wfDir).filter((n) => n.endsWith('.yml') || n.endsWith('.yaml'))) {
+    for (const m of readFileSync(join(wfDir, f), 'utf8').matchAll(
+      /run:\s*npm run ([a-z][a-z0-9:_-]*)/g,
+    )) {
+      if (!sources.has(m[1])) sources.set(m[1], f);
+    }
+  }
+  const mentioned = new Set([...readme.matchAll(/npm run ([a-z][a-z0-9:_-]*)/gi)].map((x) => x[1]));
+  const missing = [...sources.keys()].filter((s) => !mentioned.has(s));
+  report(
+    'CI workflow 里跑的 npm 门禁脚本，必须在 README 挂出（R71：门禁进了 CI 却没人知道它存在）',
+    sources.size > 0 && missing.length === 0,
+    [
+      sources.size === 0 ? 'workflow 里一个 npm run 都没扫到 —— 定位器失效（防失焦先红）' : '',
+      ...missing.map((s) => `README 里没有「npm run ${s}」（它在 ${String(sources.get(s))} 里被 CI 跑）`),
+      missing.length > 0
+        ? '   ⇒ 在 README 的命令清单里补上（或把该脚本从 workflow 里拿掉）—— 二者必居其一。'
+        : '（现状：两个 workflow 里跑的脚本在 README 都有挂出）',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

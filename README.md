@@ -161,6 +161,10 @@ npm run e2e            # 界面级端到端：真应用 + 真点击，72 步全�
 npm run mut            # 变异测试：按 review/mutations.json 逐项改坏代码，验证测试真拦得住
 npm run check:docs     # 文档一致性：文档里的命令/链接/步数/事件数必须与代码一致
 npm run check:docs:selftest  # 检查器自检：逐条注入漂移，证明它真的会失败（而不是永远绿；用例数以脚本输出为准）
+npm run check:locks    # 锁可信度：判据宣称的覆盖面 == 它实际测到的覆盖面吗（CI 在跑）
+npm run check:locks:selftest  # 锁可信度判据的自检：注入"标题与断言不对齐"的锁，证明它真的会咬（CI 在跑）
+npm run license:check  # 依赖许可证：copyleft 依赖一进依赖就被拦（会重生成 docs/DEPENDENCY-LICENSES.md）
+npm run check:notices  # 第三方素材与许可声明：声明必须被用上才算随副本保留（CI 里排在构建之后）
 npm run perf           # 启动性能预算判定（首帧 < 1000ms）
 
 npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/）

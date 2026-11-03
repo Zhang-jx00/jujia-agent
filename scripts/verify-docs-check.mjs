@@ -195,6 +195,16 @@ const cases = [
     expect: 'README 提到的 npm 脚本都存在',
   },
   {
+    // R71（2026-11-03）：「CI 里跑的门禁必须在 README 挂出」这条判据的注入。
+    // 靶子挑 check:notices —— 它是 R70 新进 CI 的脚本，正是这条判据立起来时**当场红过**的那一条；
+    // 注入形态 = 把这行挂出删掉（to 为空 ⇒ 那行只剩注释尾巴），判据必须当场点名它。
+    name: 'CI 门禁脚本从 README 的挂出里消失',
+    file: 'README.md',
+    from: 'npm run check:notices  # 第三方素材与许可声明',
+    to: '',
+    expect: '必须在 README 挂出',
+  },
+  {
     name: '失效的相对链接',
     file: 'README.md',
     from: '| 第三方依赖与许可证 |',

@@ -68,7 +68,7 @@
 ```bash
 npm ci
 npm run typecheck && npm run lint && npm run test      # 全部通过；用例数以当次门禁输出为准（每加一条用例就变 ⇒ 不写死）
-npm run check:docs && npm run check:docs:selftest     # 文档一致性 58 条判据 + 56 处注入自检（两数由仓内脚本现数，对不上就红）
+npm run check:docs && npm run check:docs:selftest     # 文档一致性 59 条判据 + 57 处注入自检（两数由仓内脚本现数，对不上就红）
 npm run e2e        # 真应用界面级（含权限门、审计账、断点续跑；步骤数见 docs/PROGRESS.md「当前规模」行）
 npm run smoke      # 真实启动断言 IPC 全链路与渲染层无 Node 泄漏
 npm run perf       # 启动预算判定（可交互 < 1000ms / 冷启动 < 1500ms，预算见 docs/PERF-BUDGET.md；实测首帧随机器而异）
@@ -101,8 +101,8 @@ npm run mut        # 变异测试 354 条（故意改坏关键约束，验证测
 
 | 文案里的数 | 处置 | 谁盯着它 |
 |---|---|---|
-| 文档一致性 **58 条**判据 | 接真源（写死） | `check:docs` 第 55 条：真源 = `scripts/check-docs.mjs` 里的判据数 |
-| **56 处**注入自检 | 接真源（写死） | `check:docs` 第 56 条：真源 = `scripts/verify-docs-check.mjs` 里的用例数 |
+| 文档一致性 **59 条**判据 | 接真源（写死） | `check:docs` 第 55 条：真源 = `scripts/check-docs.mjs` 里的判据数 |
+| **57 处**注入自检 | 接真源（写死） | `check:docs` 第 56 条：真源 = `scripts/verify-docs-check.mjs` 里的用例数 |
 | 变异 **354 条** | 接真源（写死） | `check:docs` 第 57 条：真源 = `review/mutations.json` 里的条目数 |
 | e2e 步数 / 测试文件数 | **别处已有 ⇒ 删副本**，只指路 | 已由 `docs/PROGRESS.md`「当前规模」行 + `check:docs` 第 4b 条盯着 ⇒ 这里再抄一份就多一处会漂的数（**第 58 条判据专门盯这一条**） |
 | 单测用例数 | 每笔都变 ⇒ 不写死 | 以 `npm run test` 当次输出为准（写死就是一处必假的数） |
