@@ -167,6 +167,7 @@ npm run license:check  # 依赖许可证：copyleft 依赖一进依赖就被拦�
 npm run check:notices  # 第三方素材与许可声明：声明必须被用上才算随副本保留（CI 里排在构建之后）
 npm run perf           # 启动性能预算判定（首帧 < 1000ms）
 
+npm run restore:icon  # 重建打包图标（assets/icon 源图 → build/icon.png；改图标后跑；图标本体已进库）
 npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/）
 ```
 

@@ -160,10 +160,11 @@ apps/desktop ──▶ @jujia/agent-core ──▶ zod
 - **必须 unpack**：`node-pty`（含 `pty.node` / `conpty.node`）与 `@napi-rs/canvas` 的 `.node` ⇒ 打包配置里写了 `asarUnpack`。
 - **主进程产物是 CJS**（`apps/desktop/package.json` 没有 `"type": "module"`，只有根有）；渲染层是 ESM。
 - 输出目录 `apps/desktop/release/` **已 gitignore**；分发走 GitHub Release。
-- ⚠️ **`apps/desktop/build/icon.png`（打包图标）不在 Git 里** —— `.gitignore` 的 `build/` 规则连带命中了它
-  ⇒ 干净克隆上 `npm run dist` **不可用** ⇒ 恢复路径是从入库的 `assets/icon/source-generated.png`
-  生成（脚本 `apps/desktop/scripts/restore-icon.mjs`，**目前没有 npm script 别名指向它**）。
-  ⇒ **发版前必须现扫这一格**（CI 不跑 `dist`，所以这条缺口在 CI 里看不见）。
+- ✅ **`apps/desktop/build/icon.png`（打包图标）已在 Git 里**（R72 · 排查41 修掉：`.gitignore` 改成
+  `build/*` + `!build/icon.png` **精确豁免** —— 此前被 `build/` 规则**连带吞掉** ⇒ 干净克隆上
+  `npm run dist` 不可用，而 CI 不跑 `dist` ⇒ 这格在 CI 里看不见，只能等发版前现扫）。
+  恢复通路照旧可用：`npm run restore:icon`（从入库的 `assets/icon/source-generated.png` 重建；改图标后跑）。
+  **判据**：`check:docs` 第 60 条盯「豁免行在 · 不被忽略 · 真在索引里」三件事（少一件当场红）。
 
 ### 2.6 CI 与门禁分档
 

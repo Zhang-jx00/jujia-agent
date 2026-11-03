@@ -3035,6 +3035,65 @@ const releaseCopyBlock = () => {
 }
 
 /* ------------------------------------------------------------------ *
+ * 60. 打包图标必须真的在 git 索引里（R72 · 2026-11-04）
+ *
+ * 为什么立它：`apps/desktop/build/icon.png` 曾被 `.gitignore` 的 `build/` 规则**连带吞掉**
+ * ⇒ 干净克隆上 `npm run dist` **不可用**（electron-builder 找不到打包图标）
+ * ⇒ 而 **CI 不跑 dist** ⇒ 这条缺口在 CI 里**看不见**，只能等发版前现扫
+ * （`docs/ONBOARDING.md` §2.5 一直这么记）。R72 把图标进库并立这条判据，
+ * 把「发版前必须现扫的一格」变成「每一轮都有机器盯的一格」。
+ *
+ * 三重检查（少一件都算红）：
+ * ① `.gitignore` 里带着豁免行 `!build/icon.png`（防"规则被顺手删掉或改形"）；
+ * ② `git check-ignore` 判它**不被忽略**（防"豁免行写错形状 / 被更宽的规则压住"）；
+ * ③ `git ls-files` 里真的有它（**真值**：进没进索引，只有 git 自己说了算）。
+ * ------------------------------------------------------------------ */
+{
+  const ICON_REL = 'apps/desktop/build/icon.png';
+  const hasException = read('.gitignore')
+    .split('\n')
+    .some((l) => l.trim() === '!build/icon.png');
+  let ignoreState = '';
+  try {
+    execFileSync('git', ['check-ignore', '-q', ICON_REL], { cwd: repoRoot });
+    ignoreState = 'ignored';
+  } catch (err) {
+    // 退出码 1 = 不被忽略（这正是要的）；其余非零 = git 出错 ⇒ 如实报，不折成通过
+    ignoreState =
+      err && typeof err === 'object' && /** @type {{status?: number}} */ (err).status === 1
+        ? 'not-ignored'
+        : `error:${err instanceof Error ? err.message : String(err)}`;
+  }
+  let indexed = '';
+  try {
+    indexed = execFileSync('git', ['ls-files', '--', ICON_REL], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    }).trim();
+  } catch (err) {
+    indexed = `error:${err instanceof Error ? err.message : String(err)}`;
+  }
+  report(
+    '打包图标 apps/desktop/build/icon.png 必须真的在 git 索引里（R72：干净克隆的 npm run dist 依赖它；CI 不跑 dist ⇒ 这格以前没人盯）',
+    hasException && ignoreState === 'not-ignored' && indexed === ICON_REL,
+    [
+      hasException ? '' : '.gitignore 里找不到豁免行「!build/icon.png」—— 被删了或形状变了 ⇒ 图标会被 build/ 规则连带吞掉',
+      ignoreState === 'ignored'
+        ? 'git check-ignore 说它仍被忽略 ⇒ 豁免行没生效（形状不对或被更宽的规则压住）'
+        : '',
+      ignoreState.startsWith('error:') ? `git check-ignore 跑不动：${ignoreState.slice(6)}` : '',
+      indexed === '' ? 'git ls-files 里没有它 ⇒ 图标不在索引里 ⇒ 干净克隆上 npm run dist 会失败' : '',
+      indexed.startsWith('error:') ? `git ls-files 跑不动：${indexed.slice(6)}` : '',
+      hasException && ignoreState === 'not-ignored' && indexed === ICON_REL
+        ? '（现状：豁免行在 · 不被忽略 · 真在索引里；恢复通路 npm run restore:icon 可从 assets/icon/source-generated.png 重建）'
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n     '),
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 汇总
  * ------------------------------------------------------------------ */
 

@@ -10,7 +10,55 @@
 > 轨道分类见 `docs/TRACK-PLANS.md`；排期与修复队列见 `docs/TRACK-ROADMAP.md`。
 ---
 
-## [v1.31.0-排查40 · 门禁清单的「反向」对账：CI 里跑的门禁必须在 README 挂出（R71）] — 2026-11-03 23:36
+## [v1.32.0-排查41 · 发版就绪：打包图标进库 —— 干净克隆的 `npm run dist` 可用性（R72）] — 2026-11-04 00:07
+
+**范围**：`.gitignore`（`build/` → `build/*` + `!build/icon.png` **精确豁免**）·
+`apps/desktop/build/icon.png`（**进库** · 580KB 二进制 —— 打包图标本体）·
+`package.json`（**新别名** `restore:icon` → `apps/desktop/scripts/restore-icon.mjs`）·
+`scripts/check-docs.mjs`（**新立第 60 条判据**：打包图标必须真的在 git 索引里 —— 豁免行在 · 不被忽略 · 真在索引，三重检查）·
+`scripts/verify-docs-check.mjs`（**新增 1 处注入用例**：把豁免行注掉 ⇒ 判据两腿当场断）·
+`README.md`（命令清单挂出 `restore:icon`）· `docs/ONBOARDING.md`（§2.5 从「不在 Git 里」改为「已在 Git 里」+ 判据指针）·
+`docs/RELEASE-PREP.md`（§二 两数接真源同步：59 → **60** 条判据 · 57 → **58** 处注入自检）·
+`docs/PROGRESS.md`（排查41 行）· `docs/TRACK-ROADMAP.md`（§6.3 加 R72 行）·
+`review/REVIEW-LOG.md`（复核 142）· `apps/desktop/package.json`（版本 1.31.0 → 1.32.0）。
+**零新依赖（`sharp` 本就在 devDependencies）、零新通道；零产品代码改动（渲染层与主进程一字未动）。**
+
+1. **题面与现扫（R71 交付后的下一轮，按「不硬凑题面」现扫定）**：`docs/ONBOARDING.md` §2.5 一直记着一格
+   「发版前必须现扫」—— `apps/desktop/build/icon.png`（electron-builder 的打包图标）被 `.gitignore`
+   的 `build/` 规则**连带命中**（`git check-ignore -v` 实证：`.gitignore:5:build/`），
+   `git ls-files` 证实它**不在索引里** ⇒ **干净克隆上 `npm run dist` 不可用**；
+   恢复脚本 `restore-icon.mjs` 存在但**没有 npm script 别名指向它**；
+   而 **CI 不跑 `dist`** ⇒ 这条缺口在 CI 里**看不见**，没有任何门禁会红 ⇒ 与 R71 同款病灶：
+   **没人守的一格，静默漂**。
+2. **修**：① `.gitignore` 改成 `build/*` + `!build/icon.png` —— git 的重包含规则**不允许**在
+   "目录整体被排除"下重包含子文件，必须用"目录内容"形态（`build/*`）才能让豁免行生效
+   （实测 `git check-ignore` 退出码 1 = 不再忽略）；② 图标本体 `git add` 进库（580KB，与
+   555KB 的源图 `assets/icon/source-generated.png` 并存 —— 源图本来就入库，体积不是当初排除的理由，
+   `build/` 是整段粗规则）；③ 根 `package.json` 补 `restore:icon` 别名（`sharp` 已在
+   devDependencies ⇒ 干净克隆 `npm ci` 后这条路是活的）。
+3. **判据（第 60 条）三重检查**：① `.gitignore` 带豁免行 `!build/icon.png`（防"规则被顺手删掉/改形"）·
+   ② `git check-ignore` 判它**不被忽略**（防"豁免写错形状或被更宽规则压住"）·
+   ③ `git ls-files` 里真的有它（**真值**：进没进索引只有 git 自己说了算）—— 少一件当场红，
+   git 调用出错**单列红**（不折成通过）。
+4. **证红的形状（如实记）**：本轮**没有** R71 那种"判据落地即自然红"的便宜 —— 缺口与判据同轮修掉，
+   判据落地即绿 ⇒ **证红由注入用例承担**（自检第 58 处：把豁免行注掉 ⇒ ①②两腿当场断 ⇒ 判据红并点名）。
+5. **边界（如实记）**：① **干净克隆整机 dist 未实跑**（联网取 electron 运行时的旧坑 + 时段阻断
+   ⇒ 不在本轮硬跑；本轮钉住的是"图标在库"这个此前缺失的**前提**，整机演练仍是发版前检查单的一项）；
+   ② **e2e 未重跑**（渲染层与主进程一字未动；第 51 条判据不触发 ⇒ 展示图不用重拍）；
+   ③ **变异未新增**（证红走注入；全量变异在主体提交后的干净基线上核对，结果见回填笔）。
+
+**验证方式**：typecheck 0 · lint 0 · 单测 **2267 通过 / 1 跳过（156 个测试文件）**（与上一轮持平 ⇒ 零产品代码改动）·
+`check:docs` **60 条** 0（**本轮 +1**；⚠️ 第一跑**当场红** —— 第 17 条判据逮住我把 R71 条目时间戳
+写晚 7 分钟（标题 23:36 vs 提交实录 23:29）⇒ 按"时刻跟着 git 的记录写"改准，见复核 142）·
+注入自检 **58 处**全拦 0（`check:docs:selftest` · **+1 处**：注掉 `.gitignore` 豁免行 ⇒ 第 60 条两腿当场断；
+23 个文件逐字节还原 · HEAD 未变）·
+**e2e 未重跑**（渲染层与主进程一字未动；第 51 条判据不触发 ⇒ 展示图不用重拍）·
+**变异未新增**（证红走注入）—— 全量变异在**主体提交后的干净基线**上核对（§6.1 顺序），结果见回填笔。
+
+**回退点**：`v1.31.0-排查40`；上一版 `v1.30.0-排查39`。
+
+---
+## [v1.31.0-排查40 · 门禁清单的「反向」对账：CI 里跑的门禁必须在 README 挂出（R71）] — 2026-11-03 23:29
 
 **范围**：`scripts/check-docs.mjs`（**新立第 59 条判据**：CI workflow 里跑的 npm 门禁脚本必须在 README 挂出）·
 `scripts/verify-docs-check.mjs`（**新增 1 处注入用例**：把 README 里 `check:notices` 那行挂出删掉 ⇒ 判据必须当场点名）·

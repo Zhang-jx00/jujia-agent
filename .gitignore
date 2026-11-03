@@ -2,7 +2,11 @@
 node_modules/
 dist/
 out/
-build/
+# build/ 整目录忽略，但**打包图标例外**：electron-builder 要它，而 CI 不跑 dist，
+# 曾被 `build/` 连带吞掉 ⇒ 干净克隆上 `npm run dist` 不可用（R72 · 排查41 坐实并修掉；
+# check:docs 第 60 条盯「豁免行在 · 不被忽略 · 真在索引里」三件事，少一件当场红）
+build/*
+!build/icon.png
 *.tsbuildinfo
 
 # 测试与覆盖率

@@ -205,6 +205,16 @@ const cases = [
     expect: '必须在 README 挂出',
   },
   {
+    // R72（2026-11-04）：「打包图标必须真的在 git 索引里」这条判据的注入。
+    // 注入形态 = 把 .gitignore 里的豁免行注掉 ⇒ 三重检查的 ①（豁免行在）与
+    // ②（git check-ignore 不再判它豁免）两腿当场断，判据必须红并点名。
+    name: '打包图标的 gitignore 豁免被删',
+    file: '.gitignore',
+    from: '!build/icon.png',
+    to: '#!build/icon.png',
+    expect: '必须真的在 git 索引里',
+  },
+  {
     name: '失效的相对链接',
     file: 'README.md',
     from: '| 第三方依赖与许可证 |',
