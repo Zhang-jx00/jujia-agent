@@ -674,7 +674,7 @@ D:\Github项目\jujia-agent\.machine-lock\
 
 ## 八、踩过的坑（按主题 · 现象 → 根因 → 防线 → 可迁移教训）
 
-> **全部是实测**，不是道听途说。出处：交接文档 §10 / §11 · `review/REVIEW-LOG.md`（复核 001–139）· `docs/TEST-POLICY.md`。
+> **全部是实测**，不是道听途说。出处：交接文档 §10 / §11 · `review/REVIEW-LOG.md`（复核 001 起，最新见文件尾部 —— **不复述会漂的条数**）· `docs/TEST-POLICY.md`。
 
 ### 8.1 判据假绿的七种形状（每一条都实测撞过）
 
