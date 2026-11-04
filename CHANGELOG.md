@@ -10,6 +10,68 @@
 > 轨道分类见 `docs/TRACK-PLANS.md`；排期与修复队列见 `docs/TRACK-ROADMAP.md`。
 ---
 
+## [v1.33.0-排查42 · 发布路径收口：build → dist → verify:pack 一条命令 + 许可声明进分发副本（R73）] — 2026-11-04 23:22
+
+**范围**：`scripts/release-prep.mjs`（**新**：发布前一条命令，产物按运行 id 独立目录 + 联接预检）·
+`scripts/notice-source.mjs`（**新**：第三方声明常量的发现 —— **唯一一份**实现）·
+`apps/desktop/scripts/license-in-asar.mjs`（**新**：`app.asar` 层的声明与许可核验）·
+`apps/desktop/scripts/verify-pack.mjs`（五步 → **六步**：新第①步「核分发副本」）·
+`apps/desktop/package.json`（`extraResources`：THIRD_PARTY_NOTICES.md + docs/DEPENDENCY-LICENSES.md **打进产物**）·
+`package.json`（**新别名** `release:prep`）· `scripts/check-notices.mjs`（**剥两份实现**：发现规则改从
+`notice-source.mjs` import —— 否则两份正则会长出两个答案）· `docs/DEPENDENCY-LICENSES.md`（生成物随版本重生成）·
+**两个新测试文件**：`apps/desktop/src/main/license-in-asar.test.ts`（4 例）·
+`apps/desktop/src/main/release-path-wiring.test.ts`（4 例）·
+`README.md`（挂出 `release:prep`）· `docs/PROGRESS.md`（排查42 行 + 当前规模）·
+`docs/TRACK-ROADMAP.md`（§6.3 加 R73 行）· `review/REVIEW-LOG.md`（复核 143）·
+`apps/desktop/package.json`（版本 1.32.0 → 1.33.0）。
+**零新依赖；零新通道；判定语义与权限映射一字未改。**
+
+1. **题面与来源（收口在制品）**：worktree `r76-r78-pack`（分支 `r76-r78-pack`，基线 8b2a4f6 = R69 回填）
+   里有**一整轮未提交的发布路径工作**，与 main 上 R70–R72 的发版就绪线**正好互补**：
+   `check:notices` 只管到 `out/`（构建产物）那一层，它自己在注释里写着「安装包那一层靠 `verify:pack` 兜底」
+   —— 而那里**当时并没有兜**。本轮把它收进主线。
+2. **编号与重放口径（如实记）**：原线自称 **R76–R78 · 排查40–42**，与主线已用的排查40/41（R71/R72）**冲突**
+   ⇒ 按 `docs/TRACK-ROADMAP.md` §五 的登记原则，主线重编为 **R73 · 排查42**，
+   文件头标注「收口自原线 · 原编号 RX」；**内容一字未改**（除标注、别名合并位置、
+   与下述"剥两份实现"一处收口）。`release:prep` 别名与 R72 的 `restore:icon` 同位合并进根 `package.json`。
+3. **收口时顺手剥掉一处「两份实现」**：`notice-source.mjs` 的发现正则 / 剥注释 / 字面量还原
+   与 `check-notices.mjs` 里那份**逐字符相同** —— 而前者自己的头注释就在警告
+   「两份实现会长出两个答案」⇒ 本轮把 `check-notices.mjs` 改成 **import 那一份**
+   ⇒ 发现规则全仓只写一份（构建产物与打包产物两处门禁共用同一双眼睛）。
+   **行为保真由门禁自证**：`check:notices` 六条照常绿 + 它的破坏性验证 **6/6 注入全部被咬住**
+   ⇒ 重构没有放走任何一条原来咬得住的注入。
+4. **这条路径保证什么**（`release-prep.mjs`）：① 产物目录按**运行 id** 命名（`release/rel-<id>/`）
+   ⇒ 不与任何一轮共用目录（R35/R37 连踩三轮的"旧目录句柄挡路"教训）；② **门禁验的就是要发的那份**
+   （`--dir` 出的 `win-unpacked` 直接喂 `verify-pack.mjs`，不重新打包）；③ 预检拦掉已知的坑：
+   `node_modules` 若是**目录联接**，electron-builder 产物里**一个生产依赖都没有** ⇒ 打包版起不来
+   （原线 A/B 对照实测）⇒ 预检先红并给出修法。
+5. **许可声明真正进分发副本（两层过滤都堵上）**：① `extraResources` 把
+   `THIRD_PARTY_NOTICES.md` 与 `docs/DEPENDENCY-LICENSES.md` **打进产物**（否则根本不在包里）；
+   ② `verify:pack` 新第①步「核分发副本」：声明文字**从源码现取**（`notice-source.mjs`，
+   与 `check:notices` 共用同一份发现规则 ⇒ 不手抄第二份）+ 依赖许可文件，
+   三样都必须在 **`app.asar` 里查得到** —— R70 说的「随副本保留」从构建产物层推进到**安装包层**。
+6. **边界（如实记）**：① **变异未新增**（原线未配变异 ⇒ 照单收口；新锁的证红由它自己的
+   8 例测试与 verify:pack 第①步承担 ⇒ 补变异留后续轮）；② **e2e 未重跑**
+   （渲染层一字未动；第 51 条判据不触发）；③ `release:prep` **实跑一次**作为本轮慢档
+   （build → dist → verify:pack 六步）⇒ 结果见回填笔与 `verify:pack` 的历史欠账一并清掉。
+
+**验证方式**：typecheck 0 · lint 0（⚠️ 第一跑红在原线代码的一处 `no-useless-assignment`，收口时修掉）·
+单测 **2275 通过 / 1 跳过（158 个测试文件）**（**+8 例 / +2 文件**：license-in-asar 4 例 · release-path-wiring 4 例；lint 修复后**复跑过一次**保证门禁值对最终树成立）·
+`check:notices` 六条 0（重构后照常绿）+ 它的破坏性验证 **6/6 注入全部被咬住**（**行为保真的实证**）·
+`check:docs` **60 条** 0 · 注入自检 **58 处**全拦 0 ·
+**e2e 未重跑**（渲染层一字未动；第 51 条判据不触发）·
+**慢档实跑（本轮清欠账）**：`npm run release:prep` 全程 **通过** —— 预检 ✓ → build **7.5s** ✓ →
+打包 **70s** ✓（NSIS 135MB + portable 135MB，清单带 sha256）→ verify:pack 六步 **5.2s** ✓
+（含**新第①步「核分发副本」**：声明文字与许可文件在 `app.asar` 里查得到）。
+⚠️ **实跑逮住原线两处真问题，都修掉**：① electron-builder 联网取资源撞 `github.com:443` 阻断
+⇒ 一次性环境变量走 npmmirror 镜像（与本仓 lockfile registry 同源；**不落任何配置文件**）；
+② verify:pack **人工模式分支引用已被改名的 `packRel`**（`ReferenceError` —— 这处死分支在主线
+基线里就潜伏着，只有真跑人工模式才会炸）⇒ 改回 `packRelNow()`。·
+**变异未新增**（原线未配 ⇒ 照单收口；补变异留后续轮）—— 全量变异在主体提交后的干净基线上核对。
+
+**回退点**：`v1.32.0-排查41`；上一版 `v1.31.0-排查40`。
+
+---
 ## [v1.32.0-排查41 · 发版就绪：打包图标进库 —— 干净克隆的 `npm run dist` 可用性（R72）] — 2026-11-04 00:07
 
 **范围**：`.gitignore`（`build/` → `build/*` + `!build/icon.png` **精确豁免**）·

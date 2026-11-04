@@ -168,6 +168,7 @@ npm run check:notices  # 第三方素材与许可声明：声明必须被用上�
 npm run perf           # 启动性能预算判定（首帧 < 1000ms）
 
 npm run restore:icon  # 重建打包图标（assets/icon 源图 → build/icon.png；改图标后跑；图标本体已进库）
+npm run release:prep  # 发布前一条命令：build → dist → verify:pack 六步（产物按运行 id 独立目录，验的就是要发的那份）
 npm run dist           # 打 Windows 安装包（输出在 apps/desktop/release/）
 ```
 

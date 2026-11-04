@@ -8529,3 +8529,54 @@ R62 台账把 `release/shoot` 与 `pack-probe-projone` 的占用者写成"两个
 - **CI**：run **#273**（id `41680331721`）= **success** —— CI 是真·干净检出 ⇒
   第 60 条判据在远端通过，就是"干净克隆里图标在"的远端实证。
 
+## 复核 143 · 排查（R73：发布路径收口 —— build → dist → verify:pack 一条命令 + 许可进分发副本）
+
+题面：worktree `r76-r78-pack`（基线 8b2a4f6）里**一整轮未提交的发布路径工作**。收口判断的依据：
+它与 main 的 R70–R72 发版就绪线**互补而非重复** —— `check:notices` 自己写着
+「安装包那一层靠 `verify:pack` 兜底」，而那里当时没兜 ⇒ 这正是主线发版就绪链上缺的下一格。
+
+### 靶子一：重放的三条口径（先说清，免得账目混乱）
+
+1. **编号冲突**：原线自称 R76–R78 · 排查40–42；主线已用排查40/41（R71/R72）
+   ⇒ 按 ROADMAP §五 的登记原则重编 **R73 · 排查42**，文件头标「收口自原线 · 原编号 RX」；
+   **内容一字未改**（除标注 / 别名合并位置 / 下述靶子二的一处收口）。
+2. **别名同位合并**：原线的 `release:prep` 与主线 R72 的 `restore:icon` 都插在 `dist` 之后
+   ⇒ 重放时两条都保留（`dist` → `restore:icon` → `release:prep` → `verify:pack`）。
+3. **build 配置原样收**：`extraResources` 两份许可文档进产物 —— 这是「随副本保留」在
+   **安装包层**成立的前提（否则包里根本没这两份文件）。
+
+### 靶子二：收口时剥掉一处「两份实现」（本轮自己加的活，不是原线的）
+
+1. `notice-source.mjs` 的发现正则 / 剥注释 / 字面量还原与 `check-notices.mjs` 那份**逐字符相同**，
+   而它自己的头注释就在警告「两份实现会长出两个答案」⇒ 原线没改 `check-notices.mjs`
+   ⇒ 照单收进来的话**雷原样进来**。
+2. **收口**：`check-notices.mjs` 改成 **import** `collectNoticeConstants / collectSourceFiles / stripComments`，
+   本地三份副本删除 ⇒ 发现规则全仓一份（构建产物与打包产物两处门禁共用同一双眼睛）。
+3. **行为保真由门禁自证**（不是"我觉得等价"）：`check:notices` 六条照常绿 +
+   它的破坏性验证 **6/6 注入全部被咬住** ⇒ 重构没放走任何一条原来咬得住的注入。
+
+### 靶子三：本轮踩到 / 如实记
+
+1. **第一跑 check:notices 红了两条，都是真前提未就绪**（不是脚本错）：
+   ① `out/` 不存在 ⇒ 先 `npm run build`（本仓文档口径如此）；② 版本号升到 1.33.0 后
+   `docs/DEPENDENCY-LICENSES.md` 生成物没跟着重生成（R70 第⑥条判据当场逮住）⇒ 跑
+   `license:check` 重生成。**这正是那些判据存在的意义** —— 每一步都被人记、不如每一步都被机器咬。
+2. **变异未新增**：原线未配变异 ⇒ 照单收口；新锁的证红由它自己的 8 例测试承担
+   （`license-in-asar.test.ts` 4 例 + `release-path-wiring.test.ts` 4 例，单独跑全绿）
+   ⇒ **补变异留给后续轮**（如实记，不假装"已配齐"）。
+3. **e2e 未重跑**：渲染层一字未动 ⇒ 第 51 条判据不触发；按先例如实标注。
+4. **慢档欠账顺手清**：verify:pack 自 R61 起多轮未实跑 ⇒ 本轮以 **`release:prep` 实跑**
+   兼作慢档（它内部就是六步 verify:pack）⇒ 结果见回填笔。
+
+### 本轮的门禁与边界
+
+- **新增**：`scripts/release-prep.mjs` · `scripts/notice-source.mjs` ·
+  `apps/desktop/scripts/license-in-asar.mjs` · `apps/desktop/src/main/{license-in-asar,release-path-wiring}.test.ts`（8 例）·
+  根别名 `release:prep` · `extraResources` 两份许可文档。
+- **改动**：`verify-pack.mjs`（五步 → 六步，新第①步核分发副本）·
+  `check-notices.mjs`（发现规则改 import，本地副本删除）· `README.md`（挂出 `release:prep`）·
+  `apps/desktop/package.json`（1.33.0）· `docs/DEPENDENCY-LICENSES.md`（生成物重生成）。
+- **边界**：`release-prep` 的联接预检只拦**本仓已知的坑**（目录联接）；别的打包失败形态
+  仍按"红了如实记"处理，不假装预检万能；`license-in-asar` 只核「声明的文字在不在 asar 里」，
+  不核许可文件内容的**正确性**（正确性由 `license:check` 与人工复核守）。
+

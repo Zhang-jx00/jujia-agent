@@ -34,6 +34,12 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+/**
+ * **发现规则只写一份**（R73 · 排查42）：「这次该保留的声明是哪些、分别是什么字」要判**两处**
+ * —— 构建产物（`out/`，本脚本）与**打包产物**（`app.asar`，`verify:pack` 第①步）。
+ * 两处各自写一套正则 ⇒ 两份实现会长出两个答案 ⇒ 某处假绿 ⇒ 所以共用 `scripts/notice-source.mjs`。
+ */
+import { collectNoticeConstants, collectSourceFiles, stripComments } from './notice-source.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const srcRoot = join(repoRoot, 'apps', 'desktop', 'src');
@@ -60,60 +66,11 @@ const skip = (name, reason) => {
 
 const rel = (p) => relative(repoRoot, p).replace(/\\/g, '/');
 
-/** 递归收集目录下的源码文件（跳过测试文件与声明文件） */
-function collectSources(dir, out = []) {
-  if (!existsSync(dir)) return out;
-  for (const name of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, name.name);
-    if (name.isDirectory()) {
-      if (name.name === 'node_modules') continue;
-      collectSources(full, out);
-    } else if (/\.tsx?$/.test(name.name) && !/\.test\.tsx?$/.test(name.name)) {
-      out.push(full);
-    }
-  }
-  return out;
-}
-
-/**
- * 剥掉注释再匹配 —— 否则注释里写一句 `export const X_NOTICE = '…'` 就会把这条门禁骗绿。
- * （与本仓其它判据同一套做法：匹配前先剥注释。）
- */
-function stripComments(src) {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-}
-
-/** 把源码里的字符串字面量还原成运行时的值（本仓只用到单引号 / 双引号 / 无插值模板串） */
-function literalValue(literal) {
-  const quote = literal[0];
-  const body = literal.slice(1, -1);
-  if (quote === '`') {
-    if (body.includes('${')) return null; // 带插值 ⇒ 判据不处理（如实放行，交给人工）
-    return body;
-  }
-  if (quote === '"') {
-    try {
-      return JSON.parse(literal);
-    } catch {
-      return null;
-    }
-  }
-  return body.replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-}
-
-const sources = collectSources(srcRoot);
+const sources = collectSourceFiles(srcRoot);
 
 /* --- ① 发现：源码里所有 `export const <名>_NOTICE = '…'` --- */
-const NOTICE_RE = /export\s+const\s+([A-Za-z0-9_]*_NOTICE)\s*=\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)\s*;/g;
-const notices = [];
-for (const file of sources) {
-  const src = stripComments(readFileSync(file, 'utf8'));
-  for (const m of src.matchAll(NOTICE_RE)) {
-    const value = literalValue(m[2]);
-    if (value === null) continue;
-    notices.push({ name: m[1], text: value, file });
-  }
-}
+/** 发现规则**只写一份**（剥注释 / 字面量还原 / 正则都在 `scripts/notice-source.mjs` 里） */
+const notices = collectNoticeConstants(srcRoot);
 
 report(
   '源码里能找到声明常量（`export const <素材>_NOTICE`）',

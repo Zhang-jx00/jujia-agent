@@ -7,14 +7,19 @@
  * （渲染层打包后是 `file://` 页面、Chromium 不许它 `fetch` 本地文件）**只在打包产物里出现**。
  * 也就是说，"开发态全绿、发出去才坏"的那一类问题，在它之前没有任何门禁拦得住。
  *
- * 五步（刻意最小 —— 先有网，再谈织密）：
- *   ① 启动打包版（隔离数据目录，证明它真的跑得起来）；
- *   ② 开「文件」页签、展开工作区（证明打包清单里该有的都在，动态 import 的懒加载 chunk 也能从 asar 里取到）；
- *   ③ 打开一份**中文 PDF**：页数 + 内置 cmap 被取用 + 抽字得到「你好」+ **全程零出站** ——
+ * 六步（刻意最小 —— 先有网，再谈织密）：
+ *   ① **核分发副本**（R73 · 排查42）：第三方素材的声明文字、项目自己的第三方声明清单、
+ *      以及随包依赖各自的许可文件 —— 三样都必须**在 `app.asar` 里查得到**。
+ *      为什么排第一：这一层是"发出去之后"最硬的一层，而它此前**一格都没人核过**
+ *      （`scripts/check-notices.mjs` 自己写着"安装包那一层靠 verify:pack 兜底"，
+ *      而这里当时并没有兜）。
+ *   ② 启动打包版（隔离数据目录，证明它真的跑得起来）；
+ *   ③ 开「文件」页签、展开工作区（证明打包清单里该有的都在，动态 import 的懒加载 chunk 也能从 asar 里取到）；
+ *   ④ 打开一份**中文 PDF**：页数 + 内置 cmap 被取用 + 抽字得到「你好」+ **全程零出站** ——
  *      这正是 M19b 那个内联方案在"发出去"之后是否仍然成立的直接证据。
- *   ④ 跑一张**画布**（R29 补的登记欠账，`LINKAGE-M9.md` §五）：React Flow 的懒加载 chunk、
+ *   ⑤ 跑一张**画布**（R29 补的登记欠账，`LINKAGE-M9.md` §五）：React Flow 的懒加载 chunk、
  *      `CANVAS_*` 那几条通道、图文件从 asar 外的数据目录读写 —— 三样都属于"开发态看不出、装出去才坏"；
- *   ⑤ 起一个**内置终端**（R29 补的第二笔欠账，从 R28 挪来）：`node-pty` 的原生 `.node`
+ *   ⑥ 起一个**内置终端**（R29 补的第二笔欠账，从 R28 挪来）：`node-pty` 的原生 `.node`
  *      必须落在 `app.asar.unpacked` 里才起得来，而它一旦起不来，界面上只是"点了没反应"。
  *
  * ④⑤ 都刻意只走"不需要外部服务"的那条路：画布用两个工具节点（不碰模型连接），
@@ -32,8 +37,12 @@ import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright-core';
 import { buildCjkPdf } from './pdf-fixtures.mjs';
 import { probeFileLock } from './lock-probe.mjs';
+import { auditPackLicenses } from './license-in-asar.mjs';
+import { noticeConstantsOfRepo } from '../../../scripts/notice-source.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
+/** 仓库根（声明常量的发现范围在 `apps/desktop/src` 下） */
+const repoRoot = join(here, '..', '..', '..');
 /**
  * **本轮自己独占的产物目录**（T67 · R35 落地）。两件事分开说，别混成一条：
  *
@@ -375,7 +384,52 @@ try {
     log(`\n[打包] 本轮写到专属目录 release/${PACK_OUT}（T67：不与任何一轮共用产物目录）`);
     await buildPack();
   } else {
-    log(`\n[人工模式] 只验现成产物 release/${packRel}，本轮不打包`);
+    log(`\n[人工模式] 只验现成产物 release/${packRelNow()}，本轮不打包`);
+  }
+
+  step('核分发副本：第三方声明与许可在 app.asar 里查得到（发出去之后仍然成立）');
+  {
+    /**
+     * **R73 · 排查42** —— 这一步核的是**分发副本**（`app.asar`），不是构建产物（`out/`）。
+     *
+     * 为什么必须单独核这一层：「许可要求**随副本保留**」只有装出去的那份东西里有才算兑现，
+     * 而中间隔着两层过滤 ——
+     *   · 源码里没人引用 ⇒ 打包器**树摇**掉 ⇒ 分发副本 0 命中（R70 实测过的原状）；
+     *   · `out/` 里有、但打包清单（`build.files`）漏了 ⇒ 装出去还是 0 命中。
+     * ⇒ 两层都过才叫"随副本保留"。`scripts/check-notices.mjs` 只管到 `out/` 那一层，
+     *   它自己在注释里写着「安装包那一层靠 `verify:pack` 兜底」—— **这一格此前是空的，本步补上**。
+     *
+     * 声明文字**从源码现取**（`scripts/notice-source.mjs`，与 `scripts/check-notices.mjs`
+     * 共用同一份发现规则）⇒ 这里**不手抄第二份声明**，免得两份副本慢慢漂。
+     */
+    const artifactRoot = join(RELEASE_DIR, packRelNow());
+    const asarPath = join(artifactRoot, 'resources', 'app.asar');
+    if (!existsSync(asarPath)) {
+      fail(
+        `产物里没有 app.asar：${asarPath}`,
+        'app.asar 缺失 ⇒ 这一步**量不到**（不是"通过"，是"没得核"）',
+      );
+    }
+    const notices = noticeConstantsOfRepo(repoRoot).map((n) => ({ name: n.name, text: n.text }));
+    const audit = auditPackLicenses(artifactRoot, { notices });
+    for (const c of audit.checks) {
+      if (c.skipped === true) {
+        log(`  ➖ ${c.name}（本次不适用：${c.reason ?? ''}）`);
+      } else if (c.ok) {
+        ok(`${c.name}${c.detail === undefined ? '' : ` —— ${c.detail}`}`);
+      } else {
+        log(`  ❌ ${c.name}\n     ${c.detail ?? ''}`);
+      }
+    }
+    if (!audit.ok) {
+      fail(
+        '分发副本里的第三方声明 / 许可不成立（上面标红的那几条就是）',
+        audit.checks
+          .filter((c) => c.ok === false)
+          .map((c) => `${c.name}\n     ${c.detail ?? ''}`)
+          .join('\n'),
+      );
+    }
   }
 
   step('启动**打包版**（真实安装产物，不是 out/ 里的开发产物）');
