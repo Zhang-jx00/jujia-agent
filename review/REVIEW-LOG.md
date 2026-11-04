@@ -8579,4 +8579,9 @@ R62 台账把 `release/shoot` 与 `pack-probe-projone` 的占用者写成"两个
 - **边界**：`release-prep` 的联接预检只拦**本仓已知的坑**（目录联接）；别的打包失败形态
   仍按"红了如实记"处理，不假装预检万能；`license-in-asar` 只核「声明的文字在不在 asar 里」，
   不核许可文件内容的**正确性**（正确性由 `license:check` 与人工复核守）。
+- **干净基线变异核对（主体提交 `b4d9c17` 之后）**：**354/354 被拦 · 0 逃逸 · 0 注入失败 · 0 无法运行**
+  （`MUT_EXIT=0`；跑后工作树洁净；证据 `.evidence/R73-mut.log`）。
+- **推送与回读**：`9d1f5ad..b4d9c17 main -> main` + `* [new tag] v1.33.0-排查42`（refspec 精确推，
+  第 1 次尝试即通）；`git ls-remote` 回读：远端 `main` = 远端标签 = `b4d9c17`。
+- **CI**：结论见交接文档 §2 回填笔补记（取真值走 `api.github.com` 匿名 REST）。
 
