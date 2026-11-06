@@ -5879,6 +5879,206 @@ try {
       '搜索真筛 · 回车真跳到定时页 · Ctrl+Shift+P 也能唤起 · Esc 能关闭',
   );
 
+  /**
+   * R74 · 排查43：**文字对比度** —— 真窗口实测，每屏不过 AA 的必须是 0。
+   *
+   * ## 为什么补这一步（现扫证据）
+   *
+   * R74 的离屏现扫（全站 **17 屏**）在**概览页**逮到一条不过 AA 的：
+   * `code.jj-log-scope`（12px，主色那一档）压在 `code` 的标签底（白 8% 叠卡片底）上
+   * ⇒ 实测 **4.07:1**（普通文本要 ≥ 4.5）⇒ 而它**已经静静躺在仓里很多轮** ——
+   * 根因不是没人看见，是**没有任何一步量过它**：单测量不到渲染层，e2e 里也没有这一步
+   * ⇒ 这正是 R74 要补的**覆盖缺口**：把「文字对比度」变成**每轮都跑的真窗口断言**。
+   *
+   * ## 判据的形状
+   *
+   * ① **真窗口实测**（不是读源码、不是只算令牌）：读的是 `getComputedStyle` 出来的
+   *    **实际计算色**与**实际合成底色**（半透明层按浏览器的 alpha 合成叠上去）。
+   * ② 阈值按 WCAG：**大字**（≥24px，或 ≥18.66px 且粗体）要 ≥3，**其余文字**要 ≥4.5。
+   * ③ **防失焦下限**：量到的文字元素少于下限就红 —— 量不到东西的锁会一直绿。
+   * ④ **回到初始态**：扫完回到「概览」页（保持干净收尾）。
+   *
+   * ## 为什么放在最后、且用**干净实例**来扫
+   *
+   * 本仓门禁纪律：**e2e 加步骤只能往「关闭应用」之前追加**，不许插在中间 ——
+   * 插在中间会让台账里「第 N 步」的红绿证据错位，也会改变既有步骤之间的状态前提
+   * （实证：第一版把这步插在第 3 步 ⇒ 第 16 步 MCP 的插件服务端不见了 ⇒ 挪到末尾后它就绿了）。
+   * （原在制品线把这步插在第 3 步 ⇒ 收口时按主线纪律移到此处，内容一字未改。）
+   *
+   * 而**扫的对象**必须是一台**干净实例**（与本轮离屏现扫同一口径）：马拉松流程走到这里，
+   * 对话页的历史 DOM 已经很重 ⇒ 在它身上对全站做全量 `getComputedStyle` 会把渲染层压垮
+   * （实测：挂到 win4 上扫，切到「对话」后渲染层直接没了）。量「界面本身长什么样」
+   * 就该在**没有历史包袱**的实例上量 —— 这也是 `review/R74-UI-SCAN.md` 的口径。
+   * 流程里已有三次应用重启的先例（续会话 / 崩溃现场 / 续跑），这里是第四次，同一手法。
+   */
+  step('文字对比度：真窗口实测 · 每屏不过 AA 的必须是 0（R74 补上的覆盖缺口）');
+  {
+    /** 起一台干净实例（同 profile、同数据目录、同无头开关 —— 与 win4 那次重启同一套） */
+    await app.close();
+    app = undefined;
+    app = await electron.launch({
+      executablePath: electronPath,
+      args: [MAIN_ENTRY, `--user-data-dir=${profileDir}`, '--e2e'],
+      env,
+    });
+    const winScan = await app.firstWindow();
+    await winScan.waitForSelector('body', { timeout: 15_000 });
+    await watchWindow(winScan, 'wscan');
+
+    /**
+     * 量一屏：返回「量到多少个文字元素 / 哪些不过 AA / 这一屏最低是多少」。
+     *
+     * 为什么**只算自有文本**的元素：父元素的 `innerText` 会把子元素的文字也包进去
+     * ⇒ 同一个字会被量好几遍，且父元素算出来的底色不是字真正压着的那层 ⇒ 假数。
+     */
+    const measureContrast = async (w) =>
+      await w.evaluate(() => {
+        const parseColor = (c) => {
+          const m = /rgba?\(([^)]+)\)/.exec(c || '');
+          if (!m) return null;
+          const p = m[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+          if (p.length < 3) return null;
+          return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+        };
+        const over = (fg, bg) => ({
+          r: fg.r * fg.a + bg.r * (1 - fg.a),
+          g: fg.g * fg.a + bg.g * (1 - fg.a),
+          b: fg.b * fg.a + bg.b * (1 - fg.a),
+          a: 1,
+        });
+        const lum = (c) => {
+          const f = (v) => {
+            const x = v / 255;
+            return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+          };
+          return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+        };
+        const ratio = (a, b) => {
+          const l1 = lum(a);
+          const l2 = lum(b);
+          return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+        };
+        /** 往上找真正的底色：半透明层按浏览器的 alpha 合成叠到第一个不透明层上 */
+        const effBg = (el) => {
+          const layers = [];
+          let node = el;
+          while (node) {
+            const c = parseColor(getComputedStyle(node).backgroundColor);
+            if (c && c.a > 0) {
+              layers.push(c);
+              if (c.a >= 0.99) break;
+            }
+            node = node.parentElement;
+          }
+          if (layers.length === 0) return { r: 20, g: 20, b: 20, a: 1 };
+          let base = layers[layers.length - 1];
+          for (let i = layers.length - 2; i >= 0; i -= 1) base = over(layers[i], base);
+          return base;
+        };
+        const ownText = (el) => {
+          let s = '';
+          for (const n of el.childNodes) if (n.nodeType === 3) s += n.textContent || '';
+          return s.trim();
+        };
+        const selOf = (el) => {
+          const cls = typeof el.className === 'string' ? el.className.trim().split(/\s+/)[0] : '';
+          return el.tagName.toLowerCase() + (cls ? '.' + cls : '');
+        };
+        let total = 0;
+        const failures = [];
+        let worst = null;
+        for (const el of Array.from(document.querySelectorAll('*'))) {
+          const r = el.getBoundingClientRect();
+          if (r.width <= 0 || r.height <= 0) continue;
+          const st = getComputedStyle(el);
+          if (st.visibility === 'hidden' || st.display === 'none') continue;
+          const t = ownText(el);
+          if (!t) continue;
+          total += 1;
+          const fg = parseColor(st.color);
+          if (!fg) continue;
+          const bg = effBg(el);
+          const c = ratio(fg.a < 1 ? over(fg, bg) : fg, bg);
+          const fs = parseFloat(st.fontSize);
+          const fw = Number(st.fontWeight) || 400;
+          const need = fs >= 24 || (fs >= 18.66 && fw >= 700) ? 3 : 4.5;
+          const item = {
+            ratio: Math.round(c * 100) / 100,
+            need: need,
+            sel: selOf(el),
+            text: t.slice(0, 40),
+          };
+          if (worst === null || c < worst.ratio) worst = item;
+          if (c < need) failures.push(item);
+        }
+        return { total: total, failures: failures, worst: worst };
+      });
+
+    /** 扫的屏序：左栏 7 页 + 启动器专属 4 页 + 设置中心 5 面板（与导航真源 `nav.ts` 一致） */
+    const screens = [
+      { name: '概览', go: async () => await gotoTab(winScan, '概览') },
+      { name: '对话', go: async () => await gotoTab(winScan, '对话') },
+      { name: '文件', go: async () => await gotoTab(winScan, '文件') },
+      { name: '文档', go: async () => await gotoTab(winScan, '文档') },
+      { name: 'Git', go: async () => await gotoTab(winScan, 'Git') },
+      { name: '画布', go: async () => await gotoTab(winScan, '画布') },
+      { name: '终端', go: async () => await gotoTab(winScan, '终端') },
+      { name: '连接', go: async () => await gotoLauncher(winScan, '连接') },
+      { name: '浏览器', go: async () => await gotoLauncher(winScan, '浏览器') },
+      { name: '绘图', go: async () => await gotoLauncher(winScan, '绘图') },
+      { name: '定时', go: async () => await gotoLauncher(winScan, '定时') },
+      { name: '设置:外观', go: async () => await openSetting(winScan, '外观') },
+      { name: '设置:权限规则', go: async () => await openSetting(winScan, '权限规则') },
+      { name: '设置:钩子', go: async () => await openSetting(winScan, '钩子') },
+      { name: '设置:插件', go: async () => await openSetting(winScan, '插件') },
+      { name: '设置:MCP', go: async () => await openSetting(winScan, 'MCP') },
+    ];
+    let measured = 0;
+    const failures = [];
+    let lowest = null;
+    for (const s of screens) {
+      await s.go();
+      await winScan.waitForTimeout(350);
+      const m = await measureContrast(winScan);
+      measured += m.total;
+      if (m.worst !== null && (lowest === null || m.worst.ratio < lowest.ratio)) {
+        lowest = { screen: s.name, ratio: m.worst.ratio, sel: m.worst.sel };
+      }
+      for (const f of m.failures) {
+        failures.push(s.name + ' · ' + f.sel + ' · ' + String(f.ratio) + ':1（要 ' + String(f.need) + '）· "' + f.text + '"');
+      }
+    }
+    /** 回到初始态：扫完回到「概览」页（保持干净收尾） */
+    await gotoTab(winScan, '概览');
+    if (measured < 200) {
+      fail(
+        '文字对比度：只量到 ' +
+          String(measured) +
+          ' 个文字元素（少于 200）—— 判据失焦了（量不到东西的锁会一直绿）',
+      );
+    }
+    if (failures.length > 0) {
+      fail(
+        '文字对比度：有 ' +
+          String(failures.length) +
+          ' 处文字不过 WCAG AA ⇒ ' +
+          failures.slice(0, 8).join(' | '),
+        failures.join('\n'),
+      );
+    }
+    ok(
+      '文字对比度：' +
+        String(screens.length) +
+        ' 屏共量到 ' +
+        String(measured) +
+        ' 个文字元素 · AA 破口 0 处 · 全站最低 ' +
+        String(lowest === null ? '-' : lowest.ratio) +
+        ':1（' +
+        (lowest === null ? '-' : lowest.screen + ' 的 ' + lowest.sel) +
+        '）',
+    );
+  }
+
   step('关闭应用：应干净退出（不留孤儿进程）');
   await app.close();
   app = undefined;

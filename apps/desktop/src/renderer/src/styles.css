@@ -2997,8 +2997,21 @@ html[data-jj-bg-kind='glass'] .app-root {
   color: var(--c-danger);
 }
 
+/**
+ * R74：scope 标签的字色改用**主色的浅一档**（`--c-primary-hover`）。
+ *
+ * 为什么（原状不过 AA）：日志里的 scope 是个 `<code>` ⇒ 通用 `code` 规则给它一层
+ * `--c-overlay-weak`（白 8%）的标签底 ⇒ 合成后底色是 **卡片底 + 白 8%**（实测 `#313131`）
+ * ⇒ 主色那一档（`#4c8dff`）压在上面只有 **4.07:1**，**没过 AA 的 4.5**（12px 普通文本）。
+ *
+ * 证据：R74 的离屏现扫（全站 **17 屏 · 587 个文字元素测量点**）⇒ 这是**唯一**一条不达标的；
+ * 同一页的次低值是 5.95:1 ⇒ 不改的话它就是全站唯一的 AA 破口。
+ * ⇒ 换成主色的浅一档 ⇒ **5.02:1** ⇒ 达标，视觉上仍是同一支蓝。
+ *
+ * 判据：`src/contrast-locks.test.ts`（按**令牌真值**算：标签底/卡片底变了它自己重算 ⇒ 不会漂）。
+ */
 .jj-log-scope {
-  color: var(--c-primary);
+  color: var(--c-primary-hover);
 }
 
 .jj-log-msg {
