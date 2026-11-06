@@ -163,7 +163,7 @@
 
 **当前规模**：5 个 workspace 包 · **159 个测试文件 · 单元测试用例数以 `npm run test` 当次输出为准 · 界面级 e2e 73 步全自动 · 渲染层组件测试 116 例（jsdom，16 个组件文件）**
 
-**慢档最近一次实跑（R75 · 2026-11-06）**：smoke OK · perf 首帧 266 / 276 / 356ms（铁律三采样，详见 `docs/PERF-BUDGET.md`）· verify:pack 六步 OK（R73 · `release:prep`）
+**打包类收尾门禁最近一次实跑（R75 · 2026-11-06）**：smoke OK · perf 首帧 266 / 276 / 356ms（铁律三采样，详见 `docs/PERF-BUDGET.md`）· verify:pack 六步 OK（R73 · `release:prep`）
 门禁分两档（2026-09-29 复核 044 的流程建议）——
 **快档**（每次提交前跑）：typecheck / lint / test / **check:docs 文档一致性** / **e2e 界面级**；
 **慢档**（阶段收尾与发版前跑）：smoke / perf / **verify:pack 打包产物验证** / **mut 变异测试**。
