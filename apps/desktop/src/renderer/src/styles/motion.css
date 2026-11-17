@@ -88,6 +88,83 @@
   --motion-ease-in: cubic-bezier(0.7, 0, 0.84, 0);
   --motion-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --motion-stagger-step: 40ms;
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-emphasized: cubic-bezier(0.3, 0, 0.2, 1);
+
+  /* ---------- R77（M1 令牌层）新增语义档 ----------
+     **这些令牌此刻还没有界面在用**（接线属 M3 壳的活）——
+     本轮只把令牌层补齐并让机器锁盯住它（同名同族 + 对比度可复算）。
+     语义一律语义化命名：surface1/2/3 是三栏各占一层的表面层级，
+     textTertiary/textDisabled 是文字的第三/第四阶（弱但仍可读）。 */
+  --c-surface-1: #1a1b1f;
+  --c-surface-2: #232429;
+  --c-surface-3: #2c2d33;
+  --c-text-tertiary: #9093a5;
+  --c-text-disabled: #727584;
+  --c-focus: #5b93ff;
+  --c-primary-subtle: rgba(91, 147, 255, 0.14);
+  --c-primary-strong: #6ba0ff; /* **文字安全的主色**（把主色当文字色用时的那一档） */
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --shadow-elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-elev-2: 0 4px 14px rgba(0, 0, 0, 0.46);
+  --shadow-elev-3: 0 14px 40px rgba(0, 0, 0, 0.55);
+}
+
+/* ============================================================================
+ * 亮色主题（R77 · M1）
+ *
+ * 为什么是一整块而不是"运行时反转"：反转得到的中间色对比度不可控；
+ * 显式一份 ⇒ 每个值都能被 `tokens-theme-parity.test.ts` 用**同一份** contrastRatio 复算。
+ *
+ * **同名同族**：亮色块里的令牌名必须与暗色 `:root` 完全一致 ——
+ * 少一个 ⇒ 亮色下那个位置会回落到暗色值（机器锁当场点名）。
+ *
+ * 接线到界面（谁切主题、切了之后哪些样式要跟着变）属 **M3 壳的活**，本轮只备好令牌。
+ * ========================================================================== */
+[data-theme='light'] {
+  --c-bg-layout: #f7f7f8;
+  --c-bg-container: #ffffff;
+  --c-bg-elevated: #ffffff;
+  --c-bg-input: #f1f1f3;
+  --c-text: #17181c;
+  --c-text-secondary: #5b5e6b;
+  --c-primary: #3d7ef7;
+  --c-primary-hover: #2f6fe8;
+  --c-success: #17966a;
+  --c-warning: #b97d10;
+  --c-danger: #d5455c;
+  --c-border: #e3e4e9;
+  --c-border-strong: #c9cbd4;
+  --c-scrim: rgba(0, 0, 0, 0.45);
+
+  /* 派生色：亮色下要重新派生（暗色的白叠加在亮底上不可用） */
+  --c-primary-wash: color-mix(in srgb, var(--c-primary) 12%, transparent);
+  --c-primary-wash-strong: color-mix(in srgb, var(--c-primary) 16%, transparent);
+  --c-primary-outline: color-mix(in srgb, var(--c-primary) 55%, transparent);
+  --c-danger-strong: #b3243a;
+  --c-danger-border: rgba(207, 34, 46, 0.45);
+  --c-text-strong: #000;
+  --c-overlay-weak: rgba(0, 0, 0, 0.06);
+  --c-overlay-faint: rgba(0, 0, 0, 0.04);
+  --c-border-muted: #dcdde2;
+
+  --c-surface-1: #ffffff;
+  --c-surface-2: #f1f1f3;
+  --c-surface-3: #e8e8ec;
+  --c-text-tertiary: #656872;
+  --c-text-disabled: #82848c;
+  --c-focus: #3d7ef7;
+  --c-primary-subtle: rgba(61, 126, 247, 0.1);
+  --c-primary-strong: #3369cd; /* 亮色下必须更深才在浅底上过 AA（机器锁按最差表面复算） */
+
+  --shadow-card: 0 1px 2px rgba(16, 18, 24, 0.06);
+  --shadow-popover: 0 4px 12px rgba(16, 18, 24, 0.1);
+  --shadow-dialog: 0 12px 32px rgba(16, 18, 24, 0.16);
+  --shadow-soft: 0 6px 18px rgba(16, 18, 24, 0.1);
+  --shadow-elev-1: 0 1px 2px rgba(16, 18, 24, 0.06);
+  --shadow-elev-2: 0 4px 14px rgba(16, 18, 24, 0.1);
+  --shadow-elev-3: 0 14px 40px rgba(16, 18, 24, 0.16);
 }
 
 /* ============================ 动效工具类 ============================ */

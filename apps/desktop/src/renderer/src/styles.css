@@ -2998,7 +2998,7 @@ html[data-jj-bg-kind='glass'] .app-root {
 }
 
 /**
- * R74：scope 标签的字色改用**主色的浅一档**（`--c-primary-hover`）。
+ * R74：scope 标签的字色改用**主色的浅一档**。
  *
  * 为什么（原状不过 AA）：日志里的 scope 是个 `<code>` ⇒ 通用 `code` 规则给它一层
  * `--c-overlay-weak`（白 8%）的标签底 ⇒ 合成后底色是 **卡片底 + 白 8%**（实测 `#313131`）
@@ -3006,12 +3006,18 @@ html[data-jj-bg-kind='glass'] .app-root {
  *
  * 证据：R74 的离屏现扫（全站 **17 屏 · 587 个文字元素测量点**）⇒ 这是**唯一**一条不达标的；
  * 同一页的次低值是 5.95:1 ⇒ 不改的话它就是全站唯一的 AA 破口。
- * ⇒ 换成主色的浅一档 ⇒ **5.02:1** ⇒ 达标，视觉上仍是同一支蓝。
+ *
+ * R77（M1）**再改一处**：R74 当时用的是 `--c-primary-hover`（hover 态令牌）——
+ * 暗色下它恰好是更浅的那一档（5.02:1 达标），**亮色下却正好相反**（更浅 ⇒ 浅底上更看不清，
+ * 实测 4.03:1 不过 AA）⇒ 同一个令牌在两个主题里语义相反 ⇒ 不可用。
+ * ⇒ 改用**专用的文字安全档** `--c-primary-strong`（暗色 #6ba0ff / 亮色 #3369cd），
+ * 两个值都经机器锁按**最差表面**复算 AA（`tokens-theme-parity.test.ts` 与
+ * `contrast-locks.test.ts` 都按**主题分别建表**量 ⇒ 亮色不再靠"暗色绿"蒙混）。
  *
  * 判据：`src/contrast-locks.test.ts`（按**令牌真值**算：标签底/卡片底变了它自己重算 ⇒ 不会漂）。
  */
 .jj-log-scope {
-  color: var(--c-primary-hover);
+  color: var(--c-primary-strong);
 }
 
 .jj-log-msg {

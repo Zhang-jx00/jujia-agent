@@ -113,21 +113,54 @@ const contrastRatio = (a: Rgb, b: Rgb): number => {
  * 令牌表：`--c-*` 的真值住在令牌层（`styles/motion.css` 的 `:root`），
  * 而渲染层自己那几个别名（`--bg-container: var(--c-bg-container)`）住在 `styles.css` 的 `:root`。
  * ⇒ 两张表合并成一张，**别名链**在 `resolve` 里跟进。
+ *
+ * ⚠️ **R77（M1）起按主题分表**：令牌层有了亮暗**两块**（`[data-theme='light']`）⇒
+ * 若还按"扫到同名就覆盖"建单表，**后定义胜** ⇒ 这把锁会从"量暗色"悄悄变成"量亮色"
+ * （实测：它一度拿亮色的 `--c-primary-hover` 去算暗色规则，红得莫名其妙）。
+ * ⇒ 现在按**主题**建表：**暗色 = `:root` 块；亮色 = 暗色基表 + 亮色块覆盖**（= CSS 的层叠语义），
+ * 并且**两个主题各断言一次** ⇒ 锁比原来更强（原来只管暗色）。
  */
-const tokenTable = new Map<string, string>();
-for (const m of motionNoComments.matchAll(/(--c-[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
-  tokenTable.set(m[1] ?? '', (m[2] ?? '').trim());
-}
+const themeBlocks = (() => {
+  const rootStart = motionNoComments.indexOf(':root {');
+  const lightStart = motionNoComments.indexOf("[data-theme='light'] {");
+  const blockOf = (start: number): string => {
+    expect(start, '令牌层里找不到主题块（定位器失效？）').toBeGreaterThanOrEqual(0);
+    const end = motionNoComments.indexOf('\n}', start);
+    return motionNoComments.slice(start, end);
+  };
+  return {
+    dark: rootStart >= 0 ? blockOf(rootStart) : '',
+    light: lightStart >= 0 ? blockOf(lightStart) : '',
+  };
+})();
+
+/** 主题无关的别名表（渲染层 styles.css 的 `:root`） */
+const aliasTable = new Map<string, string>();
 for (const m of stylesNoComments.matchAll(/(--[a-z0-9-]+)\s*:\s*var\((--c-[a-z0-9-]+)\)\s*;/g)) {
-  tokenTable.set(m[1] ?? '', `var(${m[2] ?? ''})`);
+  aliasTable.set(m[1] ?? '', `var(${m[2] ?? ''})`);
+}
+
+/** 按主题建令牌表（暗色基表 ⇒ 亮色覆盖） */
+function tokenTableFor(theme: 'dark' | 'light'): Map<string, string> {
+  const table = new Map<string, string>();
+  for (const m of themeBlocks.dark.matchAll(/(--c-[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
+    table.set(m[1] ?? '', (m[2] ?? '').trim());
+  }
+  if (theme === 'light') {
+    for (const m of themeBlocks.light.matchAll(/(--c-[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
+      table.set(m[1] ?? '', (m[2] ?? '').trim());
+    }
+  }
+  for (const [k, v] of aliasTable) table.set(k, v);
+  return table;
 }
 
 /** 跟进别名链，拿到字面值（认不出就返回空串 ⇒ 判据失焦 ⇒ 用例红） */
-const resolve = (name: string, depth = 0): string => {
-  const v = tokenTable.get(name);
+const resolve = (name: string, table: Map<string, string>, depth = 0): string => {
+  const v = table.get(name);
   if (v === undefined) return '';
   const inner = /^var\((--c-[a-z0-9-]+)\)$/.exec(v);
-  if (inner !== null && depth < 5) return resolve(inner[1] ?? '', depth + 1);
+  if (inner !== null && depth < 5) return resolve(inner[1] ?? '', table, depth + 1);
   return v;
 };
 
@@ -161,24 +194,31 @@ describe('R74 · 对比度锁：日志 scope 标签的字压在标签底上必�
     expect(scopeColorToken, 'styles.css 里找不到 `.jj-log-scope` 的 color 令牌').not.toBe('');
     expect(badgeBgToken, 'styles.css 里找不到 `code` 的 background 令牌').not.toBe('');
     expect(cardBgToken, 'styles.css 里找不到 `.p0-card` 的 background 令牌').not.toBe('');
-    expect(resolve(scopeColorToken), `令牌层里没有 ${scopeColorToken}`).not.toBe('');
-    expect(resolve(badgeBgToken), `令牌层里没有 ${badgeBgToken}`).not.toBe('');
-    expect(resolve(cardBgToken), `令牌层里没有 ${cardBgToken}`).not.toBe('');
+    for (const theme of ['dark', 'light'] as const) {
+      const table = tokenTableFor(theme);
+      expect(resolve(scopeColorToken, table), `令牌层里没有 ${scopeColorToken}`).not.toBe('');
+      expect(resolve(badgeBgToken, table), `令牌层里没有 ${badgeBgToken}`).not.toBe('');
+      expect(resolve(cardBgToken, table), `令牌层里没有 ${cardBgToken}`).not.toBe('');
+    }
   });
 
-  it('scope 标签：字色压在「标签底叠卡片底」上要 ≥ 4.5:1（12px 普通文本的 AA）', () => {
-    const fg = parseColor(resolve(scopeColorToken));
-    const badge = parseColor(resolve(badgeBgToken));
-    const card = parseColor(resolve(cardBgToken));
-    expect(fg, `字色令牌 ${scopeColorToken} 的值认不出：${resolve(scopeColorToken)}`).not.toBeNull();
-    expect(badge, `标签底令牌 ${badgeBgToken} 的值认不出：${resolve(badgeBgToken)}`).not.toBeNull();
-    expect(card, `卡片底令牌 ${cardBgToken} 的值认不出：${resolve(cardBgToken)}`).not.toBeNull();
-    const bg = composite(badge as Rgb, card as Rgb);
-    const ratio = contrastRatio(fg as Rgb, bg);
-    expect(
-      ratio,
-      `scope 字色 ${toHex(fg as Rgb)} 压在标签底 ${toHex(bg)}（= ${toHex(card as Rgb)} + 白 8%）上只有 ` +
-        `${ratio.toFixed(2)}:1，低于 AA 的 4.5:1（R74 现扫实测值：主色那一档是 4.07:1）`,
-    ).toBeGreaterThanOrEqual(4.5);
-  });
+  // R77（M1）：**两个主题各断言一次** —— 亮色是独立的一套值，量一次暗色等于没量亮色
+  for (const theme of ['dark', 'light'] as const) {
+    it(`scope 标签（${theme}）：字色压在「标签底叠卡片底」上要 ≥ 4.5:1（12px 普通文本的 AA）`, () => {
+      const table = tokenTableFor(theme);
+      const fg = parseColor(resolve(scopeColorToken, table));
+      const badge = parseColor(resolve(badgeBgToken, table));
+      const card = parseColor(resolve(cardBgToken, table));
+      expect(fg, `${theme}：字色令牌 ${scopeColorToken} 的值认不出：${resolve(scopeColorToken, table)}`).not.toBeNull();
+      expect(badge, `${theme}：标签底令牌 ${badgeBgToken} 的值认不出：${resolve(badgeBgToken, table)}`).not.toBeNull();
+      expect(card, `${theme}：卡片底令牌 ${cardBgToken} 的值认不出：${resolve(cardBgToken, table)}`).not.toBeNull();
+      const bg = composite(badge as Rgb, card as Rgb);
+      const ratio = contrastRatio(fg as Rgb, bg);
+      expect(
+        ratio,
+        `${theme}：scope 字色 ${toHex(fg as Rgb)} 压在标签底 ${toHex(bg)}（= ${toHex(card as Rgb)} + 覆盖层）上只有 ` +
+          `${ratio.toFixed(2)}:1，低于 AA 的 4.5:1（R74 现扫实测值：主色那一档是 4.07:1）`,
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+  }
 });
